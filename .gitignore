@@ -1,0 +1,14 @@
+# Datos: nunca al repositorio (base de datos, copias de seguridad, instancias de prueba)
+data/
+data-dev/
+*.db
+*.db-journal
+*.db-wal
+
+# Notas internas de desarrollo y herramientas locales
+CONTEXTO.md
+informe.md
+.claude/
+
+__pycache__/
+*.pyc

@@ -1,0 +1,17 @@
+services:
+  catlan:
+    build: .
+    ports: ["8080:8080"]
+    environment:
+      # CATLAN_PASSWORD: cambiame   # contraseña inicial del usuario admin (sin ella: admin, a cambiar al entrar)
+      # Avisos por correo del monitor (opcional)
+      # CATLAN_SMTP_HOST: smtp.tuempresa.com
+      # CATLAN_SMTP_PORT: "587"
+      # CATLAN_SMTP_USER: alertas@tuempresa.com
+      # CATLAN_SMTP_PASS: contraseña-de-aplicacion
+      # CATLAN_MAIL_TO: it@tuempresa.com
+      # CATLAN_TELEGRAM_TOKEN: "123456:ABC..."
+      # CATLAN_TELEGRAM_CHAT: "-1001234567890"
+      # CATLAN_WEBHOOK_URL: https://hooks.slack.com/services/...
+    volumes: ["./data:/data"]
+    restart: unless-stopped
