@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """catlan: el gato amigo de los IT. Wiki + inventario + esquemas + racks + monitor. Solo stdlib de Python."""
-import base64, hashlib, hmac, json, os, random, re, secrets, smtplib, socket, sqlite3, ssl, subprocess, threading, time, urllib.error, urllib.request
-from datetime import datetime, timezone
+import base64, hashlib, hmac, json, os, random, re, secrets, smtplib, socket, sqlite3, ssl, subprocess, sys, threading, time, urllib.error, urllib.request
+from datetime import datetime, timedelta, timezone
 import ipaddress
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
@@ -9,12 +9,15 @@ from email.message import EmailMessage
 from http.cookies import SimpleCookie
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, quote
 
 VERSION = "1.0"
 HERE = Path(__file__).parent
 DATA = Path(os.environ.get("CATLAN_DATA", HERE / "data"))
 PORT = int(os.environ.get("CATLAN_PORT", "8080"))
+CERT, KEY = os.environ.get("CATLAN_CERT", ""), os.environ.get("CATLAN_KEY", "")  # HTTPS propio: rutas del certificado y su clave (PEM)
+SCHEME = "https" if CERT else "http"
+SYSLOG_PORT = int(os.environ.get("CATLAN_SYSLOG_PORT", "514"))  # 0 = sin receptor de syslog
 PASSWORD = os.environ.get("CATLAN_PASSWORD", "")  # contraseña del usuario admin inicial; vacío = «admin», a cambiar al entrar
 MAX_BODY = 20 * 1024 * 1024
 IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"}
@@ -32,9 +35,57 @@ TABLES = {
     "checks": ["host", "label", "item", "every", "kind", "port", "url", "expect", "warn_days", "sound"],
     "sources": ["host", "label", "item", "kind", "community", "port", "user", "pass", "every", "temp_max", "disk_max",
                 "v3", "auth", "priv", "priv_pass"],
+    "expiries": ["name", "kind", "date", "item", "notes"],
+    "subnets": ["name", "cidr", "vlan", "notes"],
 }
+EXPIRY_KINDS = ("licencia", "dominio", "certificado", "contrato", "soporte", "otro")
 SECRET = ("community", "pass", "priv_pass")  # nunca salen por la API ni al historial
 AGENT_FACTS = ("name", "ip", "serial", "os", "kind")  # lo que Kitty cuenta de su equipo
+SEAL = b"CATLAN-CIFRADO-1"  # cabecera de las copias de seguridad cifradas
+
+
+def _xor(a, b):
+    return (int.from_bytes(a, "big") ^ int.from_bytes(b, "big")).to_bytes(len(a), "big")
+
+
+def seal(data, pw):
+    """Cifra con contraseña: PBKDF2-SHA256 → flujo SHAKE-256 y HMAC-SHA256 (cifrar y luego autenticar).
+    No el AES de SNMP: escrito en Python va a ~300 KB/s, y una BD con meses de métricas tardaría minutos."""
+    salt, nonce = secrets.token_bytes(16), secrets.token_bytes(16)
+    k = hashlib.pbkdf2_hmac("sha256", pw.encode(), salt, 600_000, 64)
+    head = SEAL + salt + nonce
+    ct = _xor(data, hashlib.shake_256(k[:32] + nonce).digest(len(data)))
+    return head + ct + hmac.new(k[32:], head + ct, "sha256").digest()
+
+
+def unseal(blob, pw):
+    if not blob.startswith(SEAL) or len(blob) < len(SEAL) + 64:
+        raise ValueError("no es una copia cifrada de catlan")
+    salt, nonce, ct, tag = blob[16:32], blob[32:48], blob[48:-32], blob[-32:]
+    k = hashlib.pbkdf2_hmac("sha256", pw.encode(), salt, 600_000, 64)
+    if not hmac.compare_digest(tag, hmac.new(k[32:], blob[:-32], "sha256").digest()):
+        raise ValueError("contraseña incorrecta o copia dañada")
+    return _xor(ct, hashlib.shake_256(k[:32] + nonce).digest(len(ct)))
+
+
+def totp(secret, t=None):
+    """Código de 6 cifras de la app de autenticación (RFC 6238: HMAC-SHA1, 30 s) para un secreto en base32."""
+    mac = hmac.new(base64.b32decode(secret), int((time.time() if t is None else t) // 30).to_bytes(8, "big"), "sha1").digest()
+    o = mac[-1] & 15
+    return "%06d" % ((int.from_bytes(mac[o:o + 4], "big") & 0x7FFFFFFF) % 10 ** 6)
+
+
+def totp_ok(secret, code):
+    """Vale el código de ahora y el de 30 s antes o después (relojes un poco desfasados)."""
+    code, now = str(code).strip().replace(" ", ""), time.time()
+    return bool(secret) and any(hmac.compare_digest(code, totp(secret, now + d)) for d in (-30, 0, 30))
+
+
+if __name__ == "__main__" and len(sys.argv) == 4 and sys.argv[1] == "descifrar":  # antes de abrir ninguna BD
+    import getpass
+    pw = getpass.getpass("Contraseña de la copia: ") if sys.stdin.isatty() else sys.stdin.readline().rstrip("\r\n")  # o por una tubería
+    Path(sys.argv[3]).write_bytes(unseal(Path(sys.argv[2]).read_bytes(), pw))
+    raise SystemExit(f"Descifrada en {sys.argv[3]}")
 
 DATA.mkdir(parents=True, exist_ok=True)
 db = sqlite3.connect(DATA / "catlan.db", check_same_thread=False)
@@ -93,20 +144,49 @@ CREATE TABLE IF NOT EXISTS agents(id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT
   serial TEXT, os TEXT, kind TEXT, state TEXT NOT NULL DEFAULT 'pendiente', item INTEGER, seen TEXT, created TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
 """
+fresh = not db.execute("SELECT 1 FROM sqlite_master").fetchone()
 db.executescript(SCHEMA)
-KIND = {"pages": "page", "items": "item", "checks": "check", "sources": "source"}
-try:  # BDs creadas antes del montador de esquemas
-    db.execute("ALTER TABLE maps ADD COLUMN data TEXT NOT NULL DEFAULT '{}'")
-except sqlite3.OperationalError:
-    pass
-for col in ("sources v3 INTEGER DEFAULT 0", "sources auth TEXT DEFAULT 'sha'", "sources priv TEXT DEFAULT 'aes'", "sources priv_pass TEXT DEFAULT ''",
-            "sources alerted TEXT", "sources mute_until TEXT", "checks kind TEXT DEFAULT 'ping'", "checks port INTEGER", "checks url TEXT DEFAULT ''",
-            "checks expect TEXT DEFAULT ''", "checks warn_days INTEGER DEFAULT 30", "checks detail TEXT", "checks alerted TEXT", "checks mute_until TEXT",
-            "incidents parent INTEGER", "agents source INTEGER", "items warranty TEXT DEFAULT ''", "checks sound TEXT DEFAULT ''"):
-    try:  # BDs creadas antes de SNMPv3, de las comprobaciones TCP/HTTP/SSL/DNS y del silencio
-        db.execute("ALTER TABLE %s ADD COLUMN %s" % tuple(col.split(" ", 1)))
-    except sqlite3.OperationalError:
-        pass
+KIND = {"pages": "page", "items": "item", "checks": "check", "sources": "source", "expiries": "expiry", "subnets": "subnet"}
+# Migraciones numeradas: la BD guarda por cuál va (PRAGMA user_version). Nunca cambies ni reordenes las que hay: añade al final.
+MIGRATIONS = (
+    "ALTER TABLE maps ADD COLUMN data TEXT NOT NULL DEFAULT '{}'", "ALTER TABLE sources ADD COLUMN v3 INTEGER DEFAULT 0",
+    "ALTER TABLE sources ADD COLUMN auth TEXT DEFAULT 'sha'", "ALTER TABLE sources ADD COLUMN priv TEXT DEFAULT 'aes'",
+    "ALTER TABLE sources ADD COLUMN priv_pass TEXT DEFAULT ''", "ALTER TABLE sources ADD COLUMN alerted TEXT",
+    "ALTER TABLE sources ADD COLUMN mute_until TEXT", "ALTER TABLE checks ADD COLUMN kind TEXT DEFAULT 'ping'",
+    "ALTER TABLE checks ADD COLUMN port INTEGER", "ALTER TABLE checks ADD COLUMN url TEXT DEFAULT ''",
+    "ALTER TABLE checks ADD COLUMN expect TEXT DEFAULT ''", "ALTER TABLE checks ADD COLUMN warn_days INTEGER DEFAULT 30",
+    "ALTER TABLE checks ADD COLUMN detail TEXT", "ALTER TABLE checks ADD COLUMN alerted TEXT", "ALTER TABLE checks ADD COLUMN mute_until TEXT",
+    "ALTER TABLE incidents ADD COLUMN parent INTEGER", "ALTER TABLE agents ADD COLUMN source INTEGER",
+    "ALTER TABLE items ADD COLUMN warranty TEXT DEFAULT ''", "ALTER TABLE checks ADD COLUMN sound TEXT DEFAULT ''",
+    # 19: desde aquí, numeradas desde el principio
+    "ALTER TABLE maps ADD COLUMN version INTEGER NOT NULL DEFAULT 0", "ALTER TABLE incidents ADD COLUMN version INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN totp TEXT NOT NULL DEFAULT ''",
+    "CREATE TABLE expiries(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT '', kind TEXT DEFAULT 'licencia', date TEXT DEFAULT '', "
+    "item INTEGER, notes TEXT DEFAULT '', updated TEXT DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE syslog(ts TEXT DEFAULT CURRENT_TIMESTAMP, item INTEGER, ip TEXT, sev INTEGER, msg TEXT)",
+    "CREATE INDEX syslog_i ON syslog(item, ts)",
+    "CREATE TABLE subnets(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT '', cidr TEXT NOT NULL DEFAULT '', vlan TEXT DEFAULT '', "
+    "notes TEXT DEFAULT '', scan TEXT, scanned TEXT, updated TEXT DEFAULT CURRENT_TIMESTAMP)",
+)
+LEGACY = 19  # las de antes de numerarlas: una BD vieja (user_version 0) puede tener ya cualquiera de ellas
+
+
+def migrate():
+    ver = db.execute("PRAGMA user_version").fetchone()[0]
+    if ver > len(MIGRATIONS):
+        raise SystemExit(f"Esta base de datos es de un catlan más nuevo (migración {ver}; este llega a la {len(MIGRATIONS)}). Actualiza catlan.py.")
+    if ver < len(MIGRATIONS) and not fresh:  # copia completa antes de tocar nada
+        backup_to(DATA / f"catlan-antes-de-v{len(MIGRATIONS)}-{time.strftime('%Y%m%d-%H%M%S')}.db")
+    for n in range(ver, len(MIGRATIONS)):
+        try:
+            db.execute(MIGRATIONS[n])
+        except sqlite3.OperationalError as e:
+            if not (n < LEGACY and "duplicate column" in str(e)):
+                raise
+        db.execute(f"PRAGMA user_version={n + 1}")
+
+
+migrate()
 # Ids que nunca se reutilizan. Sin AUTOINCREMENT, SQLite da a lo nuevo el id del último borrado, y lo nuevo heredaba
 # su historial en Actividad y sus enlaces ([[#id]], esquemas, racks, incidencias). Las BDs de antes se reconstruyen una vez.
 LOG_KINDS = {"pages": ("page",), "items": ("item",), "maps": ("map", "rack"), "checks": ("check",), "sources": ("source",),
@@ -202,12 +282,16 @@ def check_pass(pw):
 _basic = {}  # (nombre, sha256 de la contraseña) -> id: con Basic no se repite PBKDF2 en cada petición
 
 
-def login_ok(name, pw):
+def login_ok(name, pw, code=""):
+    """id del usuario, None si no vale, o False si la contraseña vale pero falta o falla el código de la verificación en dos pasos.
+    Por Basic no hay código: quien tiene 2FA no entra por Basic (para scripts, un usuario sin 2FA)."""
     key = (name.lower(), hashlib.sha256(pw.encode()).hexdigest())
     if key not in _basic:
-        u = q("SELECT id, hash FROM users WHERE name=?", [name]).fetchone()
+        u = q("SELECT id, hash, totp FROM users WHERE name=?", [name]).fetchone()
         if not (u and pw_ok(pw, u["hash"])):
             return None
+        if u["totp"]:  # sin caché: cada vez, su código
+            return u["id"] if totp_ok(u["totp"], code) else False
         _basic[key] = u["id"]
     return _basic[key]
 
@@ -216,7 +300,7 @@ FAILS = {}  # ip -> horas de los fallos de login recientes
 # Lo que se vacía al «Borrar la base de datos»: todo el contenido. Quedan los usuarios, los grupos, las sesiones y el id
 # de la instalación (los Kitty instalados vuelven a pedir entrar aquí).
 WIPE = ("pages", "items", "maps", "log", "checks", "pings", "pings_h", "sounds", "sources", "metrics", "metrics_h", "dash",
-        "incidents", "notes", "agents")
+        "incidents", "notes", "agents", "expiries", "syslog", "subnets")
 
 
 def throttled(ip):
@@ -232,7 +316,7 @@ def readonly(uid):
 
 
 def me(uid):
-    return {**dict(q("SELECT id, name, admin, must_change FROM users WHERE id=?", [uid]).fetchone()), "readonly": readonly(uid),
+    return {**dict(q("SELECT id, name, admin, must_change, totp != '' AS totp FROM users WHERE id=?", [uid]).fetchone()), "readonly": readonly(uid),
             "groups": [r[0] for r in q("SELECT group_id FROM members WHERE user_id=?", [uid])]}
 
 
@@ -291,9 +375,10 @@ GUIDE = """*catlan es la web de sistemas e inventario de tu equipo de IT: wiki, 
 ## Qué hace cada sección
 - **Dashboard**: tu tablero. En «Personalizar» eliges las tarjetas, las arrastras y las agrandas.
 - **Wiki**: procedimientos y documentación en Markdown, con editor visual. Enlaza un equipo con `[[#id]]` y otra página con `[[Nombre de la página]]`.
-- **Inventario**: cada equipo con su IP, nº de serie, ubicación, estado, fin de garantía y notas. Filtra, exporta a CSV y, desde la ficha, copia la IP, haz ping o abre su web. Las garantías que caducan salen arriba y avisan 30 días antes.
+- **Inventario**: cada equipo con su IP, nº de serie, ubicación, estado, fin de garantía y notas. Filtra, exporta a CSV y, desde la ficha, copia la IP, haz ping o abre su web. Las garantías que caducan salen arriba y avisan 30 días antes; en **Caducidades**, lo mismo para licencias, dominios, certificados y contratos. Si un equipo envía su **syslog** a catlan (UDP 514), sale en su ficha.
 - **Esquemas**: diagramas de red con iconos y conexiones. **Topología automática** lo dibuja solo leyendo LLDP, CDP y la tabla MAC de un switch.
 - **Racks**: armarios montados U a U, con bocas de switch, patch panel y PDU.
+- **Redes**: tus subredes con las IPs libres y en uso, y los conflictos: una IP en dos equipos del inventario o un equipo que responde sin estar en él.
 - **Monitor**: comprueba cada pocos segundos lo que elijas y avisa en pantalla, con el sonido de cada dispositivo y por tus canales. Si cae un switch, avisa de él y no de todo lo que cuelga de él.
 - **Salud**: SNMP v2c y v3 (Synology, QNAP, Cisco, HP, Ubiquiti, MikroTik…), grabadores Hikvision y los PCs con Kitty, con gráficos de hasta 90 días.
 - **Incidencias**: tickets con prioridad, estado, persona o grupo asignado, seguimiento e incidencias hijas.
@@ -304,16 +389,18 @@ GUIDE = """*catlan es la web de sistemas e inventario de tu equipo de IT: wiki, 
 - **Alt+C** o **/** abre el buscador: busca en todo. Empieza por `W:` para la wiki, `U:` para equipos y `T:` para incidencias.
 - **Silenciar** un dispositivo, o **Mantenimiento** para todos, evita avisos mientras trabajas.
 - Si dos personas editan lo mismo, catlan avisa en vez de pisar los cambios del otro.
-- Kitty en PCs Windows: **Inventario → Añadir PC** da una línea para pegar en PowerShell. No instala programas.
+- Kitty en Windows y Linux: **Inventario → Añadir con Kitty** da una línea para pegar en PowerShell o en la terminal. No instala programas.
 
 ## Tus datos: todo se queda en tu servidor
 - catlan funciona entero en la máquina donde lo instalas, con una base de datos SQLite en `data/catlan.db`. Sin nube, sin cuentas externas, sin analítica, sin telemetría y sin publicidad.
 - La web no carga nada de Internet: ni fuentes, ni scripts, ni imágenes de terceros.
 - catlan solo se conecta a:
-  - los equipos y direcciones que tú le pidas vigilar o leer (ping, puertos, webs, certificados, DNS, SNMP, Hikvision) y las redes que le pidas descubrir;
+  - los equipos y direcciones que tú le pidas vigilar o leer (ping, puertos, webs, certificados, DNS, SNMP, Hikvision) y las redes que le pidas descubrir o escanear;
+- catlan escucha syslog en UDP 514 (`CATLAN_SYSLOG_PORT`) y solo guarda lo que llega de IPs del inventario, 30 días.
   - los canales de aviso que configures: tu servidor de correo, la API de Telegram (`api.telegram.org`) si pones un bot, y tu webhook.
-- Kitty solo envía nombre del equipo, sistema, modelo, CPU, memoria, discos, IPs, tiempo encendido y nº de serie, y solo después de que un administrador lo acepte. Nada de usuarios, programas, archivos ni lo que se hace en el equipo.
-- Las contraseñas de los usuarios se guardan con PBKDF2: no se pueden leer. Las de SNMP, correo y Telegram se guardan en la base de datos y nunca salen por la web. Ojo: **la copia de seguridad las incluye**, guárdala como algo sensible.
+- Kitty solo envía nombre del equipo, sistema, modelo, CPU, memoria, discos, IPs, tiempo encendido, nº de serie y los errores y críticos del Visor de eventos o del journal de Linux (con las rutas de usuario tapadas), y solo después de que un administrador lo acepte. Nada de usuarios, programas, archivos ni lo que se hace en el equipo.
+- Las contraseñas de los usuarios se guardan con PBKDF2: no se pueden leer. Las de SNMP, correo y Telegram se guardan en la base de datos y nunca salen por la web. La copia de seguridad las incluye, por eso **va cifrada con la contraseña que elijas**: sin ella no se puede abrir.
+- Verificación en dos pasos: menú de tu usuario → «Verificación en dos pasos», con cualquier app de autenticación.
 - Lo que borras queda en Actividad hasta que borras la base de datos (Opciones → zona de peligro, con contraseña y copia previa).
 
 ## Qué no hace
@@ -624,6 +711,7 @@ def monitor():
         if n % 1800 == 0:  # en bruto, 7 días; lo de antes ya está resumido por horas
             q("DELETE FROM pings WHERE ts < datetime('now', '-7 days')")
             q("DELETE FROM metrics WHERE ts < datetime('now', '-7 days')")
+            q("DELETE FROM syslog WHERE ts < datetime('now', '-30 days')")
             q(f"DELETE FROM pings_h WHERE hour < datetime('now', '-{KEEP_DAYS} days')")
             q(f"DELETE FROM metrics_h WHERE hour < datetime('now', '-{KEEP_DAYS} days')")
         time.sleep(2)
@@ -1339,7 +1427,7 @@ def auto_map(src):
     data = {"nodes": nodes, "links": links, "auto": {"source": src["id"], "at": time.strftime("%Y-%m-%d %H:%M:%S")}}
     row = q("SELECT id FROM maps WHERE name=? AND json_extract(data, '$.auto.source')=?", [name, src["id"]]).fetchone()
     if row:
-        q("UPDATE maps SET data=? WHERE id=?", [json.dumps(data), row["id"]])
+        q("UPDATE maps SET data=?, version=version+1 WHERE id=?", [json.dumps(data), row["id"]])
         return row["id"], name, nbrs, False
     return q("INSERT INTO maps(name, mime, image, data) VALUES(?, '', ?, ?)", [name, b"", json.dumps(data)]).lastrowid, name, nbrs, True
 
@@ -1397,6 +1485,32 @@ def kitty_read(name, x):
     return out, info
 
 
+def kitty_events(new, prev):
+    """Eventos de Windows que envía Kitty, junto a los ya guardados -> (los de 7 días, máx. 30, el más nuevo primero; avisos).
+    Avisan los críticos de las últimas 24 h (un apagado inesperado, un pantallazo azul): los errores, que Windows tiene muchos, solo se ven."""
+    txt = lambda v, n: v.strip()[:n] if isinstance(v, str) else ""
+    now, seen, out = datetime.now(timezone.utc), set(), []
+    for e in (new if isinstance(new, list) else [])[:50] + (prev if isinstance(prev, list) else []):
+        if not isinstance(e, dict) or type(e.get("rec")) is not int or e.get("level") not in (1, 2):
+            continue
+        try:
+            t = datetime.fromisoformat(txt(e.get("time"), 40))
+            age = now - (t if t.tzinfo else t.replace(tzinfo=timezone.utc))
+        except ValueError:
+            continue
+        k = (txt(e.get("log"), 40), e["rec"])
+        if k in seen or not timedelta(minutes=-10) < age < timedelta(days=7):  # -10 min: relojes un poco adelantados
+            continue
+        seen.add(k)
+        out.append({"rec": e["rec"], "log": k[0], "time": t.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), "level": e["level"],
+                    "source": txt(e.get("source"), 100), "code": e["code"] if type(e.get("code")) is int else 0, "msg": txt(e.get("msg"), 400),
+                    "_age": age})
+    out = sorted(out, key=lambda e: e["_age"])[:30]
+    probs = [f"Crítico en el registro: {e['source']} {e['code']}" + (f" · {e['msg'][:140]}" if e["msg"] else "")
+             for e in out if e["level"] == 1 and e["_age"] < timedelta(days=1)][:3]
+    return [{k: v for k, v in e.items() if k != "_age"} for e in out], probs
+
+
 def check_item(d):
     """Fin de garantía: vacío o una fecha AAAA-MM-DD de verdad (el aviso compara textos)."""
     w = d.get("warranty", "")
@@ -1410,16 +1524,93 @@ def check_item(d):
 
 
 def warranties():
-    """Una vez al día: avisa de las garantías que caducan dentro de 30 días y de las que caducan hoy."""
+    """Una vez al día: avisa de las garantías, licencias, dominios… que caducan dentro de 30 días y de los que caducan hoy."""
     today = time.strftime("%Y-%m-%d")
     if (q("SELECT v FROM meta WHERE k='warranty_day'").fetchone() or [None])[0] == today:
         return
     q("INSERT OR REPLACE INTO meta(k, v) VALUES('warranty_day', ?)", [today])
-    rows = q("SELECT name, warranty FROM items WHERE warranty IN (date('now', 'localtime'), date('now', 'localtime', '+30 days')) "
-             "ORDER BY warranty, name COLLATE NOCASE").fetchall()
+    days = "(date('now', 'localtime'), date('now', 'localtime', '+30 days'))"
+    rows = q(f"SELECT name, warranty AS day, 'garantía' AS kind FROM items WHERE warranty IN {days} UNION ALL "
+             f"SELECT name, date, kind FROM expiries WHERE date IN {days} ORDER BY day, name COLLATE NOCASE").fetchall()
     if rows and channels():
-        notify("catlan: garantías que caducan", "\n".join(f"- {r['name']}: {'hoy' if r['warranty'] == today else 'el ' + r['warranty']}"
-                                                         for r in rows) + "\n\n-- catlan")
+        notify("catlan: caducidades", "\n".join(f"- {r['name']}: {'hoy' if r['day'] == today else 'el ' + r['day']} ({r['kind']})"
+                                                 for r in rows) + "\n\n-- catlan")
+
+
+def check_expiry(d, new=False):
+    """Licencias, dominios, contratos…: con nombre, tipo conocido y una fecha AAAA-MM-DD de verdad."""
+    if new or "name" in d:
+        if not (isinstance(d.get("name"), str) and 1 <= len(d["name"].strip()) <= 200):
+            raise ValueError("ponle un nombre (hasta 200 caracteres)")
+    if "kind" in d and d["kind"] not in EXPIRY_KINDS:
+        raise ValueError("tipo no válido: " + ", ".join(EXPIRY_KINDS))
+    if new or "date" in d:
+        try:
+            datetime.strptime(str(d.get("date")), "%Y-%m-%d")
+        except ValueError:
+            raise ValueError("fecha no válida: AAAA-MM-DD")
+    if d.get("item") is not None and type(d["item"]) is not int:
+        raise ValueError("equipo no válido")
+    if "notes" in d and not (isinstance(d["notes"], str) and len(d["notes"]) <= 5000):
+        raise ValueError("notas no válidas")
+
+
+def check_subnet(d, new=False):
+    """IPv4 de /16 a /30; se guarda normalizada (10.0.0.7/24 -> 10.0.0.0/24)."""
+    if new or "cidr" in d:
+        try:
+            net = ipaddress.ip_network(str(d.get("cidr", "")).strip(), strict=False)
+        except ValueError:
+            raise ValueError("red no válida: escribe algo como 10.0.0.0/24")
+        if net.version != 4 or not 16 <= net.prefixlen <= 30:
+            raise ValueError("solo redes IPv4 de /16 a /30")
+        d["cidr"] = str(net)
+    for k in ("name", "vlan", "notes"):
+        if k in d and not (isinstance(d[k], str) and len(d[k]) <= 2000):
+            raise ValueError(f"{k} no válido")
+
+
+def ipam(row):
+    """Una subred: cada IP en uso (inventario y último escaneo) y los conflictos: una IP en dos equipos del inventario,
+    o que responde en la red sin estar en el inventario."""
+    net, use = ipaddress.ip_network(row["cidr"]), {}
+    for r in q("SELECT id, name, ip FROM items WHERE ip != ''"):
+        try:
+            a = ipaddress.ip_address(r["ip"].strip())
+        except ValueError:
+            continue
+        if a in net:
+            use.setdefault(int(a), []).append({"id": r["id"], "name": r["name"]})
+    scan = {int(ipaddress.ip_address(f["ip"])): f.get("name", "") for f in json.loads(row["scan"] or "[]")}
+    ips = [{"ip": str(ipaddress.ip_address(a)), "items": use.get(a, []), "seen": scan.get(a),
+            "up": a in scan if row["scanned"] else None,
+            "conflict": "duplicada" if len(use.get(a, [])) > 1 else "sin registrar" if a not in use else ""}
+           for a in sorted(set(use) | set(scan))]
+    size = net.num_addresses - 2 if net.prefixlen < 31 else net.num_addresses
+    free = (str(h) for h in net.hosts() if int(h) not in use and int(h) not in scan)
+    return {**dict(row), "scan": None, "size": size, "used": len(ips), "free": max(size - len(ips), 0),
+            "next_free": [x for _, x in zip(range(8), free)], "ips": ips}
+
+
+def syslog_server():
+    """Syslog por UDP (RFC 3164 y 5424): cada mensaje va a la ficha del equipo del inventario con esa IP.
+    Lo que llega de IPs que no están en el inventario se descarta."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.bind(("0.0.0.0", SYSLOG_PORT))
+    except OSError as e:
+        return print(f"syslog: no puedo escuchar en UDP {SYSLOG_PORT} ({e}); prueba con otro CATLAN_SYSLOG_PORT (0 = sin syslog)")
+    while True:  # shortcut: sin límite de mensajes por segundo; si un equipo inunda, fíltralo en el equipo o en el cortafuegos
+        try:
+            data, (ip, _) = s.recvfrom(8192)
+            item = q("SELECT id FROM items WHERE ip=? ORDER BY id LIMIT 1", [ip]).fetchone()
+            if not item:
+                continue
+            m = re.match(rb"<(\d{1,3})>", data)
+            msg = data[m.end() if m else 0:].decode("utf-8", "replace").strip()[:1000]
+            q("INSERT INTO syslog(item, ip, sev, msg) VALUES(?,?,?,?)", [item[0], ip, int(m[1]) & 7 if m else 6, msg])
+        except Exception as e:  # un paquete raro no tumba el receptor
+            print("syslog:", e)
 
 
 def check_source(d, new=False):
@@ -1603,6 +1794,7 @@ def refs(item):
         "maps": [dict(r) for r in q(f"SELECT id, name, json_extract(data, '$.type') AS type FROM maps "
                                     f"WHERE {in_map} OR {in_map} ORDER BY name", ["$.nodes", item, "$.devices", item])],
         "incidents": [dict(r) for r in q("SELECT id, title, status FROM incidents WHERE item=? ORDER BY id DESC", [item])],
+        "expiries": [dict(r) for r in q("SELECT id, name, kind, date FROM expiries WHERE item=? ORDER BY date", [item])],
     }
 
 
@@ -1615,6 +1807,7 @@ def drop_source(a):
 
 
 class H(BaseHTTPRequestHandler):
+    timeout = 60  # una conexión que no habla (ni termina el saludo TLS) suelta su hilo
     def send(self, code, body=b"", mime="application/json", cookie=None, headers=None):
         if not isinstance(body, bytes):
             body = json.dumps(body).encode()
@@ -1690,20 +1883,25 @@ class H(BaseHTTPRequestHandler):
         if method != "GET" and not free and not pending and self.uid and readonly(self.uid):
             return self.send(403, {"error": "tu usuario es de solo vista"})
         try:
-            if parts == ["kitty.ps1"] and method == "GET":  # instalador de Kitty con esta dirección y este id (catlan sin sesión, como la página)
+            if parts in (["kitty.ps1"], ["kitty.sh"]) and method == "GET":  # instalador de Kitty (Windows o Linux) con esta dirección y este id, sin sesión
                 host = self.headers.get("Host", "")
                 if not HOST.fullmatch(host):  # va dentro de un script que se ejecuta como administrador
                     return self.send(400, b"Host no valido", "text/plain; charset=utf-8")
-                ps = (HERE / "kitty.ps1").read_text(encoding="utf-8").replace("{{URL}}", "http://" + host).replace("{{ID}}", INSTANCE)
+                ps = (HERE / parts[0]).read_text(encoding="utf-8").replace("{{URL}}", f"{SCHEME}://{host}").replace("{{ID}}", INSTANCE)
+                ps = ps.replace("\r\n", "\n") if parts == ["kitty.sh"] else ps  # un clon de Git en Windows lo deja con CRLF y sh no lo lee
                 return self.send(200, ps.encode(), "text/plain; charset=utf-8")
             if not parts or parts[0] != "api":
                 return self.send(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
             res, rid = parts[1] if len(parts) > 1 else "", parts[2] if len(parts) > 2 else None
             if res in ("login", "logout", "me", "users"):
                 return self.account(method, res, rid)
-            if res == "backup" and method == "GET":  # copia de seguridad descargable (solo admin)
+            if res == "backup" and method in ("GET", "POST"):  # copia de seguridad descargable (solo admin); POST {password}: cifrada
                 if not self.admin:
                     return self.send(403, {"error": "solo para administradores"})
+                pw = json.loads(self.body() or b"{}") if method == "POST" else {}
+                pw = pw.get("password") if isinstance(pw, dict) else ""  # "" no pasa check_pass
+                if pw is not None:
+                    check_pass(pw)
                 tmp = DATA / f".descarga-{secrets.token_hex(6)}.db"
                 try:
                     with lock:  # la conexión es compartida: nada de copiar a medias mientras otro hilo escribe
@@ -1711,9 +1909,10 @@ class H(BaseHTTPRequestHandler):
                     data = tmp.read_bytes()
                 finally:
                     tmp.unlink(missing_ok=True)
-                self.log("descargar", "db", 0, "una copia de seguridad", {"bytes": len(data)})
-                return self.send(200, data, "application/vnd.sqlite3",
-                                 headers={"Content-Disposition": f'attachment; filename="catlan-{time.strftime("%Y%m%d-%H%M")}.db"'})
+                self.log("descargar", "db", 0, "una copia de seguridad" + (" cifrada" if pw else ""), {"bytes": len(data)})
+                name = f"catlan-{time.strftime('%Y%m%d-%H%M')}" + (".catlan" if pw else ".db")
+                return self.send(200, seal(data, pw) if pw else data, "application/octet-stream" if pw else "application/vnd.sqlite3",
+                                 headers={"Content-Disposition": f'attachment; filename="{name}"'})
             if res == "alerts":  # canales de aviso: solo admin; los secretos ni salen ni se pisan con un campo vacío
                 if not self.admin:
                     return self.send(403, {"error": "solo para administradores"})
@@ -1763,6 +1962,23 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, [dict(r) for r in q(f"SELECT * FROM log {where} ORDER BY id DESC LIMIT 300", args)])
             if res == "items" and method == "GET" and len(parts) > 3 and parts[3] == "refs":
                 return self.send(200, refs(int(rid)))
+            if res == "items" and method == "GET" and len(parts) > 3 and parts[3] == "syslog":
+                return self.send(200, [dict(r) for r in q("SELECT ts, ip, sev, msg FROM syslog WHERE item=? ORDER BY rowid DESC LIMIT 200", [int(rid)])])
+            if res == "subnets" and rid and len(parts) > 3 and parts[3] in ("ips", "scan"):
+                row = q("SELECT * FROM subnets WHERE id=?", [int(rid)]).fetchone()
+                if not row:
+                    return self.send(404, {"error": "no existe"})
+                if parts[3] == "scan" and method == "POST":  # ping, DNS y SNMP (public), como «Descubrir red»
+                    net = ipaddress.ip_network(row["cidr"])
+                    if net.num_addresses > 1024:
+                        raise ValueError("se escanean redes de hasta 1024 direcciones (/22): divide esta en subredes")
+                    found = [{"ip": f["ip"], "name": f["name"]} for f in discover(net, "public")]
+                    q("UPDATE subnets SET scan=?, scanned=CURRENT_TIMESTAMP WHERE id=?", [json.dumps(found), row["id"]])
+                    self.log("escanear", "subnet", row["id"], row["name"] or row["cidr"], {"responden": len(found)})
+                    row = q("SELECT * FROM subnets WHERE id=?", [row["id"]]).fetchone()
+                elif method != "GET":
+                    return self.send(405, {"error": "método no permitido"})
+                return self.send(200, ipam(row))
             if res == "monitor" and method == "GET" and rid is None:
                 return self.send(200, monitor_state())
             if res == "monitor" and method == "POST" and rid == "test":
@@ -1849,7 +2065,7 @@ class H(BaseHTTPRequestHandler):
             cols = TABLES[res]
             pub = lambda r: {k: v for k, v in dict(r).items() if k not in SECRET}
             if method == "GET" and rid is None:
-                order = {"pages": "title", "items": "name"}.get(res, "id")
+                order = {"pages": "title", "items": "name", "expiries": "date", "subnets": "cidr"}.get(res, "id")
                 return self.send(200, [pub(r) for r in q(f"SELECT * FROM {res} ORDER BY {order} COLLATE NOCASE")])
             if method == "POST" and rid is None:  # un objeto, o una lista para crear en serie
                 body = json.loads(self.body() or b"{}")
@@ -1859,6 +2075,8 @@ class H(BaseHTTPRequestHandler):
                 for b in batch:  # todo validado antes de guardar nada
                     if res == "items":
                         check_item(b)
+                    if res in ("expiries", "subnets"):
+                        (check_expiry if res == "expiries" else check_subnet)(b, new=True)
                     if res in ("checks", "sources"):
                         (check_host if res == "checks" else check_source)({k: v for k, v in b.items() if k in cols}, new=True)
                 out = []
@@ -1880,6 +2098,8 @@ class H(BaseHTTPRequestHandler):
                 d = {k: v for k, v in raw.items() if k in cols}
                 if res == "items":
                     check_item(d)
+                if res in ("expiries", "subnets"):
+                    (check_expiry if res == "expiries" else check_subnet)(d)
                 if res == "checks":
                     check_host(d)
                     if "host" in d:
@@ -1967,7 +2187,8 @@ class H(BaseHTTPRequestHandler):
             q("UPDATE agents SET source=? WHERE id=?", [sid, a["id"]])
             src = q(SOURCES + " WHERE s.id=?", [sid]).fetchone()
         q("UPDATE sources SET host=?, item=?, every=?, last=CURRENT_TIMESTAMP WHERE id=?", [f["ip"] or f["name"], item, every, src["id"]])
-        (out, info), probs = kitty_read(f["name"], b.get("facts")), []
+        out, info = kitty_read(f["name"], b.get("facts"))
+        info["events"], probs = kitty_events(b.get("events"), json.loads(src["info"] or "{}").get("events"))
         save_health(dict(src), limits(dict(src), out, probs), probs, info, None)
         return self.send(200, {"state": "adoptado", "item": item, "catlan": INSTANCE})
 
@@ -2134,9 +2355,13 @@ class H(BaseHTTPRequestHandler):
             return self.send(201, dict(q("SELECT * FROM notes WHERE id = (SELECT max(id) FROM notes WHERE incident=?)", [row["id"]]).fetchone()))
         if method == "PUT":
             check_incident(d, row["id"])
-            d = {k: v for k, v in d.items() if v != row[k]}
+            d, seen = {k: v for k, v in d.items() if v != row[k]}, b.get("_seen")  # _seen: la versión que abrió quien guarda
             if d:
-                q(f"UPDATE incidents SET {', '.join(k + '=?' for k in d)} WHERE id=?", [*d.values(), row["id"]])
+                cur = q(f"UPDATE incidents SET {', '.join(k + '=?' for k in d)}, version=version+1 WHERE id=?"
+                        + (" AND version=?" if seen is not None else ""), [*d.values(), row["id"], *([seen] if seen is not None else [])])
+                if not cur.rowcount:
+                    who = q("SELECT who FROM log WHERE kind='incident' AND ref=? ORDER BY id DESC LIMIT 1", [row["id"]]).fetchone()
+                    return self.send(409, {"error": f"{who['who'] if who and who['who'] else 'Alguien'} la cambió mientras la editabas."})
                 now = q(INC + " WHERE n.id=?", [row["id"]]).fetchone()
                 say = {"status": f"cambió el estado a «{now['status']}»", "priority": f"cambió la prioridad a «{now['priority']}»",
                        "assignee": f"asignó a {now['assignee_name']}" if now["assignee"] else "quitó la persona asignada",
@@ -2198,14 +2423,16 @@ class H(BaseHTTPRequestHandler):
         if res == "login" and method == "POST":
             if throttled(ip):
                 return self.send(429, {"error": "demasiados intentos: espera 15 minutos"})
-            uid = login_ok(str(b.get("name", ""))[:100], str(b.get("pass", ""))[:200])
+            uid = login_ok(str(b.get("name", ""))[:100], str(b.get("pass", ""))[:200], str(b.get("code", ""))[:10])
             if not uid:
-                FAILS[ip].append(time.time())
+                FAILS[ip].append(time.time())  # también los códigos fallidos: 10 y fuera
+                if uid is False:
+                    return self.send(401, {"error": "código incorrecto" if b.get("code") else "escribe el código de tu app de autenticación", "totp": True})
                 return self.send(401, {"error": "usuario o contraseña incorrectos"})
             tok = secrets.token_urlsafe(32)
             q("DELETE FROM sessions WHERE expires <= datetime('now')")
             q("INSERT INTO sessions(token, user_id, expires) VALUES(?, ?, datetime('now', '+30 days'))", [sha(tok), uid])
-            return self.send(200, me(uid), cookie=f"{COOKIE}={tok}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000")
+            return self.send(200, me(uid), cookie=f"{COOKIE}={tok}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000" + ("; Secure" if CERT else ""))
         if res == "logout" and method == "POST":
             q("DELETE FROM sessions WHERE token=?", [self.token])
             return self.send(204, cookie=f"{COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0")
@@ -2222,6 +2449,23 @@ class H(BaseHTTPRequestHandler):
             _basic.clear()
             self.log("cambiar contraseña", "user", self.uid, self.user, {})
             return self.send(204)
+        if res == "me" and method == "POST" and rid == "totp":  # verificación en dos pasos (app de autenticación)
+            if b.get("off"):
+                if not pw_ok(str(b.get("pass", "")), q("SELECT hash FROM users WHERE id=?", [self.uid]).fetchone()["hash"]):
+                    return self.send(400, {"error": "la contraseña no es correcta"})
+                q("UPDATE users SET totp='' WHERE id=?", [self.uid])
+                self.log("quitar 2FA", "user", self.uid, self.user, {})
+                return self.send(200, me(self.uid))
+            sec = str(b.get("secret", ""))
+            if not sec:  # paso 1: un secreto nuevo para la app; no se guarda hasta confirmar un código
+                sec = base64.b32encode(secrets.token_bytes(20)).decode()
+                return self.send(200, {"secret": sec, "uri": f"otpauth://totp/catlan:{quote(self.user)}?secret={sec}&issuer=catlan"})
+            if not re.fullmatch(r"[A-Z2-7]{32}", sec) or not totp_ok(sec, b.get("code", "")):
+                return self.send(400, {"error": "el código no coincide: revisa la hora del móvil y vuelve a probar"})
+            q("UPDATE users SET totp=? WHERE id=?", [sec, self.uid])
+            _basic.clear()  # Basic ya no le vale
+            self.log("activar 2FA", "user", self.uid, self.user, {})
+            return self.send(200, me(self.uid))
         if res != "users":
             return self.send(405, {"error": "método no permitido"})
         if method == "GET" and not self.admin:  # para asignar incidencias: solo nombres
@@ -2229,7 +2473,7 @@ class H(BaseHTTPRequestHandler):
         if not self.admin:
             return self.send(403, {"error": "solo para administradores"})
         if method == "GET":
-            return self.send(200, [dict(r) for r in q("SELECT id, name, admin, must_change, created FROM users ORDER BY name COLLATE NOCASE")])
+            return self.send(200, [dict(r) for r in q("SELECT id, name, admin, must_change, totp != '' AS totp, created FROM users ORDER BY name COLLATE NOCASE")])
         if method == "POST" and rid is None:
             return self.create_users(b)
         row = rid and q("SELECT id, name FROM users WHERE id=?", [rid]).fetchone()
@@ -2240,12 +2484,14 @@ class H(BaseHTTPRequestHandler):
         if method == "PUT":
             if "admin" in b:
                 q("UPDATE users SET admin=? WHERE id=?", [int(b["admin"] is True), row["id"]])
+            if b.get("totp") is False:  # perdió el móvil: un admin le quita la 2FA y la vuelve a activar al entrar
+                q("UPDATE users SET totp='' WHERE id=?", [row["id"]])
             if "pass" in b:
                 check_pass(b["pass"])
                 q("UPDATE users SET hash=?, must_change=1 WHERE id=?", [pw_hash(b["pass"]), row["id"]])
                 q("DELETE FROM sessions WHERE user_id=?", [row["id"]])
                 _basic.clear()
-            self.log("editar", "user", row["id"], row["name"], {"admin": b.get("admin"), "contraseña": "pass" in b})
+            self.log("editar", "user", row["id"], row["name"], {"admin": b.get("admin"), "contraseña": "pass" in b, "quitar 2FA": b.get("totp") is False})
             return self.send(200, me(row["id"]))
         if method == "DELETE":
             q("DELETE FROM sessions WHERE user_id=?", [row["id"]])
@@ -2285,20 +2531,25 @@ class H(BaseHTTPRequestHandler):
             self.end_headers()
             return self.wfile.write(row["image"])
         if method == "GET" and rid:
-            row = q("SELECT id, name, data, length(image) > 0 AS has_image FROM maps WHERE id=?", [rid]).fetchone()
+            row = q("SELECT id, name, data, version, length(image) > 0 AS has_image FROM maps WHERE id=?", [rid]).fetchone()
             return self.send(200, {**dict(row), "data": json.loads(row["data"])}) if row else self.send(404, {"error": "no existe"})
         if method == "PUT" and rid:
             d = json.loads(self.body() or b"{}")
             if not isinstance(d.get("name", ""), str) or not isinstance(d.get("data", {}), dict):
                 raise ValueError("name debe ser texto y data un objeto")
-            if "name" in d:
-                q("UPDATE maps SET name=? WHERE id=?", [d["name"][:200], rid])
             if d.get("data", {}).get("type") == "rack":
                 check_rack(d["data"])
-            if "data" in d:
-                q("UPDATE maps SET data=? WHERE id=?", [json.dumps(d["data"]), rid])
+            seen = d.get("_seen")  # la versión que abrió quien guarda: si otro guardó antes, 409 (en la misma sentencia: atómico)
+            sets = {k: v for k, v in (("name", d.get("name", "")[:200] or None), ("data", "data" in d and json.dumps(d["data"]))) if v}
+            cur = q(f"UPDATE maps SET {''.join(k + '=?, ' for k in sets)}version=version+1 WHERE id=?" + (" AND version=?" if seen is not None else ""),
+                    [*sets.values(), rid, *([seen] if seen is not None else [])])
+            if not cur.rowcount:
+                if not (row := q("SELECT version FROM maps WHERE id=?", [rid]).fetchone()):
+                    return self.send(404, {"error": "no existe"})
+                who = q("SELECT who FROM log WHERE kind IN ('map', 'rack') AND ref=? ORDER BY id DESC LIMIT 1", [rid]).fetchone()
+                return self.send(409, {"error": f"{who['who'] if who and who['who'] else 'Alguien'} lo cambió mientras lo editabas.", "version": row["version"]})
             self.log_map("editar", rid)
-            return self.send(204)
+            return self.send(200, {"version": q("SELECT version FROM maps WHERE id=?", [rid]).fetchone()["version"]})
         if method == "DELETE" and rid:
             self.log_map("borrar", rid)
             q("DELETE FROM maps WHERE id=?", [rid])
@@ -2340,6 +2591,15 @@ class H(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     # ASCII: la consola de Windows (cp1252) revienta con emojis
-    print(f"catlan {VERSION} en http://0.0.0.0:{PORT}  (datos en {DATA})")
+    srv = ThreadingHTTPServer(("0.0.0.0", PORT), H)
+    if CERT:
+        tls = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        tls.load_cert_chain(CERT, KEY or None)
+        srv.socket = tls.wrap_socket(srv.socket, server_side=True, do_handshake_on_connect=False)  # el saludo TLS, en el hilo de cada petición: uno lento no para a los demás
+        quiet = srv.handle_error  # escáneres y navegadores que rechazan el certificado: sin traza en la consola
+        srv.handle_error = lambda req, addr: None if isinstance(sys.exc_info()[1], (ssl.SSLError, ConnectionError, TimeoutError)) else quiet(req, addr)
+    print(f"catlan {VERSION} en {SCHEME}://0.0.0.0:{PORT}  (datos en {DATA})")
     threading.Thread(target=monitor, daemon=True).start()
-    ThreadingHTTPServer(("0.0.0.0", PORT), H).serve_forever()
+    if SYSLOG_PORT:
+        threading.Thread(target=syslog_server, daemon=True).start()
+    srv.serve_forever()

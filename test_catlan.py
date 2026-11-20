@@ -1,6 +1,7 @@
 """Prueba de humo de la API: python test_catlan.py"""
 from pathlib import Path
-import base64, http.server, json, os, socketserver, ssl, subprocess, sys, tempfile, threading, time, urllib.request, urllib.error
+import base64, http.server, json, os, socket, socketserver, ssl, subprocess, sys, tempfile, threading, time, urllib.request, urllib.error
+from datetime import datetime, timedelta, timezone
 
 mails = []  # correos recibidos por el servidor SMTP de mentira
 
@@ -129,7 +130,10 @@ threading.Thread(target=agent.serve_forever, daemon=True).start()
 APORT = agent.server_address[1]
 
 PORT = "18099"
-env = {**os.environ, "CATLAN_DATA": tempfile.mkdtemp(), "CATLAN_PORT": PORT, "CATLAN_PASSWORD": "miau",
+with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as _u:  # un puerto UDP libre para el syslog
+    _u.bind(("127.0.0.1", 0))
+    SYSLOG = _u.getsockname()[1]
+env = {**os.environ, "CATLAN_DATA": tempfile.mkdtemp(), "CATLAN_PORT": PORT, "CATLAN_PASSWORD": "miau", "CATLAN_SYSLOG_PORT": str(SYSLOG),
        "CATLAN_SMTP_HOST": "127.0.0.1", "CATLAN_SMTP_PORT": str(smtp.server_address[1]), "CATLAN_MAIL_TO": "it@example.com", "CATLAN_WEBHOOK_URL": WEB + "/hook"}
 srv = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(__file__), "catlan.py")], env=env)
 AUTH = "Basic " + base64.b64encode(b"admin:miau").decode()  # CATLAN_PASSWORD = la del admin inicial
@@ -165,7 +169,7 @@ try:
             return e.code, "", json.loads(e.read() or b"null")
 
     st, adm, me = raw("/api/login", "POST", {"name": "admin", "pass": "miau"})
-    assert st == 200 and adm.startswith(f"catlan_{catlan.sha(str(Path(env['CATLAN_DATA']).resolve()))[:10]}=") and me == {"id": 1, "name": "admin", "admin": 1, "must_change": 0, "readonly": False, "groups": []}
+    assert st == 200 and adm.startswith(f"catlan_{catlan.sha(str(Path(env['CATLAN_DATA']).resolve()))[:10]}=") and me == {"id": 1, "name": "admin", "admin": 1, "must_change": 0, "totp": 0, "readonly": False, "groups": []}
     assert raw("/api/pages", cookie=adm)[0] == 200 and raw("/api/login", "POST", {"name": "admin", "pass": "mal"})[0] == 401
     # Instalación nueva: la wiki trae la «Guía de catlan» (uso, funciones y qué hace con los datos), una sola vez
     guia = call("/api/pages")[1]
@@ -219,7 +223,7 @@ try:
     s, i = call("/api/items", "POST", {"name": "sw-core", "ip": "10.0.0.1"})
     assert s == 201
     esquema = {"nodes": [{"id": "a", "t": "switch", "x": 100, "y": 100, "item": i["id"]}], "links": []}
-    assert call(f"/api/maps/{m['id']}", "PUT", {"name": "P1", "data": esquema})[0] == 204
+    assert call(f"/api/maps/{m['id']}", "PUT", {"name": "P1", "data": esquema})[0] == 200
     s, got = call(f"/api/maps/{m['id']}")
     assert got["name"] == "P1" and got["data"] == esquema and got["has_image"] == 1
     assert call(f"/api/maps/{m['id']}", "PUT", {"data": "no"})[0] == 400
@@ -232,7 +236,7 @@ try:
     call(f"/api/pages/{p['id']}", "PUT", {"body": "el switch [[#%d]] va al CPD" % i["id"]})
     r = call(f"/api/items/{i['id']}/refs")[1]
     assert [x["id"] for x in r["pages"]] == [p["id"]] and [x["id"] for x in r["maps"]] == [m["id"]]
-    assert call(f"/api/items/{i['id'] + 100}/refs")[1] == {"pages": [], "items": [], "maps": [], "incidents": []}
+    assert call(f"/api/items/{i['id'] + 100}/refs")[1] == {"pages": [], "items": [], "maps": [], "incidents": [], "expiries": []}
     hist = call(f"/api/log?kind=page&ref={p['id']}")[1]
     assert [h["action"] for h in hist] == ["editar", "editar", "crear"] and hist[0]["who"] == "admin"
     assert "[[#" in json.loads(hist[0]["data"])["body"]
@@ -257,7 +261,7 @@ try:
         assert call(f"/api/maps/{rk}", "PUT", {"data": {"type": "rack", **bad}})[0] == 400, bad
     good = {"type": "rack", "height": 12, "devices": [{"id": "a", "t": "switch", "u": 12, "h": 1, "ports": 48, "sfp": 4, "pmap": {"1": "x"}},
                                                       {"id": "b", "t": "pdu", "u": 1, "h": 1, "ports": 8, "pmap": {"1": "ESXi-01 fuente A", "2": "[[#1]]"}}]}  # enchufes
-    assert call(f"/api/maps/{rk}", "PUT", {"data": good})[0] == 204
+    assert call(f"/api/maps/{rk}", "PUT", {"data": good})[0] == 200
     assert call(f"/api/maps/{rk}")[1]["data"] == good
     # Monitor: hosts que no pueden colarse como opciones del comando ping
     for bad in [{"host": "-c 9 x"}, {"host": "a;rm"}, {"host": ""}, {"host": "10.0.0.1", "every": 1}]:
@@ -575,6 +579,18 @@ try:
     assert lost["state"] == "error" and lost["error"].startswith("Kitty no responde"), lost
     kitty(K1, every=1, facts={**facts, "disks": [{"name": "C:", "total": 1000, "free": 500}]})
     assert next(h for h in call("/api/health")[1] if h["id"] == hk["id"])["state"] == "ok"
+    # Visor de eventos: se guardan 7 días sin repetir; un crítico de las últimas 24 h avisa, un error solo se ve
+    utc = lambda **d: (datetime.now(timezone.utc) - timedelta(**d)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ev = lambda rec, level, **d: {"rec": rec, "log": "System", "time": utc(**d), "level": level, "source": "Kernel-Power", "code": 41, "msg": "Apagado inesperado."}
+    ok_disks = {**facts, "disks": [{"name": "C:", "total": 1000, "free": 500}]}
+    kitty(K1, every=1, facts=ok_disks, events=[ev(7, 2, hours=1), ev(8, 1, minutes=5), ev(8, 1, minutes=5), ev(1, 1, days=8), ev(2, 3, minutes=1),
+                                               {"rec": "x"}, "nada", {**ev(9, 2, minutes=1), "time": "ayer"}])
+    hk2 = next(h for h in call("/api/health")[1] if h["id"] == hk["id"])
+    assert [e["rec"] for e in hk2["info"]["events"]] == [8, 7] and hk2["state"] == "warn"
+    assert hk2["problems"] == ["Crítico en el registro: Kernel-Power 41 · Apagado inesperado."], hk2["problems"]
+    kitty(K1, every=1, facts=ok_disks, events=[ev(10, 2, minutes=1)])  # el siguiente envío trae solo lo nuevo: lo de antes sigue
+    assert [e["rec"] for e in next(h for h in call("/api/health")[1] if h["id"] == hk["id"])["info"]["events"]] == [10, 8, 7]
+    kitty(K1, every=1, facts=ok_disks, events=[])
     # expulsado: fuera de Salud con su historial; la ficha del inventario se queda
     assert call(f"/api/agents/{ag['id']}", "PUT", {"state": "rechazado"})[0] == 200 and not [h for h in call("/api/health")[1] if h["kind"] == "kitty"]
     assert call(f"/api/metrics?source={hk['id']}&hours=1")[1] == {} and len(call("/api/items")[1]) == n_items + 1
@@ -660,6 +676,44 @@ try:
         assert r.headers["Content-Disposition"].startswith('attachment; filename="catlan-') and r.read(16) == b"SQLite format 3\x00"
     assert call("/api/backup", auth=LEC)[0] == 403
     assert not list(Path(env["CATLAN_DATA"]).glob(".descarga-*"))  # el temporal no se queda
+    # Copia cifrada: solo se abre con su contraseña, y cualquier cambio en el archivo se nota
+    req = urllib.request.Request(f"http://127.0.0.1:{PORT}/api/backup", json.dumps({"password": "copia-segura"}).encode(), method="POST",
+                                 headers={"Authorization": AUTH, "Content-Type": "application/json"})
+    with urllib.request.urlopen(req) as r:
+        assert r.headers["Content-Disposition"].endswith('.catlan"')
+        blob = r.read()
+    assert blob.startswith(catlan.SEAL) and b"SQLite format 3" not in blob
+    assert catlan.unseal(blob, "copia-segura").startswith(b"SQLite format 3\x00")
+    for bad in ((blob, "otra-clave"), (blob[:-40] + bytes([blob[-40] ^ 1]) + blob[-39:], "copia-segura"), (b"SQLite", "copia-segura")):
+        try:
+            catlan.unseal(*bad); raise AssertionError("abrió una copia mala")
+        except ValueError:
+            pass
+    assert catlan.unseal(catlan.seal(b"", "x" * 8), "x" * 8) == b""
+    assert call("/api/backup", "POST", {"password": "corta"})[0] == 400 and call("/api/backup", "POST", {"password": "copia-segura"}, auth=LEC)[0] == 403
+    with tempfile.TemporaryDirectory() as tmp:  # y se descifra desde la consola
+        (Path(tmp) / "c.catlan").write_bytes(blob)
+        out = subprocess.run([sys.executable, str(Path(__file__).parent / "catlan.py"), "descifrar", str(Path(tmp) / "c.catlan"), str(Path(tmp) / "c.db")],
+                             input="copia-segura\n", capture_output=True, text=True, env={**os.environ, "CATLAN_DATA": tmp + "/nada"})
+        assert (Path(tmp) / "c.db").read_bytes().startswith(b"SQLite format 3\x00") and not Path(tmp, "nada").exists(), out.stderr
+    # Verificación en dos pasos (TOTP, RFC 6238)
+    assert catlan.totp(base64.b32encode(b"12345678901234567890").decode(), 59) == "287082"  # vector del RFC
+    call("/api/users", "POST", {"name": "dospasos", "pass": "provisional-1"})
+    ck = raw("/api/login", "POST", {"name": "dospasos", "pass": "provisional-1"})[1]
+    assert raw("/api/me/password", "POST", {"old": "provisional-1", "new": "segura-dos-pasos"}, cookie=ck)[0] == 204
+    sec = raw("/api/me/totp", "POST", {}, cookie=ck)[2]["secret"]
+    assert raw("/api/me/totp", "POST", {"secret": sec, "code": "000000" if catlan.totp(sec) != "000000" else "111111"}, cookie=ck)[0] == 400
+    assert raw("/api/me/totp", "POST", {"secret": sec, "code": catlan.totp(sec)}, cookie=ck)[2]["totp"] == 1
+    st, _, body = raw("/api/login", "POST", {"name": "dospasos", "pass": "segura-dos-pasos"})
+    assert st == 401 and body["totp"] is True
+    assert raw("/api/login", "POST", {"name": "dospasos", "pass": "mal", "code": catlan.totp(sec)})[2].get("totp") is None  # sin pista con mala contraseña
+    assert raw("/api/login", "POST", {"name": "dospasos", "pass": "segura-dos-pasos", "code": catlan.totp(sec)})[0] == 200
+    assert call("/api/pages", auth="Basic " + base64.b64encode(b"dospasos:segura-dos-pasos").decode())[0] == 401  # por Basic, no
+    uid = next(u["id"] for u in call("/api/users")[1] if u["name"] == "dospasos")
+    assert call(f"/api/users/{uid}", "PUT", {"totp": False})[1]["totp"] == 0  # perdió el móvil
+    assert raw("/api/login", "POST", {"name": "dospasos", "pass": "segura-dos-pasos"})[0] == 200
+    call(f"/api/users/{uid}", "DELETE")
+    catlan.FAILS.clear()
     # Ediciones a la vez: con _seen, si otro lo cambió desde entonces, 409 con quién; sin _seen, como siempre
     pg = call("/api/pages", "POST", {"title": "Conflicto", "body": "v1"})[1]
     assert call(f"/api/pages/{pg['id']}", "PUT", {"body": "v2", "_seen": pg["updated"]})[0] == 200  # nadie en medio: guarda
@@ -668,14 +722,83 @@ try:
     st, body = call(f"/api/pages/{pg['id']}", "PUT", {"body": "v2 tardía", "_seen": pg["updated"]})
     assert st == 409 and call(f"/api/pages/{pg['id']}")[1]["body"] == "v3 de otro", (st, body)
     assert call(f"/api/pages/{pg['id']}", "PUT", {"body": "la mía"})[1]["body"] == "la mía"  # «Guardar igualmente»
+    # Lo mismo en esquemas, racks e incidencias, con un número de versión
+    mp = call("/api/maps?name=Conflicto", "POST")[1]
+    v0 = call(f"/api/maps/{mp['id']}")[1]["version"]
+    v1 = call(f"/api/maps/{mp['id']}", "PUT", {"data": {"nodes": []}, "_seen": v0})[1]["version"]
+    assert v1 == v0 + 1 and call(f"/api/maps/{mp['id']}", "PUT", {"name": "otro", "_seen": v1})[0] == 200
+    st, body = call(f"/api/maps/{mp['id']}", "PUT", {"name": "tardío", "_seen": v1})
+    assert st == 409 and call(f"/api/maps/{mp['id']}")[1]["name"] == "otro", (st, body)
+    assert call("/api/maps/999999", "PUT", {"name": "x", "_seen": 0})[0] == 404
+    call(f"/api/maps/{mp['id']}", "DELETE")
+    inc = call("/api/incidents", "POST", {"title": "Conflicto"})[1]
+    assert call(f"/api/incidents/{inc['id']}", "PUT", {"body": "a", "_seen": inc["version"]})[0] == 200
+    assert call(f"/api/incidents/{inc['id']}", "PUT", {"body": "b", "_seen": inc["version"]})[0] == 409
+    assert call(f"/api/incidents/{inc['id']}")[1]["body"] == "a" and call(f"/api/incidents/{inc['id']}", "PUT", {"body": "b"})[0] == 200
+    call(f"/api/incidents/{inc['id']}", "DELETE")
+    assert catlan.db.execute("PRAGMA user_version").fetchone()[0] == len(catlan.MIGRATIONS)  # migraciones numeradas al día
     # Aviso de garantías: una vez al día, solo las que caducan hoy o dentro de 30 días
     sent = []
     catlan.notify, catlan.channels = (lambda subject, text: sent.append(text)), (lambda: ["correo"])
     catlan.q("DELETE FROM meta WHERE k='warranty_day'")
     for name, days in (("caduca-hoy", 0), ("caduca-en-30", 30), ("caduca-en-31", 31)):
         catlan.q("INSERT INTO items(name, warranty) VALUES(?, date('now', 'localtime', ?))", [name, f"+{days} days"])
+    # Caducidades que no son garantías (licencias, dominios…): mismo aviso
+    day = lambda n: (datetime.now() + timedelta(days=n)).strftime("%Y-%m-%d")
+    dom = call("/api/expiries", "POST", {"name": "midominio.es", "kind": "dominio", "date": day(30)})[1]
+    assert dom["kind"] == "dominio" and call("/api/expiries", "POST", {"name": "Office", "kind": "licencia", "date": day(31)})[0] == 201
+    for bad in ({"name": "x", "date": "2026-02-30"}, {"name": "", "date": day(1)}, {"name": "x", "kind": "coche", "date": day(1)}, {"name": "x"}):
+        assert call("/api/expiries", "POST", bad)[0] == 400, bad
+    assert call(f"/api/expiries/{dom['id']}", "PUT", {"date": "mañana"})[0] == 400
+    catlan.q("INSERT INTO expiries(name, kind, date) VALUES('midominio.es', 'dominio', ?), ('Office', 'licencia', ?)", [day(30), day(31)])
     catlan.warranties(), catlan.warranties()
     assert len(sent) == 1 and "caduca-hoy: hoy" in sent[0] and "caduca-en-30: el " in sent[0] and "caduca-en-31" not in sent[0], sent
+    assert "midominio.es: el " in sent[0] and "(dominio)" in sent[0] and "Office" not in sent[0], sent
+    it = call("/api/items", "POST", {"name": "con-licencia"})[1]
+    call(f"/api/expiries/{dom['id']}", "PUT", {"item": it["id"]})
+    assert [e["name"] for e in call(f"/api/items/{it['id']}/refs")[1]["expiries"]] == ["midominio.es"]
+    # Syslog: lo que manda un equipo del inventario sale en su ficha; lo de IPs desconocidas, no
+    lo = call("/api/items", "POST", {"name": "manda-syslog", "ip": "127.0.0.9"})[1]
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as u:
+        u.bind(("127.0.0.9", 0))  # desde la IP del equipo
+        u.sendto("<11>Nov 20 18:00:00 sw1 kernel: disco lleno ñ".encode(), ("127.0.0.1", SYSLOG))
+        u.sendto(b"sin prioridad", ("127.0.0.1", SYSLOG))
+    for _ in range(50):
+        logs = call(f"/api/items/{lo['id']}/syslog")[1]
+        if len(logs) == 2: break
+        time.sleep(0.1)
+    assert [(l["sev"], l["msg"]) for l in logs] == [(6, "sin prioridad"), (3, "Nov 20 18:00:00 sw1 kernel: disco lleno ñ")], logs
+    # IPAM: subred normalizada; en uso, libres, IP repetida en el inventario y lo que responde sin estar en él
+    for bad in ({"cidr": "10.0.0.0/15"}, {"cidr": "fe80::/64"}, {"cidr": "hola"}, {}):
+        assert call("/api/subnets", "POST", bad)[0] == 400, bad
+    sn = call("/api/subnets", "POST", {"cidr": "127.0.0.5/29", "name": "Lazo"})[1]
+    assert sn["cidr"] == "127.0.0.0/29"
+    call("/api/items", "POST", {"name": "repetido", "ip": "127.0.0.1"})
+    r = call(f"/api/subnets/{sn['id']}/ips")[1]
+    assert (r["size"], r["used"], r["free"]) == (6, 1, 5) and r["ips"][0]["conflict"] == "duplicada" and r["next_free"][0] == "127.0.0.2", r
+    r = call(f"/api/subnets/{sn['id']}/scan", "POST")[1]  # 127.0.0.1-6 responden (lazo local)
+    assert r["used"] == 6 and {i["conflict"] for i in r["ips"][1:]} == {"sin registrar"} and r["ips"][0]["up"] is True, r
+    assert call("/api/subnets", "POST", {"cidr": "10.0.0.0/21"})[0] == 201 and call(f"/api/subnets/{sn['id']}/scan", auth=LEC)[0] == 200
+    big = call("/api/subnets", "POST", {"cidr": "10.0.0.0/16"})[1]
+    r = call(f"/api/subnets/{big['id']}/ips")[1]
+    assert call(f"/api/subnets/{big['id']}/scan", "POST")[0] == 400 and r["size"] == 65534 and r["free"] == 65534 - r["used"], r["used"]
+    # Kitty para Linux: el instalador lleva esta dirección, va con LF y, en Linux, el agente habla bien con catlan
+    st, sh = call("/kitty.sh", auth="")
+    sh = sh.decode()
+    assert st == 200 and f"URL='http://127.0.0.1:{PORT}'" in sh and "{{" not in sh and "\r" not in sh
+    if sys.platform.startswith("linux"):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "agent.sh").write_text(sh.split("<<'AGENT'\n")[1].split("\nAGENT\n")[0])
+            (Path(tmp) / "key").write_text("k" * 64)
+            out = subprocess.run(["sh", str(Path(tmp) / "agent.sh")], env={**os.environ, "KITTY_DIR": tmp}, capture_output=True, text=True)
+            state = (Path(tmp) / "state").read_text().splitlines()
+            assert state[0] == "pendiente", (state, out.stderr)
+            ag = next(a for a in call("/api/agents")[1] if a["name"] == socket.gethostname())
+            call(f"/api/agents/{ag['id']}", "PUT", {"state": "adoptado"})
+            subprocess.run(["sh", str(Path(tmp) / "agent.sh")], env={**os.environ, "KITTY_DIR": tmp}, check=True)
+            assert (Path(tmp) / "state").read_text().splitlines()[0] == "adoptado" and (Path(tmp) / "since").exists()
+            h = next(s for s in call("/api/health")[1] if s["kind"] == "kitty" and s["info"].get("name") == socket.gethostname())
+            assert h["info"]["mem_total"] and h["info"]["disks"] and h["info"]["cores"], h["info"]
     # Sonido por dispositivo: se guarda en la comprobación; borrar un sonido subido devuelve a sus usuarios al general
     ck = call("/api/checks", "POST", {"host": "127.0.0.1", "label": "con sirena", "sound": "siren", "every": 3600})[1]
     assert ck["sound"] == "siren" and call("/api/checks", "POST", {"host": "127.0.0.1", "sound": "trompeta"})[0] == 400

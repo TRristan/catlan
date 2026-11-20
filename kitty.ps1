@@ -25,7 +25,8 @@ try { # quien tenga la clave se hace pasar por este PC: fuera los usuarios norma
     Write-Host "Kitty: no he podido restringir $r; los usuarios locales podrán leer su clave." -ForegroundColor Yellow
 }
 
-# Lo que corre cada 5 minutos: lo justo para ver fallos (nada de usuarios, programas, procesos ni archivos).
+# Lo que corre cada 5 minutos: lo justo para ver fallos (nada de usuarios, programas, procesos ni archivos),
+# más los errores y críticos del Visor de eventos para saber por qué falla.
 # Solo cmdlets y tipos básicos: funciona también con PowerShell en modo de lenguaje restringido.
 $agent = @'
 $ErrorActionPreference = 'Stop'
@@ -54,10 +55,22 @@ try {
         disks = @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object { @{ name = $_.DeviceID; total = [int64]$_.Size; free = [int64]$_.FreeSpace } })
         ips = @(Get-NetIPAddress -AddressState Preferred | Where-Object { $_.IPAddress -notmatch '^(127\.|::1$|fe80:)' } | ForEach-Object { $_.IPAddress })
     }
+    # Críticos y errores del Visor de eventos (Sistema y Aplicación) desde el último envío, los 20 más recientes, sin rutas de usuario
+    $now = Get-Date
+    $since = (Get-ItemProperty $r).since
+    $from = if ($since) { [datetime]$since } else { $now.AddDays(-1) }
+    $events = @()
+    try {
+        $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'System', 'Application'; Level = 1, 2; StartTime = $from } -MaxEvents 20 -ErrorAction SilentlyContinue | ForEach-Object {
+            $m = ("$($_.Message)" -replace '(?i)\\Users\\[^\\\s]+', '\Users\(usuario)' -replace '\s+', ' ').Trim()
+            @{ rec = [int64]$_.RecordId; log = $_.LogName; time = $_.TimeCreated.ToUniversalTime().ToString('s') + 'Z'; level = [int]$_.Level; source = "$($_.ProviderName)"; code = [int]$_.Id; msg = $m.Substring(0, [Math]::Min(400, $m.Length)) }
+        })
+    } catch {} # sin eventos o sin acceso al registro: el resto se envía igual
     # ip vacía: catlan pone la dirección desde la que llega
-    $body = @{ key = (Get-ItemProperty $r).key; name = $env:COMPUTERNAME; ip = ''; serial = $serial; os = "windows/$($env:PROCESSOR_ARCHITECTURE.ToLower())"; kind = 'pc'; every = 5; facts = $facts } | ConvertTo-Json -Depth 4 -Compress
+    $body = @{ key = (Get-ItemProperty $r).key; name = $env:COMPUTERNAME; ip = ''; serial = $serial; os = "windows/$($env:PROCESSOR_ARCHITECTURE.ToLower())"; kind = 'pc'; every = 5; facts = $facts; events = $events } | ConvertTo-Json -Depth 4 -Compress
     $res = Invoke-RestMethod "$Url/api/agent" -Method Post -Body $body -ContentType 'application/json; charset=utf-8' -TimeoutSec 20 -UseBasicParsing
     if ($res.catlan -ne $Catlan) { throw "$Url no es el catlan que lo instaló" } # atado: no habla con ningún otro
+    if ($res.state -eq 'adoptado') { Set-ItemProperty $r since $now.ToString('s') } # pendiente: los eventos esperan a que lo acepten
     Note $res.state ''
 } catch {
     Note 'error' $_.Exception.Message

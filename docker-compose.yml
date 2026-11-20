@@ -1,7 +1,7 @@
 services:
   catlan:
     build: .
-    ports: ["8080:8080"]
+    ports: ["8080:8080", "514:514/udp"]  # 514/udp: syslog de tus equipos
     environment:
       # CATLAN_PASSWORD: cambiame   # contraseña inicial del usuario admin (sin ella: admin, a cambiar al entrar)
       # Avisos por correo del monitor (opcional)

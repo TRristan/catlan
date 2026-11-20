@@ -621,6 +621,7 @@ input[type=range]{flex:1;max-width:190px;accent-color:var(--acc)}
 .dash{position:relative;min-height:200px;margin-bottom:28px}
 .btn[hidden]{display:none}
 textarea[hidden]{display:none} /* el editor visual guarda en él su Markdown */
+.login-card label[hidden]{display:none} /* el código de la 2FA, solo cuando el servidor lo pide */
 /* Login */
 .login{position:fixed;inset:0;z-index:200;display:grid;place-items:center;padding:16px;background:radial-gradient(1200px 600px at 50% -10%,var(--acc-soft),transparent 70%),var(--bg)}
 .login-card{width:min(360px,100%);display:flex;flex-direction:column;gap:14px;padding:30px 28px 26px;background:var(--s1);border:1px solid var(--line);border-radius:22px;box-shadow:var(--sh3);animation:rise .6s var(--spring) both}
@@ -776,6 +777,7 @@ button.inc-tg{cursor:pointer;transition:background .2s,color .2s}button.inc-tg:h
       <a href="#/inv" data-v="inv" title="Inventario"><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-box"/></svg><span class="lbl">Inventario</span></a>
       <a href="#/maps" data-v="maps" title="Esquemas"><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-nodes"/></svg><span class="lbl">Esquemas</span></a>
       <a href="#/racks" data-v="racks" title="Racks"><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-rack"/></svg><span class="lbl">Racks</span></a>
+      <a href="#/redes" data-v="redes" title="Redes"><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-net"/></svg><span class="lbl">Redes</span></a>
       <a href="#/monitor" data-v="monitor" title="Monitor"><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-signal"/></svg><span class="lbl">Monitor</span><span class="nbadge" id="mon-badge" hidden></span></a>
       <a href="#/salud" data-v="salud" title="Salud"><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-thermo"/></svg><span class="lbl">Salud</span><span class="nbadge" id="hl-badge" hidden></span></a>
       <a href="#/inc" data-v="inc" title="Incidencias"><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-ticket"/></svg><span class="lbl">Incidencias</span><span class="nbadge" id="inc-badge" hidden></span></a>
@@ -900,6 +902,8 @@ const UI = {
   mail: '<rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="m4 7 8 6 8-6"/>',
   play: '<path d="M8 5.5v13l10-6.5z"/>',
   eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.5"/>',
+  key: '<circle cx="7.5" cy="15.5" r="4"/><path d="M10.5 12.5 20 3M16 7l3 3M14 9l2 2"/>',
+  net: '<rect x="8" y="3" width="8" height="6" rx="1.5"/><path d="M12 9v4M5 21v-4h14v4M12 13v8"/>',
 };
 const ui = (n, s = 18) => `<svg class="ic" width="${s}" height="${s}" aria-hidden="true"><use href="#u-${n}"/></svg>`;
 // Equipos del montador (48x48, trazo = currentColor)
@@ -1104,7 +1108,7 @@ async function api(path, method = 'GET', body, type = 'application/json') {
   if (r.status === 401) { showLogin(); if (write) sync('error'); throw new Error(401); } // sesión caducada o cerrada en otro sitio
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
-    if (!(r.status === 409 && body?._seen)) toast(e.error || r.statusText, 'bad'); // el conflicto lo pregunta putFresh
+    if (!(r.status === 409 && body?._seen != null)) toast(e.error || r.statusText, 'bad'); // el conflicto lo pregunta putFresh
     if (write) sync('error'); throw Object.assign(new Error(r.status), {info: e});
   }
   if (write && !pending) sync('saved');
@@ -1213,7 +1217,7 @@ function ago(ts) {
 const names = async () => Object.fromEntries((await api('items')).map(i => [i.id, i.name]));
 
 // ── Historial ───────────────────────────────────────────
-const KINDS = {page: ['Wiki', 'wiki', 'book'], item: ['Equipo', 'inv', 'box'], map: ['Esquema', 'maps', 'nodes'], rack: ['Rack', 'racks', 'rack'], check: ['Monitor', 'monitor', 'signal'], source: ['Salud', 'salud', 'thermo'], user: ['Usuario', 'users', 'user'], group: ['Grupo', 'users', 'users'], incident: ['Incidencia', 'inc', 'ticket'], agent: ['Kitty', 'inv', 'box'], db: ['Opciones', 'opts', 'cog'], alerts: ['Avisos', 'opts', 'bell']};
+const KINDS = {page: ['Wiki', 'wiki', 'book'], item: ['Equipo', 'inv', 'box'], map: ['Esquema', 'maps', 'nodes'], rack: ['Rack', 'racks', 'rack'], check: ['Monitor', 'monitor', 'signal'], source: ['Salud', 'salud', 'thermo'], user: ['Usuario', 'users', 'user'], group: ['Grupo', 'users', 'users'], incident: ['Incidencia', 'inc', 'ticket'], agent: ['Kitty', 'inv', 'box'], expiry: ['Caducidad', 'cad', 'clock'], subnet: ['Red', 'redes', 'net'], db: ['Opciones', 'opts', 'cog'], alerts: ['Avisos', 'opts', 'bell']};
 const VERB = {crear: 'creó', editar: 'editó', borrar: 'borró', aceptar: 'aceptó', rechazar: 'rechazó', olvidar: 'olvidó', vaciar: 'borró', descargar: 'descargó'};
 const NOUN = {page: 'la página', item: 'el equipo', map: 'el esquema', rack: 'el rack', check: 'la vigilancia de', source: 'la lectura de', agent: 'el Kitty de'};
 const hue = s => Math.abs([...(s || '?')].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)) % 360;
@@ -1970,7 +1974,7 @@ const views = {
         const f = await dialog(`<h3>Editar incidencia</h3><div class="fields"><div class="field"><label for="e-t">Título</label><input id="e-t" name="title" required maxlength="200" value="${esc(n.title)}"></div>
           <div class="field"><label for="e-b">Descripción</label><textarea id="e-b" name="body" rows="6">${esc(n.body)}</textarea></div></div>`, {ok: 'Guardar'});
         richEditor(document.querySelector('dialog[open] #e-b'), names);
-        if (f) { await api('incidents/' + n.id, 'PUT', {title: f.get('title').trim(), body: f.get('body')}); route(false); }
+        if (f) { try { await putFresh('incidents/' + n.id, {title: f.get('title').trim(), body: f.get('body')}, n.version); } catch { return; } route(false); }
       }, {icon: 'edit'}],
       ...(ME.admin ? ['-', ['Borrar incidencia', async () => { if (await ask('¿Borrar esta incidencia?', `«${esc(n.title)}» y su seguimiento se borrarán. Quedará una copia en Actividad.`)) { await api('incidents/' + n.id, 'DELETE'); toast('Incidencia borrada'); location.hash = '#/inc'; } }, {icon: 'trash', danger: true}]] : [])]);
   },
@@ -2044,8 +2048,8 @@ const views = {
             <span class="ex">${us.length} ${us.length === 1 ? 'usuario' : 'usuarios'} · ${gs.length} ${gs.length === 1 ? 'grupo' : 'grupos'} · quién entra y quién puede editar</span></div><span style="display:flex;transform:rotate(-90deg)" class="dim">${ui('chev', 16)}</span></a>
           <a class="rowlink" href="#/inv" style="--i:1"><span class="badge-ic">${ui('signal', 18)}</span><div class="grow"><b>Kitty en los PCs</b>
             <span class="ex">En Inventario: «Añadir PC» y aceptar los que piden entrar</span></div><span style="display:flex;transform:rotate(-90deg)" class="dim">${ui('chev', 16)}</span></a>
-          <a class="rowlink" href="/api/backup" download style="--i:2"><span class="badge-ic">${ui('layers', 18)}</span><div class="grow"><b>Descargar copia de seguridad</b>
-            <span class="ex">Toda la base de datos en un archivo .db. Para restaurarla, sustituye data/catlan.db con catlan parado.</span></div>${ui('redo', 16)}</a></div>
+          <a class="rowlink" href="/api/backup" id="bk" style="--i:2"><span class="badge-ic">${ui('layers', 18)}</span><div class="grow"><b>Descargar copia de seguridad</b>
+            <span class="ex">Toda la base de datos, cifrada con una contraseña (lleva las credenciales de SNMP y avisos). Para restaurarla: <code>python catlan.py descifrar copia.catlan data/catlan.db</code> con catlan parado.</span></div>${ui('redo', 16)}</a></div>
         <section class="card pad mt" aria-labelledby="al-t"><h3 class="card-t" id="al-t">${ui('bell', 16)}Avisos fuera de catlan <span class="dim small" id="al-ch" style="font-weight:400"></span></h3>
           <p class="small muted" style="margin:0 0 12px">Cuando algo cae y cuando vuelve, avisos de Salud, incidencias críticas y garantías. Las contraseñas y tokens guardados no se vuelven a mostrar: déjalos en blanco para conservarlos.</p>
           <form id="al-f" class="fields two" autocomplete="off">
@@ -2077,6 +2081,19 @@ const views = {
       a.env.forEach(k => f.elements[k]?.insertAdjacentHTML('afterend', '<small class="dim env-note">Viene de una variable de entorno: lo que guardes aquí manda.</small>'));
     };
     paintAlerts(await api('alerts'));
+    $('#bk').onclick = async e => { // cifrada: la copia lleva las credenciales de SNMP y de los avisos
+      e.preventDefault();
+      const f = await dialog(`<h3>Copia de seguridad cifrada</h3><p>Sin esta contraseña no se puede abrir: guárdala aparte (si se pierde, la copia no sirve).</p>
+        <div class="fields"><div class="field"><label for="bk-p">Contraseña de la copia <span class="dim">· mínimo 8 caracteres</span></label><input id="bk-p" name="p" type="password" minlength="8" autocomplete="new-password" required autofocus></div>
+        <div class="field"><label for="bk-r">Repítela</label><input id="bk-r" name="r" type="password" minlength="8" autocomplete="new-password" required></div></div>`, {ok: 'Descargar'});
+      if (!f) return;
+      if (f.get('p') !== f.get('r')) return toast('Las contraseñas no coinciden', 'bad');
+      toast('Preparando la copia…');
+      const r = await fetch('/api/backup', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({password: f.get('p')})}).catch(() => null);
+      if (!r?.ok) return toast(r ? (await r.json().catch(() => ({}))).error || 'No se pudo hacer la copia' : 'Sin conexión con el servidor', 'bad');
+      const a = Object.assign(document.createElement('a'), {href: URL.createObjectURL(await r.blob()), download: r.headers.get('Content-Disposition').match(/filename="(.+)"/)[1]});
+      a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    };
     $('#al-f').onsubmit = async e => {
       e.preventDefault();
       const body = Object.fromEntries(new FormData(e.target));
@@ -2170,6 +2187,7 @@ const views = {
       const b = e.target.closest('[data-more]'), u = b && us.find(x => x.id === +b.closest('[data-id]').dataset.id); if (!u) return;
       menu(b, u.id === ME.id ? [['Cambiar mi contraseña', () => passDialog(false), {icon: 'edit'}]] : [
         [u.admin ? 'Quitar administrador' : 'Hacer administrador', async () => { await api('users/' + u.id, 'PUT', {admin: !u.admin}); route(false); }, {icon: 'user'}],
+        ...(u.totp ? [['Quitar verificación en dos pasos', async () => { if (await ask('¿Quitar su verificación en dos pasos?', `«${esc(u.name)}» entrará solo con su contraseña hasta que la vuelva a activar.`, 'Quitar')) { await api('users/' + u.id, 'PUT', {totp: false}); toast('Verificación en dos pasos quitada'); route(false); } }, {icon: 'key'}]] : []),
         ['Contraseña nueva', async () => { const pw = genPass(); await api('users/' + u.id, 'PUT', {pass: pw}); await credsDialog('Contraseña provisional nueva', [{name: u.name, pass: pw}]); route(false); }, {icon: 'edit'}], '-',
         ['Borrar usuario', async () => { if (await ask('¿Borrar este usuario?', `«${esc(u.name)}» ya no podrá entrar. Lo que hizo sigue en Actividad.`)) { await api('users/' + u.id, 'DELETE'); toast('Usuario borrado'); route(false); } }, {icon: 'trash', danger: true}]]);
     };
@@ -2440,13 +2458,14 @@ const views = {
   },
   async inv(id) {
     if (!id) {
-      const [items, agents] = await Promise.all([api('items'), ME?.admin ? api('agents') : []]), q = qv(), ro = ME.readonly, sel = new Set();
+      const [items, agents, exps] = await Promise.all([api('items'), ME?.admin ? api('agents') : [], api('expiries')]), q = qv(), ro = ME.readonly, sel = new Set();
       const waiting = agents.filter(a => a.state !== 'adoptado'), code = c => c.toUpperCase().replace(/^(.{4})/, '$1-');
-      const expiring = items.filter(i => i.warranty && daysTo(i.warranty) <= 60).sort((a, b) => a.warranty.localeCompare(b.warranty));
+      const expiring = [...items.filter(i => i.warranty).map(i => ({name: i.name, date: i.warranty, kind: 'garantía', href: '#/inv/' + i.id})),
+        ...exps.map(e => ({name: e.name, date: e.date, kind: e.kind, href: '#/cad'}))].filter(e => daysTo(e.date) <= 60).sort((a, b) => a.date.localeCompare(b.date));
       const hits = items.filter(i => Object.values(i).join(' ').toLowerCase().includes(q));
       crumbs([['Inventario']]);
       app.innerHTML = head('Inventario', items.length ? `${q ? `${hits.length} de ` : ''}${items.length} ${items.length === 1 ? 'equipo' : 'equipos'}` : 'Todo lo que tiene IP, número de serie o enchufe',
-          `<a class="btn ghost" href="#/discover">${ui('search', 16)}Descubrir red</a><button class="btn ghost" id="bulk">${ui('layers', 16)}En serie</button>${ME.admin ? `<button class="btn ghost" id="addpc">${ui('signal', 16)}Añadir PC</button>` : ''}${items.length ? `<button class="btn ghost" id="csv">${ui('box', 16)}Exportar CSV</button>` : ''}` + (items.length ? `<button class="btn" id="add">${ui('plus', 16)}Nuevo equipo</button>` : ''))
+          `<a class="btn ghost" href="#/discover">${ui('search', 16)}Descubrir red</a><a class="btn ghost" href="#/cad">${ui('clock', 16)}Caducidades</a><button class="btn ghost" id="bulk">${ui('layers', 16)}En serie</button>${ME.admin ? `<button class="btn ghost" id="addpc">${ui('signal', 16)}Añadir con Kitty</button>` : ''}${items.length ? `<button class="btn ghost" id="csv">${ui('box', 16)}Exportar CSV</button>` : ''}` + (items.length ? `<button class="btn" id="add">${ui('plus', 16)}Nuevo equipo</button>` : ''))
         + (waiting.length ? `<section class="card" style="margin-bottom:16px"><div class="pad"><h3 class="card-t">Kitty pide entrar <span class="count">${waiting.length}</span></h3>
             <p class="muted small">Equipos con Kitty instalado que han encontrado este catlan. Acepta solo los que reconozcas: el código debe coincidir con el que mostró el instalador en ese equipo.</p></div>
             ${waiting.map(a => `<div data-ag="${a.id}" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;padding:12px 16px;border-top:1px solid var(--line)">
@@ -2454,8 +2473,8 @@ const views = {
                 <br><small class="dim"><span class="mono">${esc(a.ip)}</span> · ${esc(a.os)} · ${esc(ago(a.seen))}</small></div>
               <span class="mono" title="Código de este Kitty">${esc(code(a.code))}</span>
               <div style="display:flex;gap:8px"><button class="btn pri" data-st="adoptado">${ui('check', 15)}Aceptar</button>${a.state === 'pendiente' ? '<button class="btn ghost" data-st="rechazado">Rechazar</button>' : '<button class="btn ghost" data-st="del">Olvidar</button>'}</div></div>`).join('')}</section>` : '')
-        + (expiring.length ? `<section class="card pad" style="margin-bottom:16px"><h3 class="card-t">${ui('clock', 15)}Garantías <span class="count">${expiring.length}</span></h3>
-            <ul class="rel">${expiring.map(i => `<li><a href="#/inv/${i.id}"><span class="badge-ic">${ui(daysTo(i.warranty) < 0 ? 'alert' : 'clock', 16)}</span><span><b>${esc(i.name)}</b><small class="${daysTo(i.warranty) < 0 ? 't-bad' : ''}">${warrantyTxt(i.warranty)} · ${esc(new Date(i.warranty + 'T00:00').toLocaleDateString('es'))}</small></span></a></li>`).join('')}</ul></section>` : '')
+        + (expiring.length ? `<section class="card pad" style="margin-bottom:16px"><h3 class="card-t">${ui('clock', 15)}Caducan pronto <span class="count">${expiring.length}</span></h3>
+            <ul class="rel">${expiring.map(e => `<li><a href="${e.href}"><span class="badge-ic">${ui(daysTo(e.date) < 0 ? 'alert' : 'clock', 16)}</span><span><b>${esc(e.name)}</b><small class="${daysTo(e.date) < 0 ? 't-bad' : ''}">${esc(e.kind)} · ${warrantyTxt(e.date)} · ${esc(new Date(e.date + 'T00:00').toLocaleDateString('es'))}</small></span></a></li>`).join('')}</ul></section>` : '')
         + (items.length ? `<div class="ufil"><input id="ifil" style="width:min(480px,100%)" type="search" placeholder="Filtrar por nombre, IP, tipo, ubicación, estado o nº de serie…" aria-label="Filtrar equipos" autocomplete="off"></div>` : '')
         + (hits.length ? `<div class="card tbl-wrap"><table class="tbl utbl itbl"><thead><tr>${ro ? '' : '<th style="width:36px"><input type="checkbox" id="uall" aria-label="Seleccionar todos"></th>'}<th>Nombre</th><th class="hide-m">Tipo</th><th>IP</th><th class="hide-m">Ubicación</th><th>Estado</th><th class="hide-m">Nº serie</th></tr></thead>
           <tbody class="stagger">${hits.map((i, k) => `<tr data-id="${i.id}" tabindex="0" style="--i:${Math.min(k, 14)}">${ro ? '' : `<td><input type="checkbox" class="usel" value="${i.id}" aria-label="Seleccionar ${esc(i.name)}"></td>`}<td><b>${esc(i.name)}</b></td><td class="muted hide-m">${esc(i.kind)}</td>
@@ -2506,12 +2525,15 @@ const views = {
       $('#add') && ($('#add').onclick = create.item);
       $('#bulk').onclick = itemSeries;
       $('#addpc') && ($('#addpc').onclick = () => {
-        const cmd = `irm ${location.origin}/kitty.ps1 | iex`;
-        dialog(`<h3>Añadir un PC con Kitty</h3><p>En el PC, abre <b>PowerShell como administrador</b> y pega esta línea. Deja una tarea programada que envía su estado cada 5 minutos; no instala ningún programa ni deja archivos.</p>
-          <div style="display:flex;gap:8px;align-items:center"><code class="mono" style="flex:1;padding:10px 12px;border:1px solid var(--line);border-radius:8px;word-break:break-all">${esc(cmd)}</code><button type="button" class="btn" id="pc-copy">${ui('copy', 15)}Copiar</button></div>
-          <p class="muted small">Después aparecerá aquí, en «Kitty pide entrar», para que lo aceptes. Para quitarlo: <span class="mono">Unregister-ScheduledTask Kitty; Remove-Item HKLM:\\SOFTWARE\\Kitty</span></p>`, {ok: 'Listo'});
+        const cmd = `irm ${location.origin}/kitty.ps1 | iex`, sh = `curl -fsSL ${location.origin}/kitty.sh | sudo sh`;
+        const line = (c, id) => `<div style="display:flex;gap:8px;align-items:center"><code class="mono" style="flex:1;padding:10px 12px;border:1px solid var(--line);border-radius:8px;word-break:break-all">${esc(c)}</code><button type="button" class="btn" id="${id}">${ui('copy', 15)}Copiar</button></div>`;
+        dialog(`<h3>Añadir un equipo con Kitty</h3><p><b>Windows</b>: abre PowerShell como administrador y pega esta línea. Deja una tarea programada que envía su estado cada 5 minutos; no instala ningún programa ni deja archivos.</p>${line(cmd, 'pc-copy')}
+          <p class="muted small">Para quitarlo: <span class="mono">Unregister-ScheduledTask Kitty; Remove-Item HKLM:\\SOFTWARE\\Kitty</span></p>
+          <p><b>Linux</b> (con curl): pega esta línea en una terminal. Deja un temporizador de systemd (o cron) que envía lo mismo cada 5 minutos.</p>${line(sh, 'sh-copy')}
+          <p class="muted small">Para quitarlo: <span class="mono">sudo sh /usr/local/lib/kitty-agent.sh quitar</span>. Después aparecerá aquí, en «Kitty pide entrar», para que lo aceptes.</p>`, {ok: 'Listo'});
         document.querySelector('dialog[open]:last-of-type .dlg-a .ghost').remove();
         document.querySelector('#pc-copy').onclick = () => copy(cmd);
+        document.querySelector('#sh-copy').onclick = () => copy(sh);
       });
       app.querySelectorAll('[data-ag] [data-st]').forEach(b => b.onclick = async () => {
         const id = b.closest('[data-ag]').dataset.ag, st = b.dataset.st;
@@ -2520,10 +2542,11 @@ const views = {
       });
       return;
     }
-    const [i, n, refs, log] = await Promise.all([api('items/' + id), names(), api(`items/${id}/refs`), api(`log?kind=item&ref=${id}`)]);
+    const [i, n, refs, log, sys] = await Promise.all([api('items/' + id), names(), api(`items/${id}/refs`), api(`log?kind=item&ref=${id}`), api(`items/${id}/syslog`)]);
     const ref = `[[#${i.id}]]`;
     const rel = [...refs.pages.map(p => ['book', `#/wiki/${p.id}`, p.title, 'Página de la wiki']), ...refs.incidents.map(x => ['ticket', `#/inc/${x.id}`, `#${x.id} ${x.title}`, 'Incidencia · ' + x.status]),
       ...refs.items.map(x => ['box', `#/inv/${x.id}`, x.name, 'Notas de otro equipo']),
+      ...refs.expiries.map(x => ['clock', '#/cad', x.name, `${esc(x.kind)} · ${warrantyTxt(x.date)}`]),
       ...refs.maps.map(m => m.type === 'rack' ? ['rack', `#/racks/${m.id}`, m.name, 'Montado en rack'] : ['nodes', `#/maps/${m.id}`, m.name, 'Aparece en esquema'])];
     crumbs([['Inventario', '#/inv'], [i.name || 'Sin nombre']]);
     const mon = monData || await api('monitor').catch(() => null); // recién abierta la página aún no ha pasado el sondeo
@@ -2545,6 +2568,10 @@ const views = {
           ${rel.length ? `<ul class="rel">${rel.map(([ic, h, t, s]) => `<li><a href="${h}"><span class="badge-ic">${ui(ic, 16)}</span><span><b>${esc(t)}</b><small>${s}</small></span></a></li>`).join('')}</ul>`
             : `<p class="muted small">Aún no aparece en ningún sitio. Pega <code class="mono">${ref}</code> en una página o enlázalo desde un esquema o un rack.</p>`}</section>
           <section class="card pad" style="--i:2"><h3 class="card-t">${ui('clock', 15)}Historial <span class="count">${log.length}</span></h3><div class="scroll">${timeline(log)}</div></section></aside></div>
+        ${sys.length ? `<section class="card pad mt"><h3 class="card-t">${ui('pulse', 15)}Syslog <span class="count">${sys.length}</span><span class="dim small" style="font-weight:400;margin-left:auto">últimos 30 días</span></h3>
+          <div class="scroll" style="max-height:340px"><table class="tbl"><tbody>${sys.map(l => `<tr><td class="mono dim small" style="white-space:nowrap">${esc(date(l.ts).toLocaleString('es'))}</td>
+            <td>${l.sev <= 3 ? `<span class="pill bad"><i></i>${l.sev <= 2 ? 'crítico' : 'error'}</span>` : l.sev === 4 ? '<span class="pill warn"><i></i>aviso</span>' : ''}</td>
+            <td class="mono small" style="word-break:break-word">${esc(l.msg)}</td></tr>`).join('')}</tbody></table></div></section>` : ''}
         <datalist id="dl-status">${STATUSES.map(s => `<option value="${s}">`).join('')}</datalist><datalist id="dl-kind">${Object.values(ICONS).map(([n]) => `<option value="${n.toLowerCase()}">`).join('')}</datalist>`;
     const save = $('#save');
     app.querySelectorAll('.field input,.field textarea').forEach(el => el.oninput = () => { save.disabled = false; onSave = doSave; });
@@ -2565,6 +2592,87 @@ const views = {
       ['Copiar referencia', () => copy(ref), {icon: 'copy'}], '-',
       ['Borrar equipo', async () => { if (await ask('¿Borrar este equipo?', `«${esc(i.name)}» desaparecerá del inventario. Sus enlaces quedarán tachados y habrá una copia en Actividad.`)) { await api('items/' + id, 'DELETE'); toast('Equipo borrado'); location.hash = '#/inv'; } }, {icon: 'trash', danger: true}]]);
   },
+  async cad() {
+    const [exps, items] = await Promise.all([api('expiries'), api('items')]), ro = ME.readonly, byId = Object.fromEntries(items.map(i => [i.id, i]));
+    crumbs([['Inventario', '#/inv'], ['Caducidades']]);
+    app.innerHTML = head('Caducidades', 'Licencias, dominios, certificados y contratos. Avisan 30 días antes y el mismo día, como las garantías.', ro ? '' : `<button class="btn" id="add">${ui('plus', 16)}Nueva</button>`)
+      + (exps.length ? `<div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Nombre</th><th>Tipo</th><th>Caduca</th><th class="hide-m">Equipo</th><th class="hide-m">Notas</th></tr></thead>
+        <tbody class="stagger">${exps.map((e, k) => { const n = daysTo(e.date); return `<tr data-id="${e.id}" tabindex="0" style="--i:${Math.min(k, 14)}"><td><b>${esc(e.name)}</b></td><td class="muted">${esc(e.kind)}</td>
+          <td><span class="pill ${n < 0 ? 'bad' : n <= 30 ? 'warn' : ''}"><i></i>${warrantyTxt(e.date)}</span> <span class="dim small">${esc(new Date(e.date + 'T00:00').toLocaleDateString('es'))}</span></td>
+          <td class="hide-m">${e.item && byId[e.item] ? `<a href="#/inv/${+e.item}">${esc(byId[e.item].name)}</a>` : ''}</td><td class="muted hide-m">${esc(e.notes)}</td></tr>`; }).join('')}</tbody></table></div>`
+        : empty('clock', 'Nada que caduque todavía', 'Añade licencias, dominios o contratos con su fecha y catlan avisará por tus canales. Las garantías de los equipos se ponen en su ficha.', ro ? '' : `<button class="btn" id="add2">${ui('plus', 16)}Nueva</button>`));
+    const edit = async (e = {kind: 'licencia'}) => {
+      const f = await dialog(`<h3>${e.id ? 'Editar caducidad' : 'Nueva caducidad'}</h3><div class="fields two">
+        <div class="field full"><label for="x-n">Nombre</label><input id="x-n" name="name" required maxlength="200" value="${esc(e.name || '')}" placeholder="Microsoft 365, midominio.es…" autofocus></div>
+        <div class="field"><label for="x-k">Tipo</label><select id="x-k" name="kind">${optList(['licencia', 'dominio', 'certificado', 'contrato', 'soporte', 'otro'], e.kind)}</select></div>
+        <div class="field"><label for="x-d">Caduca el</label><input id="x-d" name="date" type="date" required value="${esc(e.date || '')}"></div>
+        <div class="field full"><label for="x-i">Equipo <span class="dim">· opcional</span></label><select id="x-i" name="item">${optList(items, e.item, 'Ninguno')}</select></div>
+        <div class="field full"><label for="x-o">Notas</label><textarea id="x-o" name="notes" rows="3" maxlength="5000">${esc(e.notes || '')}</textarea></div></div>`, {ok: 'Guardar'});
+      if (!f) return;
+      const d = {name: f.get('name').trim(), kind: f.get('kind'), date: f.get('date'), item: f.get('item') ? +f.get('item') : null, notes: f.get('notes')};
+      try { await (e.id ? api('expiries/' + e.id, 'PUT', d) : api('expiries', 'POST', d)); } catch { return; }
+      toast('Guardado'); route(false);
+    };
+    [$('#add'), $('#add2')].forEach(b => b && (b.onclick = () => edit()));
+    if (!ro) app.querySelectorAll('tr[data-id]').forEach(tr => {
+      const e = exps.find(x => x.id === +tr.dataset.id);
+      tr.onclick = ev => !ev.target.closest('a') && menu(tr, [['Editar', () => edit(e), {icon: 'edit'}], '-',
+        ['Borrar', async () => { if (await ask('¿Borrar esta caducidad?', `«${esc(e.name)}» ya no avisará. Queda una copia en Actividad.`)) { await api('expiries/' + e.id, 'DELETE'); toast('Borrada'); route(false); } }, {icon: 'trash', danger: true}]]);
+      tr.onkeydown = ev => ev.key === 'Enter' && tr.onclick(ev);
+    });
+  },
+  async redes(id) {
+    const ro = ME.readonly;
+    const subnetDialog = async (n = {}) => {
+      const f = await dialog(`<h3>${n.id ? 'Editar red' : 'Nueva red'}</h3><div class="fields two">
+        <div class="field"><label for="n-c">Red</label><input id="n-c" name="cidr" class="mono" required placeholder="10.0.0.0/24" value="${esc(n.cidr || '')}" spellcheck="false" autofocus></div>
+        <div class="field"><label for="n-v">VLAN <span class="dim">· opcional</span></label><input id="n-v" name="vlan" maxlength="40" value="${esc(n.vlan || '')}"></div>
+        <div class="field full"><label for="n-n">Nombre</label><input id="n-n" name="name" maxlength="200" value="${esc(n.name || '')}" placeholder="Oficina, servidores, cámaras…"></div>
+        <div class="field full"><label for="n-o">Notas</label><textarea id="n-o" name="notes" rows="3">${esc(n.notes || '')}</textarea></div></div>`, {ok: 'Guardar'});
+      if (!f) return;
+      const d = Object.fromEntries(['cidr', 'vlan', 'name', 'notes'].map(k => [k, f.get(k).trim()]));
+      try { const r = await (n.id ? api('subnets/' + n.id, 'PUT', d) : api('subnets', 'POST', d)); location.hash = '#/redes/' + r.id; route(false); } catch {}
+    };
+    if (!id) {
+      const nets = await Promise.all((await api('subnets')).map(n => api(`subnets/${n.id}/ips`)));
+      crumbs([['Redes']]);
+      app.innerHTML = head('Redes', 'Subredes, IPs libres y en uso, y conflictos con el inventario', ro ? '' : `<button class="btn" id="add">${ui('plus', 16)}Nueva red</button>`)
+        + (nets.length ? `<div class="card tbl-wrap"><table class="tbl utbl"><thead><tr><th>Red</th><th>Nombre</th><th class="hide-m">VLAN</th><th>Uso</th><th>Conflictos</th></tr></thead>
+          <tbody class="stagger">${nets.map((n, k) => { const bad = n.ips.filter(x => x.conflict).length, pct = Math.round(100 * n.used / n.size);
+            return `<tr data-id="${n.id}" tabindex="0" style="--i:${Math.min(k, 14)}"><td class="mono"><b>${esc(n.cidr)}</b></td><td>${esc(n.name)}</td><td class="muted hide-m">${esc(n.vlan)}</td>
+              <td><span class="small">${n.used} de ${n.size} · ${pct}%</span><div style="height:5px;border-radius:3px;background:var(--line);margin-top:4px;min-width:90px"><div style="height:100%;width:${Math.min(100, pct)}%;border-radius:3px;background:${pct >= 90 ? 'var(--bad)' : 'var(--acc)'}"></div></div></td>
+              <td>${bad ? `<span class="pill warn"><i></i>${bad}</span>` : '<span class="dim">—</span>'}</td></tr>`; }).join('')}</tbody></table></div>`
+          : empty('net', 'Aún no hay redes', 'Añade tus subredes y catlan te dirá qué IPs están libres, cuáles usa el inventario y cuáles responden sin estar en él.', ro ? '' : `<button class="btn" id="add2">${ui('plus', 16)}Nueva red</button>`));
+      [$('#add'), $('#add2')].forEach(b => b && (b.onclick = () => subnetDialog()));
+      app.querySelectorAll('tr[data-id]').forEach(tr => { tr.onclick = () => location.hash = '#/redes/' + tr.dataset.id; tr.onkeydown = e => e.key === 'Enter' && tr.onclick(); });
+      return;
+    }
+    const n = await api(`subnets/${id}/ips`), ip2n = a => a.split('.').reduce((x, y) => x * 256 + +y, 0), n2ip = v => [24, 16, 8, 0].map(b => Math.floor(v / 2 ** b) % 256).join('.');
+    const byIp = Object.fromEntries(n.ips.map(x => [x.ip, x])), [base, bits] = n.cidr.split('/'), total = 2 ** (32 - +bits), small = total <= 1024;
+    const bad = n.ips.filter(x => x.conflict);
+    crumbs([['Redes', '#/redes'], [n.cidr]]);
+    const who = x => x.items.length ? x.items.map(i => `<a href="#/inv/${i.id}">${esc(i.name)}</a>`).join(', ') : `<span class="dim">${esc(x.seen || 'sin nombre')}</span>`;
+    app.innerHTML = head(`<span class="mono">${esc(n.cidr)}</span>${n.name ? ' · ' + esc(n.name) : ''}`,
+        [`${n.used} en uso`, `${n.free} libres`, n.vlan && 'VLAN ' + esc(n.vlan), n.scanned ? `escaneada ${esc(ago(n.scanned))}` : 'sin escanear'].filter(Boolean).join(' &nbsp;·&nbsp; '),
+        (ro ? '' : `${small ? `<button class="btn" id="scan">${ui('search', 16)}Escanear</button>` : ''}<button class="btn ghost" id="ed">${ui('edit', 15)}Editar</button>`) + moreBtn)
+      + (n.notes ? `<p class="muted">${esc(n.notes)}</p>` : '')
+      + (bad.length ? `<section class="card pad" style="margin-bottom:16px"><h3 class="card-t">${ui('alert', 15)}Conflictos <span class="count">${bad.length}</span></h3><table class="tbl"><tbody>${bad.map(x => `<tr>
+          <td style="width:1%"><span class="pill ${x.conflict === 'duplicada' ? 'bad' : 'warn'}"><i></i>${x.conflict}</span></td><td class="mono" style="width:1%;white-space:nowrap">${esc(x.ip)}</td><td>${who(x)}</td></tr>`).join('')}</tbody></table>
+          <p class="muted small">«Duplicada»: dos equipos del inventario con la misma IP. «Sin registrar»: responde en la red y no está en el inventario (añádelo desde Inventario → Descubrir red).</p></section>` : '')
+      + (n.next_free.length ? `<p class="small">Libres: ${n.next_free.map(x => `<button class="chip mono" data-ip="${x}" title="Copiar">${x}</button>`).join(' ')}${n.free > n.next_free.length ? ' …' : ''}</p>` : '')
+      + (small ? `<section class="card pad mt"><div id="ipgrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(30px,1fr));gap:3px">${Array.from({length: total}, (_, k) => {
+          const a = n2ip(ip2n(base) + k), x = byIp[a], edge = total > 2 && (k === 0 || k === total - 1);
+          const c = edge ? 'transparent' : !x ? 'var(--line)' : x.conflict === 'duplicada' ? 'var(--bad)' : x.conflict ? 'var(--warn)' : 'var(--ok)';
+          return `<button class="ipc" data-ip="${a}" title="${a}${x ? ' · ' + esc(x.items.map(i => i.name).join(', ') || x.seen || 'responde') : edge ? (k ? ' · difusión' : ' · red') : ' · libre'}" style="height:22px;border:0;border-radius:4px;background:${c};font-size:9px;color:${x ? '#fff' : 'var(--tx3)'};cursor:pointer">${a.split('.')[3]}</button>`; }).join('')}</div>
+          <p class="dim small" style="margin:10px 0 0">Verde: en el inventario · amarillo: responde sin estar en él · rojo: IP duplicada · gris: libre. Pulsa una IP libre para copiarla.</p></section>` : '')
+      + (n.ips.length ? `<div class="card tbl-wrap mt"><table class="tbl"><thead><tr><th>IP</th><th>Equipo</th><th>${n.scanned ? 'Responde' : ''}</th><th></th></tr></thead><tbody>${n.ips.map(x => `<tr><td class="mono">${esc(x.ip)}</td><td>${who(x)}</td>
+          <td>${x.up == null ? '' : x.up ? '<span class="pill ok"><i></i>sí</span>' : '<span class="pill"><i></i>no</span>'}</td><td>${x.conflict ? `<span class="pill ${x.conflict === 'duplicada' ? 'bad' : 'warn'}"><i></i>${x.conflict}</span>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '');
+    app.querySelectorAll('[data-ip]').forEach(b => b.onclick = () => { const x = byIp[b.dataset.ip]; if (x?.items.length) location.hash = '#/inv/' + x.items[0].id; else copy(b.dataset.ip); });
+    $('#ed') && ($('#ed').onclick = () => subnetDialog(n));
+    $('#scan') && ($('#scan').onclick = async e => { e.currentTarget.disabled = true; toast(`Escaneando ${n.cidr}…`); try { await api(`subnets/${n.id}/scan`, 'POST'); toast('Escaneo terminado'); } catch {} route(false); });
+    $('#more').onclick = e => menu(e.currentTarget, [['Copiar red', () => copy(n.cidr), {icon: 'copy'}], ...(ro ? [] : ['-',
+      ['Borrar red', async () => { if (await ask('¿Borrar esta red?', `«${esc(n.cidr)}» desaparece de Redes. Los equipos del inventario no se tocan.`)) { await api('subnets/' + n.id, 'DELETE'); toast('Red borrada'); location.hash = '#/redes'; } }, {icon: 'trash', danger: true}]])]);
+  },
   async maps(id) {
     if (!id) {
       const maps = (await api('maps')).filter(m => m.type !== 'rack' && m.name.toLowerCase().includes(qv()));
@@ -2581,8 +2689,8 @@ const views = {
     const racks = Object.fromEntries(all.filter(x => x.type === 'rack').map(r => [r.id, r]));
     const rackData = {}, rackOf = id => rackData[id] ||= api('maps/' + id).catch(() => null); // vista previa, una vez por sesión
     const byId = Object.fromEntries(items.map(i => [i.id, i])), d = {nodes: [], links: [], ...m.data};
-    let selN = null, selL = null, connecting = false, drag = null, pan = null, timer, first = true;
-    const save = () => { clearTimeout(timer); timer = setTimeout(() => api('maps/' + m.id, 'PUT', {name: $('#mname').value, data: d}), 400); };
+    let selN = null, selL = null, connecting = false, drag = null, pan = null, timer, first = true, saving = Promise.resolve(); // saving: un guardado detrás de otro, con la versión que devolvió el anterior
+    const save = () => { clearTimeout(timer); timer = setTimeout(() => saving = saving.then(() => putFresh('maps/' + m.id, {name: $('#mname').value, data: d}, m.version)).then(x => m.version = x.version, () => {}), 400); };
     app.dataset.w = 'fill';
     crumbs([['Esquemas', '#/maps'], [m.name]]);
     app.innerHTML = `<div class="ed-head"><input id="mname" class="title-in" value="${esc(m.name)}" aria-label="Nombre del esquema"><span class="dim small" id="count"></span>${moreBtn}</div>
@@ -2950,6 +3058,11 @@ const views = {
       if (kit) $('#kit-info').innerHTML = `<table class="data-t"><tbody>${[['Sistema', inf.descr], ['Modelo', inf.model], ['Procesador', inf.cpu && `${inf.cpu}${inf.cores ? ` · ${inf.cores} hilos` : ''}`],
           ['Memoria', inf.mem_total && gb(inf.mem_total)], ['Discos', (inf.disks || []).map(x => `${x.name} ${gb(x.free)} libres de ${gb(x.total)}`).join(' · ')],
           ['IPs', (inf.ips || []).join(' · ')], ['Nº de serie', inf.serial]].filter(r => r[1]).map(([k, v]) => `<tr><td class="dim">${k}</td><td>${esc(v)}</td></tr>`).join('')}</tbody></table>`;
+      const evs = kit ? inf.events || [] : [];
+      $('#ev-card').hidden = !evs.length;
+      if (evs.length) $('#ev-list').innerHTML = `<div class="tbl-wrap"><table class="data-t"><thead><tr><th>Cuándo</th><th>Nivel</th><th class="hide-m">Registro</th><th>Origen</th><th>Mensaje</th></tr></thead><tbody>${evs.map(e =>
+        `<tr><td style="white-space:nowrap" title="${esc(when(e.time))}">${esc(ago(e.time))}</td><td class="${e.level === 1 ? 't-bad' : 'dim'}">${e.level === 1 ? 'Crítico' : 'Error'}</td>
+          <td class="dim hide-m">${e.log === 'System' ? 'Sistema' : e.log === 'Application' ? 'Aplicación' : esc(e.log)}</td><td>${esc(e.source)} <span class="mono dim">${e.code}</span></td><td class="small" style="text-align:left">${esc(e.msg) || '<span class="dim">sin mensaje</span>'}</td></tr>`).join('')}</tbody></table></div>`;
       lineChart($('#c-temp'), temps, {unit: '°C', limit: h.temp_max, title: 'Temperatura', more: tMore, empty: 'Este equipo no informa de temperaturas.'});
       diskBars($('#c-disk'), lat('disk:').sort((a, b) => b.value - a.value), h.disk_max);
       lineChart($('#c-disk-h'), dh, {unit: '%', lo: 0, hi: 100, limit: h.disk_max, h: 170, title: 'Ocupación de discos en el tiempo', more: dMore, empty: ''});
@@ -2993,6 +3106,7 @@ const views = {
       + `<div id="h-state"></div><div class="kpi-row" id="kpis"></div>
       <section class="card pad" id="kit-card" hidden style="margin-bottom:16px"><h3 class="card-t">Equipo</h3><div id="kit-info"></div>
         <p class="dim small" style="margin:8px 0 0">Lo envía Kitty. Solo lo justo para ver fallos: nada de usuarios, programas ni archivos.</p></section>
+      <section class="card pad" id="ev-card" hidden style="margin-bottom:16px"><h3 class="card-t">Visor de eventos <span class="dim small" style="font-weight:400">· críticos y errores de los últimos 7 días</span></h3><div id="ev-list"></div></section>
       <div class="charts stagger"><section class="card pad" style="--i:0" id="temp-card"><h3 class="card-t">Temperatura</h3><div id="c-temp"></div></section>
         <section class="card pad" style="--i:1"><h3 class="card-t">Ocupación de discos</h3><div id="c-disk"></div><div id="c-disk-h" class="mt"></div></section>
         <section class="card pad" style="--i:2"><h3 class="card-t">CPU y memoria</h3><div id="c-cpu"></div></section>
@@ -3045,8 +3159,8 @@ const views = {
     const [r, items] = await Promise.all([api('maps/' + id), api('items')]);
     const byId = Object.fromEntries(items.map(i => [i.id, i])), d = {height: 42, devices: [], ...r.data, type: 'rack'};
     const UH = 24; // px por U
-    let sel = null, drag = null, timer, first = true;
-    const save = () => { clearTimeout(timer); timer = setTimeout(() => api('maps/' + r.id, 'PUT', {name: $('#mname').value, data: d}), 400); };
+    let sel = null, drag = null, timer, first = true, saving = Promise.resolve();
+    const save = () => { clearTimeout(timer); timer = setTimeout(() => saving = saving.then(() => putFresh('maps/' + r.id, {name: $('#mname').value, data: d}, r.version)).then(x => r.version = x.version, () => {}), 400); };
     // ¿cabe un equipo de h U con su U inferior en u, sin pisar a otro?
     const free = (u, h, skip) => u >= 1 && u + h - 1 <= d.height && !d.devices.some(x => x !== skip && u < x.u + x.h && x.u < u + h);
     const dev = () => d.devices.find(x => x.id === sel);
@@ -3195,7 +3309,7 @@ async function route(animate = true) {
   document.body.classList.remove('nav-open');
   const [, view = 'home', ...rest] = location.hash.split('/');
   const v = views[view] ? view : 'home';
-  document.querySelectorAll('#nav a').forEach(a => { a.classList.toggle('on', a.dataset.v === ({p: 'wiki', discover: 'inv', sla: 'monitor', users: 'opts'}[v] || v)); a.toggleAttribute('aria-current', a.classList.contains('on')); });
+  document.querySelectorAll('#nav a').forEach(a => { a.classList.toggle('on', a.dataset.v === ({p: 'wiki', discover: 'inv', cad: 'inv', sla: 'monitor', users: 'opts'}[v] || v)); a.toggleAttribute('aria-current', a.classList.contains('on')); });
   moveInd();
   delete app.dataset.w;
   try { await views[v](rest.join('/') || null); }
@@ -3365,6 +3479,7 @@ function showLogin() {
   el.innerHTML = `<form class="login-card"><span class="login-logo">${ui('cat', 30)}</span><h1>catlan</h1><p>El gato amigo de los IT</p>
     <label>Usuario<input name="name" autocomplete="username" required autofocus></label>
     <label>Contraseña<input name="pass" type="password" autocomplete="current-password" required></label>
+    <label hidden>Código de tu app de autenticación<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7"></label>
     <p class="login-err" role="alert"></p><button class="btn pri">Entrar</button></form>`;
   document.body.append(el);
   const off = [...document.querySelectorAll('body > :not(#login):not([inert])')]; // detrás no se llega con el teclado
@@ -3375,8 +3490,10 @@ function showLogin() {
     e.preventDefault();
     const r = await fetch('/api/login', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(Object.fromEntries(new FormData(f)))}).catch(() => null);
     if (!r?.ok) { // sacudida y mensaje: nunca se dice si fallaba el usuario o la contraseña
-      f.querySelector('.login-err').textContent = r ? (await r.json().catch(() => ({}))).error || 'No se pudo entrar' : 'Sin conexión con el servidor';
-      f.classList.remove('bad'); void f.offsetWidth; f.classList.add('bad'); f.pass.select(); return;
+      const e = r ? await r.json().catch(() => ({})) : {};
+      f.querySelector('.login-err').textContent = r ? e.error || 'No se pudo entrar' : 'Sin conexión con el servidor';
+      if (e.totp) { f.code.parentNode.hidden = false; f.code.required = true; f.code.select(); } // la contraseña valía: falta el código
+      f.classList.remove('bad'); void f.offsetWidth; f.classList.add('bad'); if (!e.totp) f.pass.select(); return;
     }
     off.forEach(x => x.inert = false);
     anim(el, [{opacity: 1}, {opacity: 0}], {duration: 250, fill: 'forwards'})?.finished.then(() => el.remove()) ?? el.remove();
@@ -3409,7 +3526,26 @@ async function boot() {
   booted = true; route(); pollMonitor(); setInterval(pollMonitor, 10000);
   if (!tourSeen()) setTimeout(() => tour(), 700); // primera vez de este usuario: el paseo
 }
+// Verificación en dos pasos: secreto para la app (Google Authenticator, Aegis, 1Password…) y un código para confirmar
+async function totpDialog() {
+  if (ME.totp) {
+    const f = await dialog(`<h3>Quitar la verificación en dos pasos</h3><p>Al entrar ya solo te pedirá la contraseña.</p>
+      <div class="field"><label for="tf-p">Tu contraseña</label><input id="tf-p" name="pass" type="password" autocomplete="current-password" required autofocus></div>`, {ok: 'Quitar', danger: true});
+    if (f) { ME = await api('me/totp', 'POST', {off: true, pass: f.get('pass')}).catch(() => ME); if (!ME.totp) toast('Verificación en dos pasos quitada'); }
+    return;
+  }
+  const {secret, uri} = await api('me/totp', 'POST', {});
+  for (;;) {
+    const f = await dialog(`<h3>Verificación en dos pasos</h3><p>En tu app de autenticación, añade una cuenta con esta clave (o abre el enlace en el móvil). Desde entonces, al entrar te pedirá también su código de 6 cifras.</p>
+      <p><code style="user-select:all;font-size:15px;letter-spacing:1px">${esc(secret.match(/.{4}/g).join(' '))}</code> · <a href="${esc(uri)}">abrir en la app</a></p>
+      <div class="field"><label for="tf-c">Código que muestra la app</label><input id="tf-c" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" required autofocus></div>
+      <p class="small muted">Por Basic (scripts) ya no podrás entrar con este usuario. Si pierdes el móvil, un administrador te la quita.</p>`, {ok: 'Activar'});
+    if (!f) return;
+    try { ME = await api('me/totp', 'POST', {secret, code: f.get('code')}); toast('Verificación en dos pasos activada'); return; } catch {}
+  }
+}
 $('#user-btn').onclick = e => menu(e.currentTarget, [['Cambiar contraseña', () => passDialog(false), {icon: 'edit'}],
+  [ME?.totp ? 'Quitar verificación en dos pasos' : 'Verificación en dos pasos', totpDialog, {icon: 'key'}],
   ...(ME?.admin ? [['Opciones', () => { location.hash = '#/opts'; }, {icon: 'cog'}]] : []), '-',
   ['Cerrar sesión', async () => { await api('logout', 'POST'); location.reload(); }, {icon: 'x'}]]);
 applySettings();

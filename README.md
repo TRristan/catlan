@@ -42,6 +42,9 @@ van sus discos y qué incidencias tiene abiertas. Con historial de cada cambio.
 | <img src="docs/screenshots/equipo.png" alt="Ficha de un equipo"> | **Ficha de cada equipo** · copiar IP, ping al momento, abrir su web, su estado en el monitor y todo lo que lo menciona: páginas, esquemas, racks e incidencias. |
 | <img src="docs/screenshots/topologia.png" alt="Topología automática"> | **Esquemas y topología automática** · diagramas de red con iconos y, con un clic, catlan lee **LLDP, CDP y la tabla MAC** de un switch y dibuja qué equipo está en qué puerto. |
 | <img src="docs/screenshots/rack.png" alt="Rack"> | **Racks** · armarios montados U a U, con bocas de switch, patch panel y PDU anotables. |
+| | **Redes (IPAM)** · subredes con sus IPs libres y en uso, cuadrícula de ocupación, escaneo y **conflictos**: IP repetida en el inventario o equipo que responde sin estar en él. |
+| | **Caducidades** · licencias, dominios, certificados y contratos con aviso 30 días antes y el mismo día, como las garantías. |
+| | **Syslog** · catlan escucha en UDP 514 y lo que envía cada equipo del inventario sale en su ficha (30 días). |
 | <img src="docs/screenshots/monitor.png" alt="Monitor"> | **Monitor** · ping, puertos TCP, webs, certificados SSL y DNS cada pocos segundos. Avisa en pantalla, con el **sonido de cada dispositivo** y por correo, Telegram o webhook. Si cae un switch, avisa de él y no de todo lo que cuelga de él. Informe mensual de disponibilidad. |
 | <img src="docs/screenshots/salud-kittens.png" alt="Salud"> | **Salud** · temperaturas, discos, ventiladores, RAID y puertos por **SNMP** (Synology, QNAP, Cisco, HP/Aruba, Ubiquiti, MikroTik…), grabadores Hikvision y **PCs Windows con Kitty**, con gráficos de hasta 90 días. |
 | <img src="docs/screenshots/incidencias.png" alt="Incidencias"> | **Incidencias** · prioridad, estado, persona o grupo asignado, seguimiento e incidencias hijas. Las críticas avisan por tus canales. |
@@ -50,7 +53,8 @@ van sus discos y qué incidencias tiene abiertas. Con historial de cada cambio.
 | <img src="docs/screenshots/opciones.png" alt="Opciones"> | **Opciones** (administradores) · usuarios y grupos con permisos de edición o solo vista, **avisos** configurables con prueba, **copia de seguridad** descargable y zona de peligro. |
 
 Además: **dashboard** personalizable (arrastrar, agrandar, líneas, barras o tarta), **Actividad** con una foto de cada versión,
-**tutorial** guiado la primera vez, aviso si dos personas editan lo mismo a la vez, y la web se adapta al móvil.
+**tutorial** guiado la primera vez, aviso si dos personas editan lo mismo a la vez (wiki, inventario, esquemas, racks e
+incidencias), y la web se adapta al móvil.
 
 <p align="center">
   <img src="docs/screenshots/dashboard-claro.png" width="64%" alt="Tema claro">
@@ -93,13 +97,16 @@ Abre **http://localhost:8080** y entra con **admin / admin**: catlan te pide cam
 7. **PCs Windows**: en **Inventario → Añadir PC** copia una línea, pégala en PowerShell como administrador en el PC y
    acéptalo cuando pida entrar. Aparecerá en **Salud → Kittens**.
 
-## Kitty: el estado de los PCs Windows, sin instalar programas
+## Kitty: el estado de los PCs Windows y Linux, sin instalar programas
 
 `irm http://tu-catlan:8080/kitty.ps1 | iex` deja en el PC una **tarea programada** (cada 5 minutos y al arrancar) con
 el script en línea: ningún `.exe` y ningún archivo en el equipo. Un administrador acepta cada PC en catlan, y desde
-entonces envía **solo** nombre, sistema, modelo, CPU, memoria, discos, IPs, tiempo encendido y nº de serie. Nada de
+entonces envía **solo** nombre, sistema, modelo, CPU, memoria, discos, IPs, tiempo encendido, nº de serie y los **errores y críticos del Visor de eventos** (Sistema y Aplicación, con las rutas de usuario tapadas), que se ven en su ficha de Salud; un crítico, como un apagado inesperado, avisa. Nada de
 usuarios, programas, procesos ni archivos. Para quitarlo:
 `Unregister-ScheduledTask Kitty; Remove-Item HKLM:\SOFTWARE\Kitty`.
+
+En **Linux** (con curl), `curl -fsSL http://tu-catlan:8080/kitty.sh | sudo sh` deja un temporizador de systemd (o cron)
+que envía lo mismo, con los errores y críticos del journal. Para quitarlo: `sudo sh /usr/local/lib/kitty-agent.sh quitar`.
 
 ## Tus datos
 
@@ -107,9 +114,12 @@ usuarios, programas, procesos ni archivos. Para quitarlo:
 - catlan **solo se conecta** a los equipos y redes que tú le pidas vigilar, leer o descubrir, y a los canales de aviso
   que configures (tu servidor de correo, `api.telegram.org` si pones un bot, tu webhook).
 - Contraseñas de usuario con PBKDF2-SHA256 (600 000 iteraciones); 10 intentos fallidos bloquean la IP 15 minutos.
-  Las credenciales de SNMP y de los avisos nunca salen por la web, pero **sí van en la copia de seguridad**: guárdala
-  como algo sensible.
-- **Sin HTTPS propio**: si catlan sale de tu red local, ponlo detrás de un proxy con HTTPS (Caddy, nginx, Traefik).
+- **Verificación en dos pasos** (TOTP, cualquier app de autenticación) desde el menú de tu usuario. Quien la tiene no
+  entra por Basic; si pierde el móvil, un administrador se la quita.
+- Las credenciales de SNMP y de los avisos nunca salen por la web. Van en la copia de seguridad, por eso la copia que
+  baja la web **va cifrada con una contraseña** (PBKDF2 + SHAKE-256 + HMAC-SHA256).
+- **HTTPS propio** opcional con `CATLAN_CERT` y `CATLAN_KEY`; o, si catlan sale de tu red local, detrás de un proxy con
+  HTTPS (Caddy, nginx, Traefik). Con un certificado autofirmado, Kitty no conecta hasta que el PC confíe en él.
 
 ## Configuración
 
@@ -120,6 +130,8 @@ Todo se configura desde la web. Opcionalmente, con variables de entorno:
 | `CATLAN_PORT` | `8080` | Puerto |
 | `CATLAN_DATA` | `./data` | Carpeta de la base de datos |
 | `CATLAN_PASSWORD` | (vacío) | Contraseña inicial de `admin`. Vacía: `admin`, a cambiar al entrar |
+| `CATLAN_SYSLOG_PORT` | `514` | Puerto UDP del receptor de syslog (`0`: sin syslog; en Linux, 514 necesita root o `CAP_NET_BIND_SERVICE`) |
+| `CATLAN_CERT` · `CATLAN_KEY` | (vacío) | Rutas del certificado y su clave (PEM): catlan sirve HTTPS en `CATLAN_PORT` |
 | `CATLAN_SMTP_HOST` · `_PORT` · `_USER` · `_PASS` | (vacío) · `587` | Correo de avisos (465 = SSL directo). Lo de **Opciones → Avisos** manda sobre esto |
 | `CATLAN_MAIL_FROM` · `CATLAN_MAIL_TO` | (vacío) | Remitente y destinatarios (separados por comas) |
 | `CATLAN_TELEGRAM_TOKEN` · `CATLAN_TELEGRAM_CHAT` | (vacío) | Avisos por Telegram |
@@ -127,8 +139,15 @@ Todo se configura desde la web. Opcionalmente, con variables de entorno:
 
 ## Copias de seguridad
 
-**Opciones → Descargar copia de seguridad** baja toda la base de datos en un archivo `.db`; o copia `data/catlan.db`
-con catlan parado. Para restaurar, sustituye `data/catlan.db` por la copia.
+**Opciones → Descargar copia de seguridad** baja toda la base de datos cifrada con la contraseña que elijas (`.catlan`);
+o copia `data/catlan.db` con catlan parado. Para restaurar, con catlan parado:
+
+```bash
+python catlan.py descifrar catlan-20261120-1800.catlan data/catlan.db
+```
+
+Al arrancar, catlan aplica las migraciones de base de datos que falten (numeradas, guarda una copia antes) y se niega a
+abrir una base de datos de una versión más nueva.
 
 ## Desarrollo y tests
 
@@ -147,8 +166,7 @@ sin dependencias).
 - **WIP**: la interfaz y la API pueden cambiar entre versiones.
 - Perfiles SNMP de Cisco, HP/Aruba, Ubiquiti, MikroTik y Hikvision **sin probar todavía con hardware real**;
   la auto-topología está probada con agentes simulados (snmpsim), no con un switch físico.
-- Esquemas, racks e incidencias: si dos personas editan a la vez, gana la última (la wiki y el inventario sí avisan).
-- Sin HTTPS propio ni actualizaciones automáticas.
+- Sin actualizaciones automáticas.
 
 ## Licencia
 
