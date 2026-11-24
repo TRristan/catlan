@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """catlan: el gato amigo de los IT. Wiki + inventario + esquemas + racks + monitor. Solo stdlib de Python."""
-import base64, hashlib, hmac, json, os, random, re, secrets, smtplib, socket, sqlite3, ssl, subprocess, sys, threading, time, urllib.error, urllib.request
+import base64, gzip, hashlib, hmac, json, os, random, re, secrets, smtplib, signal, socket, sqlite3, ssl, subprocess, sys, threading, time, urllib.error, urllib.request
 from datetime import datetime, timedelta, timezone
 import ipaddress
 import xml.etree.ElementTree as ET
@@ -88,18 +88,47 @@ if __name__ == "__main__" and len(sys.argv) == 4 and sys.argv[1] == "descifrar":
     raise SystemExit(f"Descifrada en {sys.argv[3]}")
 
 DATA.mkdir(parents=True, exist_ok=True)
-db = sqlite3.connect(DATA / "catlan.db", check_same_thread=False)
-db.row_factory = sqlite3.Row
+DB_PATH = DATA / "catlan.db"
+
+
+def connect(**kw):
+    """WAL: los lectores no esperan al que escribe y un corte de luz no deja la BD a medias.
+    busy_timeout: si la BD está ocupada, espera hasta 5 s en vez de fallar con «database is locked»."""
+    c = sqlite3.connect(DB_PATH, timeout=5, **kw)
+    c.row_factory = sqlite3.Row
+    c.execute("PRAGMA journal_mode=WAL")
+    c.execute("PRAGMA synchronous=NORMAL")
+    c.execute("PRAGMA busy_timeout=5000")
+    return c
+
+
+db = connect(check_same_thread=False)  # la única conexión que escribe, siempre con el candado
 lock = threading.Lock()
+_local = threading.local()
+
+
+def reader():
+    """Conexión de solo lectura de este hilo: una exportación o una copia larga no congelan al resto."""
+    if getattr(_local, "db", None) is None:
+        _local.db = connect(isolation_level=None)
+        _local.db.execute("PRAGMA query_only=1")
+    return _local.db
+
+
+INTEGRITY = db.execute("PRAGMA integrity_check").fetchone()[0]
+if INTEGRITY != "ok":
+    print("ATENCIÓN: la base de datos tiene daños (PRAGMA integrity_check):", INTEGRITY,
+          "\nRestaura la última copia de data/backups/ con catlan parado.")
 
 
 def backup_to(path):
-    """Copia completa y consistente de la BD a path."""
-    bak = sqlite3.connect(path)
+    """Copia completa y consistente de la BD a path, desde su propia conexión: no para a nadie."""
+    src, bak = connect(), sqlite3.connect(path)
     try:
-        db.backup(bak)
+        src.backup(bak)
     finally:
         bak.close()
+        src.close()
 
 
 SCHEMA = """
@@ -167,6 +196,7 @@ MIGRATIONS = (
     "CREATE INDEX syslog_i ON syslog(item, ts)",
     "CREATE TABLE subnets(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT '', cidr TEXT NOT NULL DEFAULT '', vlan TEXT DEFAULT '', "
     "notes TEXT DEFAULT '', scan TEXT, scanned TEXT, updated TEXT DEFAULT CURRENT_TIMESTAMP)",
+    "ALTER TABLE checks ADD COLUMN mute_from TEXT", "ALTER TABLE sources ADD COLUMN mute_from TEXT",
 )
 LEGACY = 19  # las de antes de numerarlas: una BD vieja (user_version 0) puede tener ya cualquiera de ellas
 
@@ -255,7 +285,9 @@ class Rows(list):
 
 
 def q(sql, args=()):
-    # Todo dentro del candado: con un cursor leído fuera, otro hilo puede vaciarlo (salían 401 sueltos con sesión válida)
+    if sql.lstrip()[:6].upper() == "SELECT":  # lecturas: con la conexión del hilo (WAL), sin esperar al candado
+        return Rows(reader().execute(sql, args).fetchall())
+    # Escrituras dentro del candado: con un cursor leído fuera, otro hilo puede vaciarlo (salían 401 sueltos con sesión válida)
     with lock:
         cur = db.execute(sql, args)
         out = Rows(cur.fetchall())
@@ -286,14 +318,21 @@ def login_ok(name, pw, code=""):
     """id del usuario, None si no vale, o False si la contraseña vale pero falta o falla el código de la verificación en dos pasos.
     Por Basic no hay código: quien tiene 2FA no entra por Basic (para scripts, un usuario sin 2FA)."""
     key = (name.lower(), hashlib.sha256(pw.encode()).hexdigest())
-    if key not in _basic:
-        u = q("SELECT id, hash, totp FROM users WHERE name=?", [name]).fetchone()
-        if not (u and pw_ok(pw, u["hash"])):
+    u = q("SELECT id, hash, totp FROM users WHERE name=?", [name]).fetchone()
+    if not u:
+        return None
+    # La caché solo vale si el hash guardado sigue siendo el mismo: otro proceso (python catlan.py restablecer) puede haberlo cambiado
+    if _basic.get(key) != (u["id"], u["hash"]):
+        _basic.pop(key, None)
+        if not pw_ok(pw, u["hash"]):
             return None
         if u["totp"]:  # sin caché: cada vez, su código
             return u["id"] if totp_ok(u["totp"], code) else False
-        _basic[key] = u["id"]
-    return _basic[key]
+        _basic[key] = (u["id"], u["hash"])
+    elif u["totp"]:  # activó la 2FA en otro proceso después de entrar por aquí
+        _basic.pop(key, None)
+        return u["id"] if totp_ok(u["totp"], code) else False
+    return u["id"]
 
 
 FAILS = {}  # ip -> horas de los fallos de login recientes
@@ -383,12 +422,15 @@ GUIDE = """*catlan es la web de sistemas e inventario de tu equipo de IT: wiki, 
 - **Salud**: SNMP v2c y v3 (Synology, QNAP, Cisco, HP, Ubiquiti, MikroTik…), grabadores Hikvision y los PCs con Kitty, con gráficos de hasta 90 días.
 - **Incidencias**: tickets con prioridad, estado, persona o grupo asignado, seguimiento e incidencias hijas.
 - **Actividad**: quién cambió qué y cuándo, con una foto de cada versión.
-- **Opciones** (administradores): usuarios y grupos, avisos, Kitty, copia de seguridad y la zona de peligro.
+- **Opciones** (administradores): usuarios y grupos, avisos, Kitty, copia de seguridad, **Salud de catlan** (base de datos, copias diarias, estado del monitor) y la zona de peligro.
 
 ## Trucos
 - **Alt+C** o **/** abre el buscador: busca en todo. Empieza por `W:` para la wiki, `U:` para equipos y `T:` para incidencias.
 - **Silenciar** un dispositivo, o **Mantenimiento** para todos, evita avisos mientras trabajas.
 - Si dos personas editan lo mismo, catlan avisa en vez de pisar los cambios del otro.
+- ¿Contraseña olvidada? Un administrador te pone una nueva en Opciones → Usuarios. Si eres el único administrador, en el servidor: `python catlan.py restablecer tu-usuario`.
+- ¿Borraste algo sin querer? **Ctrl+Z** (o «Deshacer» en el aviso) en los 10 segundos siguientes; después, en Actividad sigue la foto de lo borrado.
+- En el inventario, marca varios equipos para **cambiarles** la ubicación o el estado de una vez, o programarles un **mantenimiento** (también desde un rack: menú ⋯).
 - Kitty en Windows y Linux: **Inventario → Añadir con Kitty** da una línea para pegar en PowerShell o en la terminal. No instala programas.
 
 ## Tus datos: todo se queda en tu servidor
@@ -408,7 +450,7 @@ GUIDE = """*catlan es la web de sistemas e inventario de tu equipo de IT: wiki, 
 - No hace copias de tus servidores: solo de su propia base de datos (**Opciones → Descargar copia de seguridad**).
 - No envía nada a nadie que no hayas configurado tú.
 - No necesita Internet para funcionar.
-- No trae HTTPS propio: si catlan sale de tu red local, ponlo detrás de un proxy con HTTPS (Caddy, nginx, Traefik).
+- HTTPS propio solo si le das un certificado (`CATLAN_CERT` y `CATLAN_KEY`); si catlan sale de tu red local, mejor detrás de un proxy con HTTPS (Caddy, nginx, Traefik).
 """
 if not q("SELECT 1 FROM users").fetchone():  # primera vez: admin / admin (o CATLAN_PASSWORD), a cambiar en el primer login
     q("INSERT INTO users(name, hash, admin, must_change) VALUES('admin', ?, 1, ?)", [pw_hash(PASSWORD or "admin"), 0 if PASSWORD else 1])
@@ -621,7 +663,9 @@ def notify(subject, text):
 
 
 def muted(row):
-    return bool(row.get("mute_until")) and row["mute_until"] > time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+    """En silencio o en un mantenimiento programado (desde mute_from, si lo hay, hasta mute_until; en UTC)."""
+    now = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+    return bool(row.get("mute_until")) and row["mute_until"] > now and (row.get("mute_from") or "") <= now
 
 
 def alert(table, row, state, good, subject, text):
@@ -692,29 +736,78 @@ def dependents():
     return {k: sorted(v) for k, v in verdict.items() if v}
 
 
+MON = {"beat": time.time(), "error": "", "error_at": None, "thread": None}
+
+
+def guarded(f, *a):
+    """Lo que corre en el pool: un fallo queda en la consola y en la salud de catlan, no se pierde en silencio."""
+    try:
+        f(*a)
+    except Exception as e:
+        MON.update(error=f"{f.__name__}: {e.__class__.__name__}: {e}"[:300], error_at=time.time())
+        print("monitor:", MON["error"])
+
+
+def monitor_health():
+    """Latido del monitor: si el hilo murió, se vuelve a arrancar; si va atrasado, la web lo dice."""
+    if MON["thread"] and not MON["thread"].is_alive():
+        start_monitor()
+    return {"age": int(time.time() - MON["beat"]), "error": MON["error"],
+            "error_ago": int(time.time() - MON["error_at"]) if MON["error_at"] else None}
+
+
+def start_monitor():
+    MON["thread"] = threading.Thread(target=monitor, daemon=True)
+    MON["thread"].start()
+
+
+def daily_backup():
+    """Una copia al día en data/backups/; se quedan las 7 últimas."""
+    d, day = DATA / "backups", time.strftime("%Y%m%d")
+    if (d / f"catlan-{day}.db").exists():
+        return
+    d.mkdir(exist_ok=True)
+    backup_to(d / f".catlan-{day}.tmp")
+    (d / f".catlan-{day}.tmp").replace(d / f"catlan-{day}.db")  # a medias nunca cuenta como copia
+    for old in sorted(d.glob("catlan-*.db"))[:-7]:
+        old.unlink()
+
+
 def monitor():
-    pool, n = ThreadPoolExecutor(8), 0
+    # Hasta 64 hilos, pero solo se crean si hay comprobaciones esperando: con muchas lentas (8 s de espera) no se forma cola
+    pool, n = ThreadPoolExecutor(64), 0
     while True:
-        for c in q(CHECKS + " WHERE c.last IS NULL OR c.last <= datetime('now', '-' || c.every || ' seconds')").fetchall():
-            q("UPDATE checks SET last=CURRENT_TIMESTAMP WHERE id=?", [c["id"]])  # marcado antes: no se lanza dos veces
-            pool.submit(probe, dict(c))
-        for src in q(SOURCES + " WHERE s.kind != 'kitty' AND (s.last IS NULL OR s.last <= datetime('now', '-' || s.every || ' seconds'))").fetchall():
-            q("UPDATE sources SET last=CURRENT_TIMESTAMP WHERE id=?", [src["id"]])
-            pool.submit(gather, dict(src))
-        for src in q(SOURCES + " WHERE s.kind = 'kitty' AND COALESCE(s.error, '') != ? AND s.last <= datetime('now', '-' || (3 * s.every) || ' seconds')",
-                     [KITTY_LOST]).fetchall():  # los Kitty envían ellos; tres envíos sin noticias = apagado o sin red
-            save_health(dict(src), [], [], None, KITTY_LOST)
-        n += 1
-        if n % 300 == 1:  # al arrancar y cada 10 min
-            rollup()
-            warranties()
-        if n % 1800 == 0:  # en bruto, 7 días; lo de antes ya está resumido por horas
-            q("DELETE FROM pings WHERE ts < datetime('now', '-7 days')")
-            q("DELETE FROM metrics WHERE ts < datetime('now', '-7 days')")
-            q("DELETE FROM syslog WHERE ts < datetime('now', '-30 days')")
-            q(f"DELETE FROM pings_h WHERE hour < datetime('now', '-{KEEP_DAYS} days')")
-            q(f"DELETE FROM metrics_h WHERE hour < datetime('now', '-{KEEP_DAYS} days')")
+        n += 1  # fuera del try: si una vuelta falla, lo de «cada 10 min» no se reintenta cada 2 s
+        try:
+            monitor_round(pool, n)
+        except Exception as e:  # una BD ocupada o un disco lleno no paran la vigilancia: se reintenta en la vuelta siguiente
+            MON.update(error=f"{e.__class__.__name__}: {e}"[:300], error_at=time.time())
+            print("monitor:", MON["error"])
+        MON["beat"] = time.time()
         time.sleep(2)
+
+
+def monitor_round(pool, n):
+    """Una vuelta: lanza lo que toca y, cada tanto, resúmenes, avisos de caducidad, copia diaria y limpieza."""
+    for c in q(CHECKS + " WHERE c.last IS NULL OR c.last <= datetime('now', '-' || c.every || ' seconds')").fetchall():
+        q("UPDATE checks SET last=CURRENT_TIMESTAMP WHERE id=?", [c["id"]])  # marcado antes: no se lanza dos veces
+        pool.submit(guarded, probe, dict(c))
+    for src in q(SOURCES + " WHERE s.kind != 'kitty' AND (s.last IS NULL OR s.last <= datetime('now', '-' || s.every || ' seconds'))").fetchall():
+        q("UPDATE sources SET last=CURRENT_TIMESTAMP WHERE id=?", [src["id"]])
+        pool.submit(guarded, gather, dict(src))
+    for src in q(SOURCES + " WHERE s.kind = 'kitty' AND COALESCE(s.error, '') != ? AND s.last <= datetime('now', '-' || (3 * s.every) || ' seconds')",
+                 [KITTY_LOST]).fetchall():  # los Kitty envían ellos; tres envíos sin noticias = apagado o sin red
+        save_health(dict(src), [], [], None, KITTY_LOST)
+    if n % 300 == 1:  # al arrancar y cada 10 min
+        rollup()
+        warranties()
+        daily_backup()
+    if n % 1800 == 0:  # en bruto, 7 días; lo de antes ya está resumido por horas
+        q("DELETE FROM pings WHERE ts < datetime('now', '-7 days')")
+        q("DELETE FROM metrics WHERE ts < datetime('now', '-7 days')")
+        q("DELETE FROM syslog WHERE ts < datetime('now', '-30 days')")
+        q(f"DELETE FROM pings_h WHERE hour < datetime('now', '-{KEEP_DAYS} days')")
+        q(f"DELETE FROM metrics_h WHERE hour < datetime('now', '-{KEEP_DAYS} days')")
 
 
 KEEP_DAYS = 400  # resúmenes por hora: más de un año, para comparar con el mismo mes del año anterior
@@ -765,8 +858,8 @@ def monitor_state():
         c["dep"] = deps.get(c["item"]) if c["state"] == "down" else None
         out.append(c)
     srcs = [{"id": r["id"], "name": r["label"] or r["item_name"] or r["host"], "state": r["state"], "problems": json.loads(r["problems"] or "[]"),
-             "error": r["error"], "mute_until": r["mute_until"]} for r in q(SOURCES).fetchall()]
-    return {"channels": channels(), "checks": out, "sources": srcs}
+             "error": r["error"], "mute_until": r["mute_until"], "mute_from": r["mute_from"]} for r in q(SOURCES).fetchall()]
+    return {"channels": channels(), "checks": out, "sources": srcs, "monitor": monitor_health()}
 
 
 # ── SNMP mínimo: GET y GETBULK sobre UDP, codificación BER a mano (sin dependencias) ──
@@ -1537,6 +1630,37 @@ def warranties():
                                                  for r in rows) + "\n\n-- catlan")
 
 
+_page = {}
+
+
+def page():
+    """index.html en memoria y comprimido una sola vez; se relee solo si cambia el archivo (al actualizar catlan)."""
+    f = HERE / "index.html"
+    m = f.stat().st_mtime_ns
+    if _page.get("m") != m:
+        raw = f.read_bytes()
+        _page.update(m=m, raw=raw, gz=gzip.compress(raw, 9), etag='"%s"' % hashlib.sha256(raw).hexdigest()[:20])
+    return _page
+
+
+UNDO = {"page": "pages", "item": "items", "check": "checks", "expiry": "expiries", "subnet": "subnets", "map": "maps", "rack": "maps"}
+
+
+def system_health():
+    size = lambda f: f.stat().st_size if f.exists() else 0
+    bk = sorted((DATA / "backups").glob("catlan-*.db")) if (DATA / "backups").exists() else []
+    late = q("SELECT COUNT(*) FROM checks WHERE last IS NOT NULL AND last < datetime('now', '-' || (every * 3 + 60) || ' seconds')").fetchone()[0]
+    late += q("SELECT COUNT(*) FROM sources WHERE kind != 'kitty' AND last IS NOT NULL AND last < datetime('now', '-' || (every * 3 + 60) || ' seconds')").fetchone()[0]
+    return {"version": VERSION, "schema": reader().execute("PRAGMA user_version").fetchone()[0], "python": sys.version.split()[0],
+            "db_bytes": size(DB_PATH), "wal_bytes": size(DATA / "catlan.db-wal"), "integrity": INTEGRITY, "started": STARTED,
+            "backups": [{"name": f.name, "bytes": f.stat().st_size, "at": datetime.fromtimestamp(f.stat().st_mtime, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")} for f in bk[::-1]],
+            "monitor": monitor_health(), "late": late, "syslog": SYSLOG_PORT, "https": bool(CERT),
+            "counts": {t: q(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in ("items", "pages", "checks", "sources", "incidents", "log", "metrics", "syslog")}}
+
+
+STARTED = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+
+
 def check_expiry(d, new=False):
     """Licencias, dominios, contratos…: con nombre, tipo conocido y una fecha AAAA-MM-DD de verdad."""
     if new or "name" in d:
@@ -1849,6 +1973,22 @@ class H(BaseHTTPRequestHandler):
             return self.send(403, {"error": "cambia tu contraseña para continuar", "must_change": True}) or False
         return self.send(401, {"error": "inicia sesión"}) or False
 
+    def undo(self, lid):
+        """Vuelve a crear lo borrado con la foto que quedó en Actividad, con su mismo id (los ids no se reutilizan)."""
+        e = q("SELECT * FROM log WHERE id=?", [lid]).fetchone()
+        if not (e and e["action"] == "borrar" and e["kind"] in UNDO):
+            return self.send(400, {"error": "eso no se puede deshacer"})
+        t, d = UNDO[e["kind"]], json.loads(e["data"] or "{}")
+        if q(f"SELECT 1 FROM {t} WHERE id=?", [e["ref"]]).fetchone():
+            return self.send(409, {"error": "ya existe otra vez"})
+        if t == "maps":  # sin la imagen de fondo: esa no queda en Actividad
+            q("INSERT INTO maps(id, name, mime, image, data) VALUES(?, ?, '', ?, ?)", [e["ref"], d.get("name", "Mapa"), b"", json.dumps(d.get("data", {}))])
+        else:
+            cols = [r[1] for r in reader().execute(f"PRAGMA table_info({t})") if r[1] in d and r[1] != "id"]
+            q(f"INSERT INTO {t}(id, {', '.join(cols)}) VALUES(?{', ?' * len(cols)})", [e["ref"], *(d[c] for c in cols)])
+        self.log("restaurar", e["kind"], e["ref"], e["name"], d)
+        return self.send(200, {"kind": e["kind"], "id": e["ref"]})
+
     def log(self, action, kind, ref, name, data):
         snap = json.dumps(data, ensure_ascii=False)
         last = q("SELECT id, action, who, ts > datetime('now', '-60 seconds') AS fresh FROM log "
@@ -1891,7 +2031,15 @@ class H(BaseHTTPRequestHandler):
                 ps = ps.replace("\r\n", "\n") if parts == ["kitty.sh"] else ps  # un clon de Git en Windows lo deja con CRLF y sh no lo lee
                 return self.send(200, ps.encode(), "text/plain; charset=utf-8")
             if not parts or parts[0] != "api":
-                return self.send(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
+                pg, h = page(), {"Cache-Control": "no-cache", "Vary": "Accept-Encoding"}
+                h["ETag"] = pg["etag"]
+                if self.headers.get("If-None-Match") == pg["etag"]:  # ya la tiene: 304 sin cuerpo
+                    self.send_response(304)
+                    for k, v in h.items():
+                        self.send_header(k, v)
+                    return self.end_headers()
+                gz = "gzip" in self.headers.get("Accept-Encoding", "")
+                return self.send(200, pg["gz"] if gz else pg["raw"], "text/html; charset=utf-8", headers={**h, **({"Content-Encoding": "gzip"} if gz else {})})
             res, rid = parts[1] if len(parts) > 1 else "", parts[2] if len(parts) > 2 else None
             if res in ("login", "logout", "me", "users"):
                 return self.account(method, res, rid)
@@ -1904,8 +2052,7 @@ class H(BaseHTTPRequestHandler):
                     check_pass(pw)
                 tmp = DATA / f".descarga-{secrets.token_hex(6)}.db"
                 try:
-                    with lock:  # la conexión es compartida: nada de copiar a medias mientras otro hilo escribe
-                        backup_to(tmp)
+                    backup_to(tmp)  # desde su propia conexión: la web sigue mientras se copia
                     data = tmp.read_bytes()
                 finally:
                     tmp.unlink(missing_ok=True)
@@ -1989,12 +2136,42 @@ class H(BaseHTTPRequestHandler):
                 m = (json.loads(self.body() or b"{}") or {}).get("minutes")
                 if not (type(m) is int and 0 <= m <= 10080):
                     raise ValueError("silenciar de 0 minutos a 7 días")
-                cur = q(f"UPDATE {res} SET mute_until = CASE WHEN ? > 0 THEN datetime('now', '+' || ? || ' minutes') END WHERE id=?", [m, m, rid])
+                cur = q(f"UPDATE {res} SET mute_from=NULL, mute_until = CASE WHEN ? > 0 THEN datetime('now', '+' || ? || ' minutes') END WHERE id=?", [m, m, rid])
                 if not cur.rowcount:
                     return self.send(404, {"error": "no existe"})
                 row = q(f"SELECT id, label, host, mute_until FROM {res} WHERE id=?", [rid]).fetchone()
                 self.log("silenciar" if m else "quitar silencio", KIND[res], row["id"], row["label"] or row["host"], {"minutes": m})
                 return self.send(200, dict(row))
+            if res == "maintenance" and method == "POST":  # mantenimiento programado de equipos o de todo un rack
+                b = json.loads(self.body() or b"{}")
+                items = b.get("items") or []
+                if b.get("rack") is not None:
+                    rk = q("SELECT data FROM maps WHERE id=?", [b["rack"]]).fetchone()
+                    if not rk:
+                        return self.send(404, {"error": "no existe"})
+                    items = [d["item"] for d in json.loads(rk["data"]).get("devices", []) if type(d.get("item")) is int]
+                if not (isinstance(items, list) and items and all(type(i) is int for i in items)):
+                    raise ValueError("elige equipos del inventario (o un rack con equipos enlazados)")
+                try:
+                    t0, t1 = (datetime.fromisoformat(str(b.get(k)).replace("Z", "+00:00")).astimezone(timezone.utc) for k in ("from", "to"))
+                except ValueError:
+                    raise ValueError("fechas no válidas")
+                if not (t0 < t1 and t1 > datetime.now(timezone.utc) and t1 - t0 <= timedelta(days=31)):
+                    raise ValueError("el mantenimiento acaba después de empezar, en el futuro y dura como mucho 31 días")
+                f0, f1 = (t.strftime("%Y-%m-%d %H:%M:%S") for t in (t0, t1))
+                marks = ",".join("?" * len(items))
+                ips = [r[0] for r in q(f"SELECT ip FROM items WHERE id IN ({marks}) AND ip != ''", items)]
+                n = sum(q(f"UPDATE {t} SET mute_from=?, mute_until=? WHERE item IN ({marks})"
+                          + (f" OR host IN ({','.join('?' * len(ips))})" if ips else ""), [f0, f1, *items, *ips]).rowcount for t in ("checks", "sources"))
+                self.log("programar mantenimiento", "rack" if b.get("rack") is not None else "item",
+                         b.get("rack") if b.get("rack") is not None else items[0], f"{len(items)} equipos", {"desde": f0, "hasta": f1, "items": items})
+                return self.send(200, {"muted": n, "from": f0, "to": f1})
+            if res == "log" and rid and parts[3:] == ["undo"] and method == "POST":  # deshacer un borrado
+                return self.undo(int(rid))
+            if res == "system" and method == "GET":  # la salud del propio catlan
+                if not self.admin:
+                    return self.send(403, {"error": "solo para administradores"})
+                return self.send(200, system_health())
             if res == "ping" and method == "POST":
                 b = json.loads(self.body() or b"{}")
                 d = {"host": b.get("host") if isinstance(b, dict) else None}
@@ -2589,6 +2766,25 @@ class H(BaseHTTPRequestHandler):
     def log_message(self, fmt, *a): pass
 
 
+def reset_password(name):
+    """python catlan.py restablecer <usuario>: contraseña olvidada. Desde el servidor, que ya tiene la base de datos:
+    contraseña provisional (a cambiar al entrar), sin verificación en dos pasos y con sus sesiones cerradas."""
+    u = name and q("SELECT id, name FROM users WHERE name=?", [name]).fetchone()
+    if not u:
+        names = ", ".join(r["name"] + (" (admin)" if r["admin"] else "") for r in q("SELECT name, admin FROM users ORDER BY name COLLATE NOCASE"))
+        print((f"No existe el usuario «{name}». " if name else "") + f"Usuarios: {names}\nUso: python catlan.py restablecer <usuario>")
+        return 1
+    pw = secrets.token_urlsafe(9)
+    q("UPDATE users SET hash=?, must_change=1, totp='' WHERE id=?", [pw_hash(pw), u["id"]])
+    q("DELETE FROM sessions WHERE user_id=?", [u["id"]])
+    q("INSERT INTO log(who, action, kind, ref, name, data) VALUES('consola del servidor', 'restablecer contraseña', 'user', ?, ?, '{}')", [u["id"], u["name"]])
+    print(f"Contraseña provisional de {u['name']}: {pw}\nEntra con ella y catlan te pedirá cambiarla. Su verificación en dos pasos queda quitada.")
+    return 0
+
+
+if __name__ == "__main__" and sys.argv[1:2] == ["restablecer"]:  # no hace falta parar catlan: la BD admite a los dos (WAL)
+    raise SystemExit(reset_password(sys.argv[2] if len(sys.argv) > 2 else ""))
+
 if __name__ == "__main__":
     # ASCII: la consola de Windows (cp1252) revienta con emojis
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), H)
@@ -2598,8 +2794,25 @@ if __name__ == "__main__":
         srv.socket = tls.wrap_socket(srv.socket, server_side=True, do_handshake_on_connect=False)  # el saludo TLS, en el hilo de cada petición: uno lento no para a los demás
         quiet = srv.handle_error  # escáneres y navegadores que rechazan el certificado: sin traza en la consola
         srv.handle_error = lambda req, addr: None if isinstance(sys.exc_info()[1], (ssl.SSLError, ConnectionError, TimeoutError)) else quiet(req, addr)
-    print(f"catlan {VERSION} en {SCHEME}://0.0.0.0:{PORT}  (datos en {DATA})")
-    threading.Thread(target=monitor, daemon=True).start()
+    try:  # la IP de este equipo en la red (sin enviar nada): 0.0.0.0 no se puede abrir en el navegador
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as u:
+            u.connect(("10.255.255.255", 1))
+            lan = u.getsockname()[0]
+    except OSError:
+        lan = ""
+    print(f"catlan {VERSION} en {SCHEME}://localhost:{PORT}" + (f" y {SCHEME}://{lan}:{PORT}" if lan and lan != "127.0.0.1" else "") + f"  (datos en {DATA})")
+    start_monitor()
     if SYSLOG_PORT:
         threading.Thread(target=syslog_server, daemon=True).start()
-    srv.serve_forever()
+
+    def stop(*_):  # docker stop manda SIGTERM: sale de serve_forever como con Ctrl+C
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, stop)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    lock.acquire()  # espera a la escritura en curso y no deja empezar otra (los demás hilos mueren con el proceso)
+    db.execute("PRAGMA wal_checkpoint(TRUNCATE)")  # todo dentro de catlan.db: la copia del archivo vale tal cual
+    db.close()
+    print("catlan parado")
