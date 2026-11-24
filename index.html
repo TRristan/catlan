@@ -2595,8 +2595,8 @@ const views = {
       $('#addpc') && ($('#addpc').onclick = () => {
         const cmd = `irm ${location.origin}/kitty.ps1 | iex`, sh = `curl -fsSL ${location.origin}/kitty.sh | sudo sh`;
         const line = (c, id) => `<div style="display:flex;gap:8px;align-items:center"><code class="mono" style="flex:1;padding:10px 12px;border:1px solid var(--line);border-radius:8px;word-break:break-all">${esc(c)}</code><button type="button" class="btn" id="${id}">${ui('copy', 15)}Copiar</button></div>`;
-        dialog(`<h3>Añadir un equipo con Kitty</h3><p><b>Windows</b>: abre PowerShell como administrador y pega esta línea. Deja una tarea programada que envía su estado cada 5 minutos; no instala ningún programa ni deja archivos.</p>${line(cmd, 'pc-copy')}
-          <p class="muted small">Para quitarlo: <span class="mono">Unregister-ScheduledTask Kitty; Remove-Item HKLM:\\SOFTWARE\\Kitty</span></p>
+        dialog(`<h3>Añadir un equipo con Kitty</h3><p><b>Windows</b>: abre PowerShell como administrador y pega esta línea. Instala Kitty, un programa pequeño: envía el estado del PC cada 5 minutos y deja en la bandeja un gato para que el usuario avise a IT, sin tener que llamar.</p>${line(cmd, 'pc-copy')}
+          <p class="muted small">Para quitarlo, en PowerShell como administrador: <span class="mono">Unregister-ScheduledTask Kitty -Confirm:$false; Stop-Process -Name kitty -Force; Remove-ItemProperty HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run Kitty; Remove-Item -Recurse "$env:ProgramFiles\\Kitty", "$env:ProgramData\\Kitty", HKLM:\\SOFTWARE\\Kitty</span></p>
           <p><b>Linux</b> (con curl): pega esta línea en una terminal. Deja un temporizador de systemd (o cron) que envía lo mismo cada 5 minutos.</p>${line(sh, 'sh-copy')}
           <p class="muted small">Para quitarlo: <span class="mono">sudo sh /usr/local/lib/kitty-agent.sh quitar</span>. Después aparecerá aquí, en «Kitty pide entrar», para que lo aceptes.</p>`, {ok: 'Listo'});
         document.querySelector('dialog[open]:last-of-type .dlg-a .ghost').remove();

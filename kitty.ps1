@@ -1,11 +1,18 @@
 # Kitty para catlan: instalador. catlan lo sirve en /kitty.ps1 con su dirección y su id ya puestos.
 # En el PC, PowerShell como administrador:   irm http://catlan:8080/kitty.ps1 | iex
-# Deja una tarea programada (SYSTEM, cada 5 min y al arrancar) con el script en línea: ningún archivo en el equipo.
-# Su clave y su último estado van al registro, en HKLM\SOFTWARE\Kitty, solo para SYSTEM y administradores.
+# Instala Kitty (kitty.exe, un programa pequeño que sirve el propio catlan) en Archivos de programa y deja:
+#  - una tarea programada (SYSTEM, cada 5 min y al arrancar) que envía el estado del PC: «kitty enviar»;
+#  - el gato en la bandeja de cada usuario al iniciar sesión, para avisar a IT y ver cómo va el equipo.
+# La clave del equipo va al registro, en HKLM\SOFTWARE\Kitty, solo para SYSTEM y administradores (la misma que el Kitty
+# de antes: un PC ya instalado conserva su ficha). La ventana usa otra, que solo sirve para abrir incidencias de este PC.
 $ErrorActionPreference = 'Stop' # al primer fallo, parar: nada de «instalado» a medias
+$ProgressPreference = 'SilentlyContinue' # la barra de progreso de PowerShell 5 hace lentísima la descarga
 $Url = '{{URL}}'
 $Catlan = '{{ID}}'
 $r = 'HKLM:\SOFTWARE\Kitty'
+$dir = Join-Path $env:ProgramFiles 'Kitty'
+$pub = Join-Path $env:ProgramData 'Kitty'
+$exe = Join-Path $dir 'kitty.exe'
 try {
     if (-not (Test-Path $r)) { New-Item $r | Out-Null }
 } catch {
@@ -25,70 +32,39 @@ try { # quien tenga la clave se hace pasar por este PC: fuera los usuarios norma
     Write-Host "Kitty: no he podido restringir $r; los usuarios locales podrán leer su clave." -ForegroundColor Yellow
 }
 
-# Lo que corre cada 5 minutos: lo justo para ver fallos (nada de usuarios, programas, procesos ni archivos),
-# más los errores y críticos del Visor de eventos para saber por qué falla.
-# Solo cmdlets y tipos básicos: funciona también con PowerShell en modo de lenguaje restringido.
-$agent = @'
-$ErrorActionPreference = 'Stop'
-$r = 'HKLM:\SOFTWARE\Kitty'
-function Note($state, $err) {
-    Set-ItemProperty $r state $state
-    Set-ItemProperty $r when (Get-Date -Format s)
-    Set-ItemProperty $r error "$err"
-}
+# El programa, desde catlan (si ya estaba, se para y se sustituye: así también se actualiza)
+New-Item -ItemType Directory -Force $dir, $pub | Out-Null
+Get-Process kitty -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe } | Stop-Process -Force
 try {
-    $os = Get-CimInstance Win32_OperatingSystem
-    $cpu = @(Get-CimInstance Win32_Processor)
-    $cs = Get-CimInstance Win32_ComputerSystem
-    $serial = "$((Get-CimInstance Win32_BIOS).SerialNumber)".Trim()
-    if (@('0', 'none', 'default string', 'to be filled by o.e.m.', 'system serial number', 'not specified', 'not applicable') -contains $serial.ToLower()) { $serial = '' }
-    $facts = @{
-        osver = "$($os.Caption) $($os.Version)".Trim()
-        model = "$($cs.Manufacturer) $($cs.Model)".Trim()
-        cpu = "$($cpu[0].Name)".Trim()
-        cores = [int]($cpu | Measure-Object NumberOfLogicalProcessors -Sum).Sum
-        load = [double]($cpu | Measure-Object LoadPercentage -Average).Average
-        mem_total = [int64]$os.TotalVisibleMemorySize * 1024
-        mem_free = [int64]$os.FreePhysicalMemory * 1024
-        uptime = [int64]((Get-Date) - $os.LastBootUpTime).TotalSeconds
-        serial = $serial
-        disks = @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object { @{ name = $_.DeviceID; total = [int64]$_.Size; free = [int64]$_.FreeSpace } })
-        ips = @(Get-NetIPAddress -AddressState Preferred | Where-Object { $_.IPAddress -notmatch '^(127\.|::1$|fe80:)' } | ForEach-Object { $_.IPAddress })
-    }
-    # Críticos y errores del Visor de eventos (Sistema y Aplicación) desde el último envío, los 20 más recientes, sin rutas de usuario
-    $now = Get-Date
-    $since = (Get-ItemProperty $r).since
-    $from = if ($since) { [datetime]$since } else { $now.AddDays(-1) }
-    $events = @()
-    try {
-        $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'System', 'Application'; Level = 1, 2; StartTime = $from } -MaxEvents 20 -ErrorAction SilentlyContinue | ForEach-Object {
-            $m = ("$($_.Message)" -replace '(?i)\\Users\\[^\\\s]+', '\Users\(usuario)' -replace '\s+', ' ').Trim()
-            @{ rec = [int64]$_.RecordId; log = $_.LogName; time = $_.TimeCreated.ToUniversalTime().ToString('s') + 'Z'; level = [int]$_.Level; source = "$($_.ProviderName)"; code = [int]$_.Id; msg = $m.Substring(0, [Math]::Min(400, $m.Length)) }
-        })
-    } catch {} # sin eventos o sin acceso al registro: el resto se envía igual
-    # ip vacía: catlan pone la dirección desde la que llega
-    $body = @{ key = (Get-ItemProperty $r).key; name = $env:COMPUTERNAME; ip = ''; serial = $serial; os = "windows/$($env:PROCESSOR_ARCHITECTURE.ToLower())"; kind = 'pc'; every = 5; facts = $facts; events = $events } | ConvertTo-Json -Depth 4 -Compress
-    $res = Invoke-RestMethod "$Url/api/agent" -Method Post -Body $body -ContentType 'application/json; charset=utf-8' -TimeoutSec 20 -UseBasicParsing
-    if ($res.catlan -ne $Catlan) { throw "$Url no es el catlan que lo instaló" } # atado: no habla con ningún otro
-    if ($res.state -eq 'adoptado') { Set-ItemProperty $r since $now.ToString('s') } # pendiente: los eventos esperan a que lo acepten
-    Note $res.state ''
+    Invoke-WebRequest "$Url/kitty.exe" -OutFile "$exe.nuevo" -UseBasicParsing -TimeoutSec 120
+    Move-Item -Force "$exe.nuevo" $exe
 } catch {
-    Note 'error' $_.Exception.Message
+    Remove-Item "$exe.nuevo" -ErrorAction SilentlyContinue
+    Write-Host "Kitty: no he podido descargar $Url/kitty.exe ($($_.Exception.Message)). ¿Tiene catlan kitty.exe junto a su ejecutable?" -ForegroundColor Red
+    return
 }
-'@
-$agent = "`$Url = '$Url'`n`$Catlan = '$Catlan'`n" + $agent
-$enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($agent))
-$action = New-ScheduledTaskAction powershell.exe "-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand $enc"
+
+# Lo que necesita la ventana (la leen los usuarios del PC): dónde está catlan y la clave de incidencias
+$cfg = Join-Path $pub 'kitty.json'
+$ukey = try { (Get-Content $cfg -Raw | ConvertFrom-Json).ukey } catch { '' }
+if (-not $ukey) { $ukey = [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N') }
+[IO.File]::WriteAllText($cfg, (@{ url = $Url; catlan = $Catlan; ukey = $ukey } | ConvertTo-Json -Compress)) # UTF-8 sin BOM
+
+# Cada 5 minutos y al arrancar, como SYSTEM: el estado del PC
+$action = New-ScheduledTaskAction $exe 'enviar'
 $triggers = @((New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)), (New-ScheduledTaskTrigger -AtStartup))
 $who = New-ScheduledTaskPrincipal -UserId SYSTEM -LogonType ServiceAccount -RunLevel Highest
 $set = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 2) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew
 Register-ScheduledTask Kitty -Action $action -Trigger $triggers -Principal $who -Settings $set -Description "Kitty: envía a catlan ($Url) el estado de este PC cada 5 minutos" -Force | Out-Null
+# El gato en la bandeja de cada usuario, al iniciar sesión
+Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' Kitty "`"$exe`" --oculto"
 Remove-ItemProperty $r when -ErrorAction SilentlyContinue # para esperar al primer envío de esta instalación
 Start-ScheduledTask Kitty
+Start-Process explorer.exe "`"$exe`"" # la ventana, ya, como el usuario (no como administrador)
 
 $code = try { $h = [Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($key)); ('{0:X2}{1:X2}-{2:X2}{3:X2}' -f $h[0], $h[1], $h[2], $h[3]) } catch { '(no disponible)' }
 Write-Host "Kitty instalado en $env:COMPUTERNAME (código $code)." -ForegroundColor Green
-for ($i = 0; $i -lt 15 -and -not (Get-ItemProperty $r -Name when -ErrorAction SilentlyContinue); $i++) { Start-Sleep 1 }
+for ($i = 0; $i -lt 30 -and -not (Get-ItemProperty $r -Name when -ErrorAction SilentlyContinue); $i++) { Start-Sleep 1 }
 $st = Get-ItemProperty $r
 if ($st.state -eq 'pendiente') { Write-Host "Acéptalo en catlan: Inventario → Kitty pide entrar (código $code)." }
 elseif ($st.state -eq 'error') { Write-Host "Primer envío con error: $($st.error)" -ForegroundColor Yellow }

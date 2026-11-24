@@ -264,6 +264,7 @@ pub const MIGRATIONS: &[&str] = &[
      notes TEXT DEFAULT '', scan TEXT, scanned TEXT, updated TEXT DEFAULT CURRENT_TIMESTAMP)",
     "ALTER TABLE checks ADD COLUMN mute_from TEXT",
     "ALTER TABLE sources ADD COLUMN mute_from TEXT",
+    "ALTER TABLE agents ADD COLUMN ukey TEXT /*sha256 de la clave de incidencias de Kitty, que pueden leer los usuarios del PC*/",
 ];
 /// Las de antes de numerarlas: una BD vieja (user_version 0) puede tener ya cualquiera de ellas.
 const LEGACY: usize = 19;

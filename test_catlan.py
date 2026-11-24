@@ -8,7 +8,7 @@ HERE = Path(__file__).parent
 BIN = os.environ.get("CATLAN_BIN") or str(HERE / "target" / "release" / ("catlan.exe" if os.name == "nt" else "catlan"))
 if not Path(BIN).exists():
     sys.exit(f"No encuentro {BIN}: compila con «cargo build --release» o indica la ruta en CATLAN_BIN")
-MIGRATIONS = 28  # migraciones numeradas de src/db.rs
+MIGRATIONS = 29  # migraciones numeradas de src/db.rs
 SECRET = ("community", "pass", "priv_pass")
 SEAL = b"CATLAN-CIFRADO-1"
 sha = lambda t: hashlib.sha256(t.encode()).hexdigest()
@@ -594,6 +594,26 @@ try:
     kitty(K1, every=1, facts=ok_disks, events=[ev(10, 2, minutes=1)])  # el siguiente envío trae solo lo nuevo: lo de antes sigue
     assert [e["rec"] for e in next(h for h in call("/api/health")[1] if h["id"] == hk["id"])["info"]["events"]] == [10, 8, 7]
     kitty(K1, every=1, facts=ok_disks, events=[])
+    # Avisos desde la ventana de Kitty: con su clave de incidencias (la que leen los usuarios del PC), solo si IT aceptó el equipo
+    UK, UK2 = "u" * 64, "w" * 64
+    agent = lambda path, body: call(f"/api/agent/{path}", "POST", body, auth="")
+    assert agent("mine", {"ukey": UK})[0] == 404  # aún no la ha contado el agente
+    kitty(K1, ukey=UK), kitty(K2, name="intruso", ukey=UK2)
+    assert agent("mine", {"ukey": UK2})[0] == 403  # pendiente: nada
+    assert agent("incident", {"ukey": UK2, "title": "x"})[0] == 403 and agent("incident", {"ukey": "corta", "title": "x"})[0] == 400
+    for bad in ({"ukey": UK}, {"ukey": UK, "title": " "}, {"ukey": UK, "title": "x", "priority": "urgentísima"}, {"ukey": UK, "title": "x", "body": "y" * 5001}):
+        assert agent("incident", bad)[0] == 400, bad
+    st, ki = agent("incident", {"ukey": UK, "title": "No imprime", "body": "Sale en rojo", "priority": "crítica"})
+    assert st == 201 and ki["status"] == "abierta", ki
+    full = call(f"/api/incidents/{ki['id']}")[1]
+    assert full["item"] == hk["item"] and full["author"] is None and full["history"][0]["who"] == "Kitty · pc-kitty", full
+    assert any(f"incidencia crítica #{ki['id']}" in h["text"] for h in hooks)  # lo urgente avisa a IT como cualquier incidencia
+    call("/api/incidents", "POST", {"title": "abierta por IT", "item": hk["item"]})
+    st, mine = agent("mine", {"ukey": UK})
+    assert st == 200 and [i["title"] for i in mine["incidents"]] == ["No imprime"], mine  # solo lo que avisó el PC
+    assert [agent("incident", {"ukey": UK, "title": f"n{i}"})[0] for i in range(10)][-1] == 429  # 10 por hora
+    assert agent("nada", {"ukey": UK})[0] == 404
+    assert urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{PORT}/kitty.exe")).status == 200 if (Path(BIN).parent / "kitty.exe").exists() else call("/kitty.exe", auth="")[0] == 404
     # expulsado: fuera de Salud con su historial; la ficha del inventario se queda
     assert call(f"/api/agents/{ag['id']}", "PUT", {"state": "rechazado"})[0] == 200 and not [h for h in call("/api/health")[1] if h["kind"] == "kitty"]
     assert call(f"/api/metrics?source={hk['id']}&hours=1")[1] == {} and len(call("/api/items")[1]) == n_items + 1

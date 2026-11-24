@@ -74,9 +74,10 @@ git clone https://github.com/TRristan/catlan.git
 cd catlan
 cargo build --release
 ./target/release/catlan            # en Windows: target\release\catlan.exe
-elease\catlan.exe
-eleasetlan.exe
 ```
+
+En Windows, `cargo build --release -p kitty` compila también **Kitty** (el programa de los PCs), que catlan reparte
+desde la misma carpeta.
 
 El ejecutable no necesita nada más: cópialo donde quieras. Los datos van a `data/`, junto a él.
 
@@ -115,13 +116,29 @@ sus sesiones. Sin usuario, lista los que hay.
 7. **PCs Windows**: en **Inventario → Añadir PC** copia una línea, pégala en PowerShell como administrador en el PC y
    acéptalo cuando pida entrar. Aparecerá en **Salud → Kittens**.
 
-## Kitty: el estado de los PCs Windows y Linux, sin instalar programas
+## Kitty: el gato de catlan en cada PC
 
-`irm http://tu-catlan:8080/kitty.ps1 | iex` deja en el PC una **tarea programada** (cada 5 minutos y al arrancar) con
-el script en línea: ningún `.exe` y ningún archivo en el equipo. Un administrador acepta cada PC en catlan, y desde
-entonces envía **solo** nombre, sistema, modelo, CPU, memoria, discos, IPs, tiempo encendido, nº de serie y los **errores y críticos del Visor de eventos** (Sistema y Aplicación, con las rutas de usuario tapadas), que se ven en su ficha de Salud; un crítico, como un apagado inesperado, avisa. Nada de
-usuarios, programas, procesos ni archivos. Para quitarlo:
-`Unregister-ScheduledTask Kitty; Remove-Item HKLM:\SOFTWARE\Kitty`.
+`irm http://tu-catlan:8080/kitty.ps1 | iex` (PowerShell como administrador) instala **Kitty**, un programa pequeño
+(`kitty.exe`, unos 3,5 MB, en `Archivos de programa\Kitty`) que sirve el propio catlan:
+
+- **Cada 5 minutos y al arrancar**, una tarea programada (`kitty enviar`, como SYSTEM) envía **solo** nombre, sistema,
+  modelo, CPU, memoria, discos, IPs, tiempo encendido, nº de serie y los **errores y críticos del Visor de eventos**
+  (Sistema y Aplicación, con las rutas de usuario tapadas), que se ven en su ficha de Salud; un crítico, como un apagado
+  inesperado, avisa. Nada de usuarios, programas, procesos ni archivos.
+- **Un gato en la bandeja** de cada usuario: una ventana con el diseño de catlan para **avisar a IT** («¿Qué está
+  fallando?»), seguir **sus avisos** (recibido, en curso, resuelto) y ver **cómo va el PC** en vivo. Cada aviso llega
+  a catlan como una incidencia enlazada a la ficha del equipo; si es urgente, avisa por correo, Telegram o webhook.
+
+Un administrador acepta cada PC en catlan; hasta entonces no envía eventos ni deja abrir incidencias. La clave del
+equipo solo la lee SYSTEM; la ventana usa otra, que solo sirve para abrir incidencias de ese PC (como mucho 10 por
+hora). Volver a pegar la línea actualiza Kitty sin perder la ficha. Para quitarlo, en PowerShell como administrador:
+
+```powershell
+Unregister-ScheduledTask Kitty -Confirm:$false; Stop-Process -Name kitty -Force; Remove-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run Kitty; Remove-Item -Recurse "$env:ProgramFiles\Kitty", "$env:ProgramData\Kitty", HKLM:\SOFTWARE\Kitty
+```
+
+catlan sirve `kitty.exe` si está **junto a su ejecutable** o en su carpeta de datos (en Docker, en `/data`). Se compila
+en Windows con `cargo build --release -p kitty`, que lo deja al lado de `catlan.exe`.
 
 En **Linux** (con curl), `curl -fsSL http://tu-catlan:8080/kitty.sh | sudo sh` deja un temporizador de systemd (o cron)
 que envía lo mismo, con los errores y críticos del journal. Para quitarlo: `sudo sh /usr/local/lib/kitty-agent.sh quitar`.
@@ -186,6 +203,8 @@ python test_topologia.py     # auto-topología (LLDP, CDP, MAC, ARP) contra snmp
 El servidor está en `src/` (Rust): `web.rs` la API y las sesiones, `db.rs` SQLite y las migraciones, `monitor.rs` las
 comprobaciones y los avisos, `snmp.rs` y `health.rs` la lectura de equipos. `index.html` es toda la web (HTML, CSS y JS
 sin dependencias) y se mete en el ejecutable al compilar. Los tests de Python prueban el ejecutable desde fuera.
+`kitty/` es el programa de los PCs: `facts.rs` lo que cuenta del equipo, `net.rs` el envío, `app.rs` la bandeja y la
+ventana (WebView2) y `ui.html` su interfaz.
 
 ## Estado y límites conocidos
 

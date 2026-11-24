@@ -277,7 +277,7 @@ impl Ctx<'_> {
         let parts: Vec<String> = path.split('/').filter(|p| !p.is_empty()).map(String::from).collect();
         let api = parts.first().is_some_and(|p| p == "api");
         let rest: Vec<&str> = parts.iter().skip(1).map(String::as_str).collect();
-        let free = !api || m == "POST" && (rest == ["login"] || rest == ["agent"]); // la página, el login y Kitty, sin sesión
+        let free = !api || m == "POST" && (rest == ["login"] || rest.first() == Some(&"agent") && rest.len() <= 2); // la página, el login y Kitty, sin sesión
         let pending = api && (rest.first() == Some(&"logout") || [&["me"][..], &["me", "password"]].contains(&&rest[..rest.len().min(2)])); // con contraseña provisional
         let r = (|| -> Result<Resp> {
             if let Some(r) = self.authed(free, pending)? {
@@ -305,6 +305,14 @@ impl Ctx<'_> {
 
     fn dispatch(&mut self, m: &str, parts: &[String], query: &str) -> Result<Resp> {
         let at = |i: usize| parts.get(i).map(String::as_str);
+        if parts == ["kitty.exe"] && m == "GET" {
+            // el programa de Kitty para Windows: junto al ejecutable de catlan o en la carpeta de datos (Docker)
+            let exe = [crate::config::HERE.join("kitty.exe"), DATA.join("kitty.exe")].into_iter().find(|p| p.is_file());
+            return Ok(match exe.map(std::fs::read) {
+                Some(Ok(b)) => Resp::new(200, b, "application/vnd.microsoft.portable-executable").header("Content-Disposition", "attachment; filename=\"kitty.exe\""),
+                _ => Resp::new(404, "catlan no tiene kitty.exe: ponlo junto al ejecutable de catlan o en su carpeta de datos".as_bytes().to_vec(), "text/plain; charset=utf-8"),
+            });
+        }
         if (parts == ["kitty.ps1"] || parts == ["kitty.sh"]) && m == "GET" {
             // instalador de Kitty (Windows o Linux) con esta dirección y este id, sin sesión
             let host = self.req.header("host");
@@ -341,7 +349,14 @@ impl Ctx<'_> {
             ("backup", "GET" | "POST") => return self.backup(m),
             ("alerts", _) => return self.alerts(m),
             ("wipe", "POST") => return self.wipe(),
-            ("agent", "POST") => return self.agent_hello(),
+            ("agent", "POST") => {
+                return match rid {
+                    None => self.agent_hello(),
+                    Some("incident") => self.agent_incident(),
+                    Some("mine") => self.agent_mine(),
+                    Some(_) => Ok(err(404, "no existe")),
+                };
+            }
             ("agents", _) => return self.agents(m, rid_i, rid.is_none()),
             ("groups", _) => return self.groups(m, rid, rid_i),
             ("incidents", _) => return self.incidents(m, rid, rid_i, parts),
@@ -821,6 +836,14 @@ impl Ctx<'_> {
             return bad("falta el nombre del equipo");
         }
         let key = sha256_hex(key);
+        // la clave de incidencias: la que usa la ventana de Kitty, con el usuario del PC, para abrir incidencias de este equipo
+        let ukey = b.get("ukey").and_then(Value::as_str).filter(|k| (32..=128).contains(&k.chars().count())).map(sha256_hex);
+        let save_ukey = || -> Result<()> {
+            if let Some(u) = &ukey {
+                q("UPDATE agents SET ukey=? WHERE key=?", p![u, &key])?;
+            }
+            Ok(())
+        };
         let instance = db::INSTANCE.get().cloned().unwrap_or_default();
         let fvals: Vec<SqlV> = AGENT_FACTS.iter().map(|k| db::jv(&f[*k])).collect();
         let Some(a) = q("SELECT * FROM agents WHERE key=?", p![&key])?.one() else {
@@ -830,11 +853,13 @@ impl Ctx<'_> {
             let mut args = p![&key];
             args.extend(fvals);
             q(&format!("INSERT INTO agents(key, {}, seen) VALUES(?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)", AGENT_FACTS.join(", ")), args)?;
+            save_ukey()?;
             return Ok(js(200, json!({"state": "pendiente", "catlan": instance})));
         };
         let mut args = fvals;
         args.push(db::jv(&a["id"]));
         q(&format!("UPDATE agents SET {}, seen=CURRENT_TIMESTAMP WHERE id=?", AGENT_FACTS.map(|k| format!("{k}=?")).join(", ")), args)?;
+        save_ukey()?;
         if a.s("state") != "adoptado" {
             return Ok(js(200, json!({"state": a["state"], "catlan": instance})));
         }
@@ -863,6 +888,66 @@ impl Ctx<'_> {
         let out = health::limits(&src, out, &mut probs);
         monitor::save_health(&src, &out, &probs, Some(&info), None)?;
         Ok(js(200, json!({"state": "adoptado", "item": item, "catlan": instance})))
+    }
+
+    /// El Kitty de la clave de incidencias, si ya lo aceptaron. Si no, la respuesta que toca.
+    fn agent_by_ukey(&self, b: &Value) -> Result<std::result::Result<Row, Resp>> {
+        let Some(u) = b.as_object().and_then(|o| o.get("ukey")).and_then(Value::as_str).filter(|k| (32..=128).contains(&k.chars().count())) else {
+            return bad("falta la clave de Kitty");
+        };
+        Ok(match q("SELECT * FROM agents WHERE ukey=? ORDER BY id DESC LIMIT 1", p![sha256_hex(u)])?.one() {
+            Some(a) if a.s("state") == "adoptado" => Ok(a),
+            Some(a) => Err(js(403, json!({"error": if a.s("state") == "pendiente" { "IT todavía no ha aceptado este equipo en catlan" } else { "catlan ha rechazado este equipo" }, "state": a["state"]}))),
+            None => Err(js(404, json!({"error": "este equipo aún no se ha presentado a catlan: espera unos minutos", "state": null}))),
+        })
+    }
+
+    /// Las incidencias que se abrieron desde la ventana de Kitty de este equipo, con su estado.
+    fn agent_mine(&self) -> Result<Resp> {
+        let b = self.body()?;
+        let a = match self.agent_by_ukey(&b)? {
+            Ok(a) => a,
+            Err(r) => return Ok(r),
+        };
+        let rows = q(
+            "SELECT n.id, n.title, n.status, n.priority, n.created, n.updated, (SELECT count(*) FROM notes WHERE incident = n.id AND change = 0) AS notes              FROM incidents n WHERE n.item=? AND EXISTS (SELECT 1 FROM notes o WHERE o.incident = n.id AND o.change = 1 AND o.text = 'abrió la incidencia'              AND o.who = 'Kitty · ' || ?) ORDER BY n.status IN ('resuelta', 'cerrada'), n.updated DESC LIMIT 30",
+            p![&a["item"], &a["name"]],
+        )?;
+        Ok(js(200, json!({"state": a["state"], "name": a["name"], "item": a["item"], "incidents": rows.rows})))
+    }
+
+    /// Una incidencia que abre el usuario del PC desde Kitty: va al equipo de su ficha y avisa si es urgente.
+    fn agent_incident(&mut self) -> Result<Resp> {
+        let b = self.body()?;
+        let a = match self.agent_by_ukey(&b)? {
+            Ok(a) => a,
+            Err(r) => return Ok(r),
+        };
+        let title = b.get("title").and_then(Value::as_str).map(str::trim).filter(|t| (1..=200).contains(&t.chars().count()));
+        let Some(title) = title else { return bad("cuenta en una frase qué pasa (hasta 200 caracteres)") };
+        let body = b.get("body").and_then(Value::as_str).unwrap_or("").trim();
+        if body.chars().count() > 5000 {
+            return bad("la descripción es demasiado larga (hasta 5000 caracteres)");
+        }
+        let prio = b.get("priority").and_then(Value::as_str).unwrap_or("media");
+        if !INC_PRIO.contains(&prio) {
+            return bad("urgencia no válida");
+        }
+        self.user = format!("Kitty · {}", a.s("name"));
+        // sin sesión: como mucho 10 por hora desde cada equipo
+        let recent = val("SELECT COUNT(*) FROM log WHERE who=? AND kind='incident' AND action='crear' AND ts > datetime('now', '-1 hour')", p![&self.user])?;
+        if recent.as_i64().unwrap_or(0) >= 10 {
+            return Ok(err(429, "demasiados avisos seguidos desde este equipo: espera un rato o llama a IT"));
+        }
+        let id = q("INSERT INTO incidents(title, body, priority, item) VALUES(?, ?, ?, ?)", p![title, body, prio, &a["item"]])?.lastrowid;
+        self.note(id, "abrió la incidencia", true)?;
+        self.log("crear", "incident", id, title, &json!({"title": title, "body": body, "priority": prio, "item": a["item"], "desde": "Kitty"}))?;
+        if prio == "crítica" {
+            monitor::notify(&format!("catlan: incidencia crítica #{id}: {title}"), &format!("Abierta desde Kitty en {}.
+
+-- catlan", a.s("name")));
+        }
+        Ok(js(201, q("SELECT id, title, status, priority, created, updated FROM incidents WHERE id=?", p![id])?.one()))
     }
 
     /// La ficha de este Kitty: la suya, o una con su nº de serie o su nombre (inventariado a mano), o una nueva.

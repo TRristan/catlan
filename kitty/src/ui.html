@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="es" data-motion="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kitty</title>
+<style>
+/* Tokens de catlan (index.html): mismo color, sombras, radios y curvas */
+:root{
+  --bg:#f6f5f2;--s1:#ffffff;--s2:#f0eee9;--s3:#e6e3dc;--line:#e8e5df;--line2:#d8d4cc;
+  --tx:#1c1b19;--tx2:#67635c;--tx3:#9b968d;--acc:#e8772e;--ok:#21925f;--bad:#d24343;--warn:#c4870f;
+  --acc-soft:color-mix(in oklab,var(--acc) 14%,transparent);--acc-line:color-mix(in oklab,var(--acc) 45%,transparent);
+  --sh1:0 1px 2px rgb(28 27 25/.06),0 0 0 .5px rgb(28 27 25/.03);
+  --sh2:0 10px 30px -10px rgb(28 27 25/.18),0 2px 6px rgb(28 27 25/.06);
+  --r:10px;--r2:16px;
+  --e:cubic-bezier(.22,.8,.24,1);--spring:cubic-bezier(.34,1.45,.64,1);
+  --font:ui-sans-serif,system-ui,-apple-system,"Segoe UI Variable Text","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"Cascadia Code","SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#111110;--s1:#1a1a19;--s2:#222220;--s3:#2c2b29;--line:#262624;--line2:#353431;
+  --tx:#edece8;--tx2:#a39f97;--tx3:#6e6a63;--ok:#3cc483;--bad:#f06a6a;--warn:#e5aa3a;
+  --sh1:0 1px 2px rgb(0 0 0/.4),0 0 0 .5px rgb(255 255 255/.03);--sh2:0 12px 32px -10px rgb(0 0 0/.6),0 2px 6px rgb(0 0 0/.3);color-scheme:dark}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:1ms!important;animation-delay:0s!important;transition-duration:1ms!important}}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--tx);font:14.5px/1.55 var(--font);-webkit-font-smoothing:antialiased;overflow:hidden;
+  display:flex;flex-direction:column;user-select:none}
+::selection{background:var(--acc-soft)}
+.ic{flex:none;display:block}
+.mono{font-family:var(--mono);font-size:.92em;font-variant-numeric:tabular-nums}
+.muted{color:var(--tx2)}.dim{color:var(--tx3)}.small{font-size:12.5px}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius:6px}
+h1,h2{text-wrap:balance;margin:0}
+
+/* Barra de título propia: se arrastra la ventana desde aquí */
+.bar{flex:none;display:flex;align-items:center;gap:10px;height:48px;padding:0 8px 0 16px;border-bottom:1px solid var(--line);background:var(--bg)}
+.brand{display:flex;align-items:center;gap:9px;min-width:0;flex:1;font-weight:650;letter-spacing:-.01em}
+.brand .ic{color:var(--acc);transition:transform .5s var(--spring)}.brand:hover .ic{transform:rotate(-12deg) scale(1.08)}
+.brand .pc{font-weight:500;color:var(--tx3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.win{display:flex;gap:2px}
+.wbtn{display:grid;place-items:center;width:34px;height:30px;border:0;border-radius:8px;background:transparent;color:var(--tx2);cursor:pointer;transition:background .2s,color .2s,transform .15s var(--e)}
+.wbtn:hover{background:var(--s2);color:var(--tx)}.wbtn:active{transform:scale(.92)}
+.wbtn.close:hover{background:color-mix(in oklab,var(--bad) 14%,transparent);color:var(--bad)}
+
+.pill{display:inline-flex;align-items:center;gap:7px;height:24px;padding:0 10px 0 9px;border-radius:99px;background:var(--s2);font-size:12px;color:var(--tx2);white-space:nowrap;transition:background .3s,color .3s}
+.pill i{width:6px;height:6px;border-radius:50%;background:var(--tx3);transition:background .3s}
+.pill.ok{background:color-mix(in oklab,var(--ok) 12%,transparent);color:color-mix(in oklab,var(--ok) 80%,var(--tx))}.pill.ok i{background:var(--ok);box-shadow:0 0 0 3px color-mix(in oklab,var(--ok) 20%,transparent)}
+.pill.bad{background:color-mix(in oklab,var(--bad) 11%,transparent);color:color-mix(in oklab,var(--bad) 80%,var(--tx))}.pill.bad i{background:var(--bad)}
+.pill.warn{background:color-mix(in oklab,var(--warn) 13%,transparent);color:color-mix(in oklab,var(--warn) 75%,var(--tx))}.pill.warn i{background:var(--warn)}
+.pill.acc{background:var(--acc-soft);color:color-mix(in oklab,var(--acc) 75%,var(--tx))}.pill.acc i{background:var(--acc)}
+.pill.live i{animation:pulse 2.4s var(--e) infinite}
+
+/* Pestañas: segmentado con pastilla deslizante, como en catlan */
+.tabs{flex:none;padding:14px 16px 0}
+.seg{position:relative;display:flex;padding:3px;gap:2px;background:var(--s2);border-radius:11px;isolation:isolate}
+.seg::before{content:"";position:absolute;z-index:-1;top:3px;bottom:3px;left:0;width:var(--w,0);transform:translateX(var(--x,0));background:var(--s1);border-radius:8px;box-shadow:var(--sh1);
+  transition:transform .38s var(--spring),width .38s var(--spring)}
+.seg button{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:0;background:none;height:32px;padding:0 10px;border-radius:8px;font:inherit;font-size:13px;font-weight:560;
+  color:var(--tx2);cursor:pointer;transition:color .2s;white-space:nowrap}
+.seg button:hover,.seg button.on{color:var(--tx)}
+.badge{min-width:18px;height:18px;padding:0 5px;border-radius:99px;background:var(--acc);color:#fff;font-size:11px;font-weight:650;line-height:18px;text-align:center;
+  font-variant-numeric:tabular-nums;transform:scale(0);transition:transform .45s var(--spring)}
+.badge.on{transform:scale(1)}
+
+/* Vistas */
+main{flex:1;position:relative;overflow:hidden}
+.view{position:absolute;inset:0;overflow-y:auto;padding:20px 16px 22px;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+.view[hidden]{display:block!important;visibility:hidden;pointer-events:none;opacity:0}
+.view.in{animation:pageIn .5s var(--e) both}
+.view.in .st>*{animation:rise .55s var(--e) both;animation-delay:calc(70ms + var(--i,0)*40ms)}
+@keyframes pageIn{from{opacity:0;transform:translateY(10px)}}
+@keyframes rise{from{opacity:0;transform:translateY(12px)}}
+@keyframes pulse{50%{transform:scale(.6);opacity:.5}}
+@keyframes float{50%{transform:translateY(-5px)}}
+@keyframes shake{20%{transform:translateX(-5px)}40%{transform:translateX(4px)}60%{transform:translateX(-3px)}80%{transform:translateX(2px)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes draw{from{stroke-dashoffset:var(--len)}}
+@keyframes pop{0%{transform:scale(.6);opacity:0}60%{transform:scale(1.06);opacity:1}100%{transform:scale(1)}}
+@keyframes shimmer{to{background-position:-200% 0}}
+@keyframes blink{0%,90%,100%{transform:scaleY(1)}95%{transform:scaleY(.1)}}
+
+.hd h1{font-size:22px;font-weight:680;letter-spacing:-.022em;line-height:1.25}
+.hd p{margin:6px 0 0;color:var(--tx2);font-size:13.5px}
+
+/* Formulario */
+.fields{display:grid;gap:16px;margin-top:20px}
+.field label{display:flex;align-items:baseline;gap:6px;font-size:12.5px;font-weight:560;color:var(--tx2);margin:0 0 6px}
+.field label .dim{font-weight:500}
+input,textarea{width:100%;font:inherit;color:var(--tx);background:var(--s1);border:1px solid var(--line2);border-radius:var(--r);outline:none;user-select:text;
+  transition:border-color .18s,box-shadow .18s,background .18s}
+input{height:40px;padding:0 12px}
+textarea{padding:10px 12px;line-height:1.6;resize:none;min-height:108px}
+input:hover,textarea:hover{border-color:var(--tx3)}
+input:focus,textarea:focus{border-color:var(--acc);box-shadow:0 0 0 4px var(--acc-soft)}
+input::placeholder,textarea::placeholder{color:var(--tx3)}
+.seg.urg button{font-size:12.5px;padding:0 6px;height:34px}
+.seg.urg button[data-p="crítica"].on{color:var(--bad)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 16px;border-radius:var(--r);border:1px solid var(--line2);background:var(--s1);color:var(--tx);
+  font:inherit;font-size:14px;font-weight:560;cursor:pointer;box-shadow:var(--sh1);transition:transform .15s var(--e),background .2s,border-color .2s,color .2s,opacity .2s}
+.btn:hover{border-color:var(--tx3)}.btn:active{transform:scale(.965)}
+.btn.pri{background:var(--tx);color:var(--bg);border-color:transparent}
+.btn.pri:hover{background:color-mix(in oklab,var(--tx) 86%,var(--acc))}
+.btn.ghost{background:transparent;border-color:transparent;box-shadow:none;color:var(--tx2)}.btn.ghost:hover{background:var(--s2);color:var(--tx)}
+.btn.wide{width:100%;height:44px;font-size:14.5px}
+.btn:disabled{opacity:.4;pointer-events:none}
+.btn .spin{width:16px;height:16px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:spin .7s linear infinite}
+.send-row{margin-top:6px;display:grid;gap:8px}
+.hint{text-align:center;font-size:12px;color:var(--tx3)}
+kbd{font:11px var(--mono);color:var(--tx3);border:1px solid var(--line2);border-bottom-width:2px;border-radius:5px;padding:1px 5px;background:var(--s1)}
+.err{display:flex;gap:8px;align-items:flex-start;padding:10px 12px;border-radius:var(--r);background:color-mix(in oklab,var(--bad) 9%,transparent);color:color-mix(in oklab,var(--bad) 85%,var(--tx));font-size:13px}
+.err.shake{animation:shake .45s var(--e)}
+.err .ic{margin-top:2px}
+
+/* Aviso de estado (equipo sin aceptar, sin instalar) */
+.note{display:flex;gap:12px;padding:14px;border-radius:var(--r2);border:1px solid var(--line);background:var(--s1);box-shadow:var(--sh1);margin-top:18px}
+.note .dot{flex:none;display:grid;place-items:center;width:34px;height:34px;border-radius:11px;background:color-mix(in oklab,var(--warn) 14%,transparent);color:var(--warn)}
+.note.bad .dot{background:color-mix(in oklab,var(--bad) 12%,transparent);color:var(--bad)}
+.note b{display:block;font-size:13.5px;font-weight:620}
+.note span{font-size:12.5px;color:var(--tx2)}
+
+/* Enviado */
+.done{display:grid;justify-items:center;text-align:center;padding:30px 8px 8px}
+.done svg.check{width:76px;height:76px;margin-bottom:16px}
+.done .ring{fill:color-mix(in oklab,var(--ok) 12%,transparent);stroke:var(--ok);stroke-width:2.5;--len:240;stroke-dasharray:240;animation:draw .7s var(--e) both}
+.done .tick{fill:none;stroke:var(--ok);stroke-width:4;stroke-linecap:round;stroke-linejoin:round;--len:60;stroke-dasharray:60;animation:draw .45s .45s var(--e) both}
+.done svg.check{animation:pop .6s var(--spring) both}
+.done h2{font-size:20px;font-weight:680;letter-spacing:-.02em}
+.done p{margin:6px 0 20px;color:var(--tx2);font-size:13.5px;max-width:300px}
+.done .acts{display:flex;gap:8px}
+
+/* Mis avisos */
+.list{display:grid;gap:8px;margin-top:18px}
+.inc{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:start;padding:13px 14px;border:1px solid var(--line);border-radius:var(--r2);background:var(--s1);box-shadow:var(--sh1);
+  transition:transform .35s var(--spring),box-shadow .3s var(--e),border-color .3s}
+.inc:hover{transform:translateY(-2px);box-shadow:var(--sh2);border-color:var(--line2)}
+.inc .ico{display:grid;place-items:center;width:32px;height:32px;border-radius:10px;background:var(--s2);color:var(--tx2)}
+.inc.done-st .ico{background:color-mix(in oklab,var(--ok) 12%,transparent);color:var(--ok)}
+.inc .t{font-weight:600;font-size:14px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;user-select:text}
+.inc .m{font-size:12px;color:var(--tx3);margin-top:3px}
+.inc.done-st .t{color:var(--tx2)}
+.skel{height:64px;border-radius:var(--r2);background:linear-gradient(90deg,var(--s2) 25%,var(--s3) 37%,var(--s2) 63%);background-size:200% 100%;animation:shimmer 1.4s linear infinite}
+.empty{display:grid;justify-items:center;text-align:center;padding:36px 12px 0;color:var(--tx2)}
+.empty .cat{color:var(--acc);animation:float 3.6s var(--e) infinite;margin-bottom:14px}
+.empty .cat .eyes{transform-origin:12px 13px;animation:blink 5s infinite}
+.empty b{color:var(--tx);font-size:15px;font-weight:620}
+.empty span{font-size:13px;margin-top:4px}
+.upd{margin-top:14px;text-align:center;font-size:12px;color:var(--tx3)}
+
+/* Este PC */
+.pc-hd{display:flex;gap:14px;align-items:center}
+.pc-hd .av{flex:none;display:grid;place-items:center;width:52px;height:52px;border-radius:16px;background:var(--acc-soft);color:var(--acc)}
+.pc-hd h1{font-size:20px;font-weight:680;letter-spacing:-.02em;user-select:text}
+.pc-hd p{margin:2px 0 0;color:var(--tx2);font-size:13px}
+.card{background:var(--s1);border:1px solid var(--line);border-radius:var(--r2);box-shadow:var(--sh1);padding:16px;margin-top:16px}
+.card-t{margin:0 0 12px;font-size:12.5px;font-weight:620;color:var(--tx2);letter-spacing:.01em;display:flex;align-items:center;gap:8px}
+.meter+.meter{margin-top:14px}
+.meter .row{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:13.5px}
+.meter .row b{font-weight:560}
+.meter .row span{font-size:12.5px;color:var(--tx3)}
+.meter .v{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:600;font-size:13px}
+.track{height:8px;border-radius:99px;background:var(--s2);margin-top:7px;overflow:hidden}
+.fill{height:100%;width:0;border-radius:99px;background:var(--ok);transform-origin:left;transition:width .9s var(--e),background .5s}
+.fill.warn{background:var(--warn)}.fill.bad{background:var(--bad)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:13px}
+.kv dt{color:var(--tx3)}.kv dd{margin:0;text-align:right;user-select:text}
+.chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+.chips span{padding:2px 8px;border-radius:7px;background:var(--s2);font:12px var(--mono)}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="u-cat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9.5V4l4 3h6l4-3v5.5A7.5 7.5 0 0 1 12 20a7.5 7.5 0 0 1-7-10.5z"/><path d="M9.5 13h.01M14.5 13h.01M11 16.2l1 .6 1-.6"/></symbol>
+    <symbol id="u-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></symbol>
+    <symbol id="u-min" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M7 12h10"/></symbol>
+    <symbol id="u-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></symbol>
+    <symbol id="u-ticket" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z"/><path d="M9 9.5h6M9 13.5h4"/></symbol>
+    <symbol id="u-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+    <symbol id="u-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 3.5 10 14"/><path d="m20.5 3.5-6.5 17-4-6.5-6.5-4z"/></symbol>
+    <symbol id="u-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v4.5M12 16h.01"/></symbol>
+    <symbol id="u-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="u-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="u-pc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8.5 20h7M12 16.5V20"/></symbol>
+    <symbol id="u-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></symbol>
+    <symbol id="u-net" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="8" height="6" rx="1.5"/><path d="M12 9v4M5 21v-4h14v4M12 13v8"/></symbol>
+  </defs>
+</svg>
+
+<header class="bar" data-drag>
+  <div class="brand" data-drag><svg class="ic" width="22" height="22"><use href="#u-cat"/></svg><span data-drag>Kitty</span><span class="pc" id="pcname" data-drag></span></div>
+  <span class="pill" id="conn" data-drag><i></i><span>Conectando…</span></span>
+  <div class="win">
+    <button class="wbtn" id="bmin" title="Minimizar" aria-label="Minimizar"><svg class="ic" width="18" height="18"><use href="#u-min"/></svg></button>
+    <button class="wbtn close" id="bclose" title="Cerrar (Kitty sigue en la bandeja)" aria-label="Cerrar"><svg class="ic" width="18" height="18"><use href="#u-x"/></svg></button>
+  </div>
+</header>
+
+<nav class="tabs">
+  <div class="seg" id="tabs" role="tablist">
+    <button class="on" data-v="avisar" role="tab"><svg class="ic" width="16" height="16"><use href="#u-bell"/></svg>Avisar</button>
+    <button data-v="mios" role="tab"><svg class="ic" width="16" height="16"><use href="#u-ticket"/></svg>Mis avisos<span class="badge" id="badge"></span></button>
+    <button data-v="pc" role="tab"><svg class="ic" width="16" height="16"><use href="#u-pulse"/></svg>Este PC</button>
+  </div>
+</nav>
+
+<main>
+  <section class="view in" id="v-avisar">
+    <div id="form-box" class="st">
+      <div class="hd" style="--i:0"><h1>¿Qué está fallando?</h1><p>Lo recibe el equipo de IT en catlan, junto con el estado de este equipo.</p></div>
+      <div id="gate" style="--i:1"></div>
+      <form id="form" class="fields" style="--i:2" autocomplete="off">
+        <div class="field"><label for="title">En una frase</label>
+          <input id="title" maxlength="200" placeholder="No imprime la impresora de la planta 2" required></div>
+        <div class="field"><label for="body">Detalles <span class="dim">opcional</span></label>
+          <textarea id="body" maxlength="5000" placeholder="Qué estabas haciendo, desde cuándo pasa, el mensaje de error…"></textarea></div>
+        <div class="field"><label>¿Cuánto te afecta?</label>
+          <div class="seg urg" id="urg" role="radiogroup">
+            <button type="button" data-p="baja" role="radio">Poco</button>
+            <button type="button" data-p="media" class="on" role="radio">Normal</button>
+            <button type="button" data-p="alta" role="radio">Bastante</button>
+            <button type="button" data-p="crítica" role="radio">No puedo trabajar</button>
+          </div></div>
+        <div id="ferr"></div>
+        <div class="send-row">
+          <button class="btn pri wide" id="send" type="submit"><svg class="ic" width="17" height="17"><use href="#u-send"/></svg><span>Enviar a IT</span></button>
+          <div class="hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> para enviar</div>
+        </div>
+      </form>
+    </div>
+    <div id="done-box" hidden></div>
+  </section>
+
+  <section class="view" id="v-mios" hidden>
+    <div class="st">
+      <div class="hd" style="--i:0"><h1>Mis avisos</h1><p>Los que se han enviado desde este equipo y cómo van.</p></div>
+      <div id="mine" style="--i:1"></div>
+    </div>
+  </section>
+
+  <section class="view" id="v-pc" hidden>
+    <div class="st">
+      <div class="pc-hd" style="--i:0"><span class="av"><svg class="ic" width="26" height="26"><use href="#u-pc"/></svg></span>
+        <div><h1 id="pc-name">Este equipo</h1><p id="pc-os" class="muted">&nbsp;</p></div></div>
+      <div class="card" style="--i:1"><h3 class="card-t"><svg class="ic" width="15" height="15"><use href="#u-pulse"/></svg>Ahora</h3><div id="meters"></div></div>
+      <div class="card" style="--i:2"><h3 class="card-t"><svg class="ic" width="15" height="15"><use href="#u-layers"/></svg>Discos</h3><div id="disks"></div></div>
+      <div class="card" style="--i:3"><h3 class="card-t"><svg class="ic" width="15" height="15"><use href="#u-net"/></svg>Red</h3>
+        <dl class="kv"><dt>Encendido</dt><dd id="pc-up">—</dd><dt>Direcciones</dt><dd><div class="chips" id="pc-ips"></div></dd><dt>catlan</dt><dd id="pc-srv" class="mono">—</dd></dl></div>
+    </div>
+  </section>
+</main>
+
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const ipc = o => window.ipc && window.ipc.postMessage(JSON.stringify(o));
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const ui = (n, s = 18) => `<svg class="ic" width="${s}" height="${s}" aria-hidden="true"><use href="#u-${n}"/></svg>`;
+const S = {state: 'connecting', configured: true, view: 'avisar', prio: 'media', sending: false, mine: null, mineAt: 0};
+
+// ── Ventana: arrastrar desde la barra, minimizar, cerrar (sigue en la bandeja) ──
+document.addEventListener('mousedown', e => {
+  if (e.button === 0 && e.target.closest('[data-drag]') && !e.target.closest('button')) ipc({op: 'drag'});
+});
+$('#bmin').onclick = () => ipc({op: 'min'});
+$('#bclose').onclick = () => ipc({op: 'hide'});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') ipc({op: 'hide'}); });
+
+// ── Segmentados con pastilla deslizante ──
+function seg(el) {
+  const on = el.querySelector('.on');
+  if (!on) return;
+  el.style.setProperty('--x', on.offsetLeft - 3 + 'px');
+  el.style.setProperty('--w', on.offsetWidth + 'px');
+}
+function pick(el, btn) {
+  el.querySelectorAll('button').forEach(b => { b.classList.toggle('on', b === btn); b.setAttribute('aria-selected', b === btn); });
+  seg(el);
+}
+addEventListener('resize', () => document.querySelectorAll('.seg').forEach(seg));
+
+$('#tabs').onclick = e => { const b = e.target.closest('button'); if (b) go(b.dataset.v); };
+function go(v) {
+  if (v === S.view) return;
+  pick($('#tabs'), $(`#tabs [data-v="${v}"]`));
+  const from = $('#v-' + S.view), to = $('#v-' + v);
+  from.hidden = true; from.classList.remove('in');
+  to.hidden = false; void to.offsetWidth; to.classList.add('in'); to.scrollTop = 0;
+  S.view = v;
+  if (v === 'mios' && Date.now() - S.mineAt > 5000) loadMine();
+}
+
+$('#urg').onclick = e => { const b = e.target.closest('button'); if (b) { S.prio = b.dataset.p; pick($('#urg'), b); } };
+
+// ── Estado de la conexión con catlan ──
+function setConn() {
+  const map = {
+    connecting: ['', 'Conectando…'], ok: ['ok live', 'Conectado'], pending: ['warn', 'Esperando a IT'],
+    rejected: ['bad', 'Rechazado'], offline: ['bad', 'Sin conexión'], missing: ['warn', 'Sin alta'], unconfigured: ['bad', 'Sin instalar'],
+  }[S.state];
+  $('#conn').className = 'pill ' + map[0];
+  $('#conn span').textContent = map[1];
+  const gate = {
+    unconfigured: ['bad', 'Kitty no está conectado a catlan', 'Pide a IT que lo instale con el comando de catlan.'],
+    pending: ['', 'IT todavía no ha aceptado este equipo', 'En cuanto lo acepten en catlan podrás avisar desde aquí.'],
+    missing: ['', 'Este equipo aún no se ha presentado a catlan', 'Kitty lo hace solo en unos minutos. Vuelve a intentarlo enseguida.'],
+    rejected: ['bad', 'catlan no acepta avisos de este equipo', 'Habla con el equipo de IT.'],
+  }[S.state];
+  $('#gate').innerHTML = gate ? `<div class="note ${gate[0]}"><span class="dot">${ui(gate[0] ? 'alert' : 'clock', 18)}</span><div><b>${gate[1]}</b><span>${gate[2]}</span></div></div>` : '';
+  const blocked = !!gate;
+  $('#form').querySelectorAll('input,textarea,button').forEach(el => el.disabled = blocked || S.sending);
+}
+function stateFrom(r) {
+  if (r.status === 0) return 'offline';
+  const st = r.body && r.body.state;
+  return r.status === 200 ? 'ok' : st === 'pendiente' ? 'pending' : st === 'rechazado' ? 'rejected' : r.status === 404 ? 'missing' : 'offline';
+}
+
+// ── Avisar ──
+$('#form').onsubmit = e => {
+  e.preventDefault();
+  const title = $('#title').value.trim();
+  if (!title) { showErr('Cuenta en una frase qué pasa.'); $('#title').focus(); return; }
+  S.sending = true; setConn();
+  $('#send').innerHTML = '<span class="spin"></span><span>Enviando…</span>';
+  $('#ferr').innerHTML = '';
+  ipc({op: 'send', title, body: $('#body').value.trim(), priority: S.prio});
+};
+document.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && S.view === 'avisar' && !$('#send').disabled) $('#form').requestSubmit(); });
+function showErr(msg) {
+  $('#ferr').innerHTML = `<div class="err shake">${ui('alert', 16)}<span>${esc(msg)}</span></div>`;
+}
+function resetSend() {
+  S.sending = false;
+  $('#send').innerHTML = `${ui('send', 17)}<span>Enviar a IT</span>`;
+  setConn();
+}
+function sent(r) {
+  resetSend();
+  if (r.status !== 201) {
+    const ns = stateFrom(r);
+    if (ns !== 'ok' && ns !== 'offline') { S.state = ns; setConn(); return; } // el aviso de arriba ya lo explica
+    showErr(r.body && r.body.error || 'No se ha podido enviar. Inténtalo de nuevo.');
+    return;
+  }
+  S.state = 'ok'; setConn();
+  const i = r.body;
+  $('#done-box').innerHTML = `<div class="done">
+      <svg class="check" viewBox="0 0 80 80" aria-hidden="true"><circle class="ring" cx="40" cy="40" r="37"/><path class="tick" d="m25 41 10 10 21-22"/></svg>
+      <h2>Aviso enviado</h2><p>IT ya lo tiene en catlan como incidencia <b class="mono">#${esc(i.id)}</b>. Puedes seguirla en «Mis avisos».</p>
+      <div class="acts"><button class="btn" id="d-again">Avisar de otra cosa</button><button class="btn pri" id="d-mine">${ui('ticket', 16)}Ver mis avisos</button></div></div>`;
+  $('#form-box').hidden = true; $('#done-box').hidden = false;
+  $('#d-again').onclick = () => {
+    $('#form').reset(); pick($('#urg'), $('#urg [data-p="media"]')); S.prio = 'media';
+    $('#done-box').hidden = true; $('#form-box').hidden = false;
+    const v = $('#v-avisar'); v.classList.remove('in'); void v.offsetWidth; v.classList.add('in');
+    $('#title').focus();
+  };
+  $('#d-mine').onclick = () => go('mios');
+  loadMine();
+}
+
+// ── Mis avisos ──
+const STATUS = {abierta: ['acc', 'Recibida'], 'en curso': ['acc', 'En curso'], 'en espera': ['warn', 'En espera'], resuelta: ['ok', 'Resuelta'], cerrada: ['', 'Cerrada']};
+function ago(ts) {
+  if (!ts) return '';
+  const s = Math.max(0, (Date.now() - Date.parse(ts.replace(' ', 'T') + 'Z')) / 1000);
+  if (s < 60) return 'ahora mismo';
+  if (s < 3600) return `hace ${Math.floor(s / 60)} min`;
+  if (s < 86400) return `hace ${Math.floor(s / 3600)} h`;
+  const d = Math.floor(s / 86400);
+  return d === 1 ? 'ayer' : `hace ${d} días`;
+}
+function loadMine() {
+  if (!S.configured) return renderMine();
+  if (!S.mine) $('#mine').innerHTML = '<div class="list"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>';
+  ipc({op: 'mine'});
+}
+function mine(r) {
+  S.mineAt = Date.now();
+  S.state = stateFrom(r); setConn();
+  if (r.status === 200) S.mine = r.body.incidents || [];
+  renderMine(r);
+}
+function renderMine(r) {
+  const box = $('#mine');
+  if (!S.configured || (r && r.status !== 200 && !S.mine)) {
+    box.innerHTML = `<div class="empty"><svg class="cat" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9.5V4l4 3h6l4-3v5.5A7.5 7.5 0 0 1 12 20a7.5 7.5 0 0 1-7-10.5z"/><path class="eyes" d="M9.5 13h.01M14.5 13h.01"/></svg>
+      <b>${S.state === 'offline' ? 'No llego a catlan' : 'Aún no se puede ver'}</b><span>${esc(r && r.body && r.body.error || 'Kitty no está conectado a catlan.')}</span></div>`;
+    return;
+  }
+  const list = S.mine || [];
+  const open = list.filter(i => !['resuelta', 'cerrada'].includes(i.status)).length;
+  $('#badge').textContent = open; $('#badge').classList.toggle('on', open > 0);
+  if (!list.length) {
+    box.innerHTML = `<div class="empty"><svg class="cat" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9.5V4l4 3h6l4-3v5.5A7.5 7.5 0 0 1 12 20a7.5 7.5 0 0 1-7-10.5z"/><path class="eyes" d="M9.5 13h.01M14.5 13h.01"/><path d="M11 16.2l1 .6 1-.6"/></svg>
+      <b>Nada pendiente</b><span>Aún no se ha avisado de nada desde este equipo.</span></div>`;
+    return;
+  }
+  box.innerHTML = `<div class="list st">${list.map((i, n) => {
+    const [cls, label] = STATUS[i.status] || ['', i.status];
+    const fin = ['resuelta', 'cerrada'].includes(i.status);
+    const notes = i.notes ? ` · ${i.notes} ${i.notes === 1 ? 'respuesta' : 'respuestas'}` : '';
+    return `<div class="inc${fin ? ' done-st' : ''}" style="--i:${n}"><span class="ico">${ui(fin ? 'check' : 'ticket', 17)}</span>
+      <div><div class="t">${esc(i.title)}</div><div class="m"><span class="mono">#${esc(i.id)}</span> · ${esc(ago(i.updated))}${notes}</div></div>
+      <span class="pill ${cls}"><i></i>${esc(label)}</span></div>`;
+  }).join('')}</div><div class="upd">Actualizado ${esc(ago(new Date().toISOString().slice(0, 19).replace('T', ' ')))}</div>`;
+}
+
+// ── Este PC: números que cuentan hasta su valor y barras que se deslizan ──
+const shown = {};
+function tween(el, key, to, fmt) {
+  const from = shown[key] ?? 0, t0 = performance.now(), dur = 650;
+  shown[key] = to;
+  const step = t => {
+    const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+    el.textContent = fmt(from + (to - from) * e);
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+const gb = b => (b / 1073741824).toLocaleString('es', {maximumFractionDigits: b < 1e11 ? 1 : 0}) + ' GB';
+const level = p => p >= 90 ? 'bad' : p >= 75 ? 'warn' : '';
+function meter(box, key, label, sub, pct) {
+  let m = box.querySelector(`[data-k="${CSS.escape(key)}"]`);
+  if (!m) {
+    box.insertAdjacentHTML('beforeend', `<div class="meter" data-k="${esc(key)}"><div class="row"><b>${esc(label)}</b><span class="sub"></span><span class="v">0 %</span></div><div class="track"><div class="fill"></div></div></div>`);
+    m = box.lastElementChild;
+  }
+  m.querySelector('.sub').textContent = sub;
+  m.querySelector('.sub').style.marginLeft = 'auto';
+  tween(m.querySelector('.v'), key, pct, v => Math.round(v) + ' %');
+  const f = m.querySelector('.fill');
+  requestAnimationFrame(() => { f.style.width = Math.max(1.5, pct) + '%'; f.className = 'fill ' + level(pct); });
+}
+function upTxt(s) {
+  const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  return d ? `${d} d ${h} h` : h ? `${h} h ${m} min` : `${m} min`;
+}
+function stats(s) {
+  $('#pcname').textContent = s.name; $('#pc-name').textContent = s.name;
+  $('#pc-os').textContent = s.os || ' ';
+  meter($('#meters'), 'cpu', 'Procesador', '', s.cpu);
+  meter($('#meters'), 'mem', 'Memoria', `${gb(s.mem_used)} de ${gb(s.mem_total)}`, s.mem_total ? 100 * s.mem_used / s.mem_total : 0);
+  (s.disks || []).forEach(d => meter($('#disks'), 'disk:' + d.name, d.name, `${gb(d.free)} libres de ${gb(d.total)}`, d.total ? 100 * (d.total - d.free) / d.total : 0));
+  $('#pc-up').textContent = upTxt(s.uptime);
+  const ips = (s.ips || []).map(i => `<span>${esc(i)}</span>`).join('');
+  if ($('#pc-ips').innerHTML !== ips) $('#pc-ips').innerHTML = ips || '<span class="dim">—</span>';
+}
+
+// ── Lo que llama Kitty desde Rust ──
+window.kitty = {
+  init(c) {
+    S.configured = c.configured;
+    $('#pcname').textContent = c.name;
+    $('#pc-srv').textContent = c.server || '—';
+    if (!c.configured) { S.state = 'unconfigured'; setConn(); renderMine(); return; }
+    loadMine();
+  },
+  stats, mine, sent,
+  shown() {
+    const v = $('#v-' + S.view); v.classList.remove('in'); void v.offsetWidth; v.classList.add('in');
+    if (S.configured) loadMine();
+    if (S.view === 'avisar' && !$('#title').disabled) setTimeout(() => $('#title').focus(), 80);
+  },
+};
+setInterval(() => { if (S.configured && !document.hidden) loadMine(); }, 60000);
+document.querySelectorAll('.seg').forEach(seg);
+setConn();
+ipc({op: 'ready'});
+</script>
+</body>
+</html>

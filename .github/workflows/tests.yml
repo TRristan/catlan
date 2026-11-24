@@ -13,3 +13,11 @@ jobs:
         with:
           python-version: "3.12"
       - run: python test_catlan.py
+  kitty:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test -p kitty --locked
+      - run: cargo build --release -p kitty --locked

@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "kitty"]
+default-members = ["."] # kitty (ventana para Windows): cargo build --release -p kitty
+
 [package]
 name = "catlan"
 version = "1.0.0"

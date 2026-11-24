@@ -28,7 +28,7 @@
 - ¿Contraseña olvidada? Un administrador te pone una nueva en Opciones → Usuarios. Si eres el único administrador, en el servidor: `catlan restablecer tu-usuario`.
 - ¿Borraste algo sin querer? **Ctrl+Z** (o «Deshacer» en el aviso) en los 10 segundos siguientes; después, en Actividad sigue la foto de lo borrado.
 - En el inventario, marca varios equipos para **cambiarles** la ubicación o el estado de una vez, o programarles un **mantenimiento** (también desde un rack: menú ⋯).
-- Kitty en Windows y Linux: **Inventario → Añadir con Kitty** da una línea para pegar en PowerShell o en la terminal. No instala programas.
+- Kitty en Windows y Linux: **Inventario → Añadir con Kitty** da una línea para pegar en PowerShell o en la terminal. En Windows deja un gato en la bandeja para que cada usuario avise a IT: sus avisos llegan como incidencias de su equipo.
 
 ## Tus datos: todo se queda en tu servidor
 - catlan funciona entero en la máquina donde lo instalas, con una base de datos SQLite en `data/catlan.db`. Sin nube, sin cuentas externas, sin analítica, sin telemetría y sin publicidad.
@@ -37,7 +37,7 @@
   - los equipos y direcciones que tú le pidas vigilar o leer (ping, puertos, webs, certificados, DNS, SNMP, Hikvision) y las redes que le pidas descubrir o escanear;
 - catlan escucha syslog en UDP 514 (`CATLAN_SYSLOG_PORT`) y solo guarda lo que llega de IPs del inventario, 30 días.
   - los canales de aviso que configures: tu servidor de correo, la API de Telegram (`api.telegram.org`) si pones un bot, y tu webhook.
-- Kitty solo envía nombre del equipo, sistema, modelo, CPU, memoria, discos, IPs, tiempo encendido, nº de serie y los errores y críticos del Visor de eventos o del journal de Linux (con las rutas de usuario tapadas), y solo después de que un administrador lo acepte. Nada de usuarios, programas, archivos ni lo que se hace en el equipo.
+- Kitty solo envía nombre del equipo, sistema, modelo, CPU, memoria, discos, IPs, tiempo encendido, nº de serie y los errores y críticos del Visor de eventos o del journal de Linux (con las rutas de usuario tapadas), más los avisos que escriba el usuario en su ventana, y solo después de que un administrador lo acepte. Nada de usuarios, programas, archivos ni lo que se hace en el equipo.
 - Las contraseñas de los usuarios se guardan con PBKDF2: no se pueden leer. Las de SNMP, correo y Telegram se guardan en la base de datos y nunca salen por la web. La copia de seguridad las incluye, por eso **va cifrada con la contraseña que elijas**: sin ella no se puede abrir.
 - Verificación en dos pasos: menú de tu usuario → «Verificación en dos pasos», con cualquier app de autenticación.
 - Lo que borras queda en Actividad hasta que borras la base de datos (Opciones → zona de peligro, con contraseña y copia previa).
