@@ -168,6 +168,7 @@ select{appearance:none;padding-right:34px;background-image:url("data:image/svg+x
 .tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13.5px}
 .tbl th{position:sticky;top:0;text-align:left;font-size:12px;font-weight:600;color:var(--tx3);padding:12px 16px;border-bottom:1px solid var(--line);background:var(--s1);white-space:nowrap}
 .tbl td{padding:calc(13px*var(--pad)) 16px;border-bottom:1px solid var(--line);white-space:nowrap}
+.tbl.kv td{white-space:normal;overflow-wrap:break-word}.tbl.kv tbody tr{cursor:default}
 .tbl tbody tr{cursor:pointer;transition:background .15s}
 .tbl tbody tr:hover,.tbl tbody tr:focus-visible{background:var(--s2);outline:none}
 .tbl tbody tr:last-child td{border-bottom:0}
@@ -655,6 +656,9 @@ button.inc-tg{cursor:pointer;transition:background .2s,color .2s}button.inc-tg:h
 .inc-kids>div{overflow:hidden;min-height:0;opacity:0;visibility:hidden;transition:opacity .3s,visibility 0s .45s}
 .inc-kids.open{grid-template-rows:1fr}.inc-kids.open>div{opacity:1;visibility:visible;transition:opacity .3s}
 .inc-kids .rowlink b{font-size:14px}
+.mon-dead{margin:0 0 14px;padding:10px 14px;border-radius:12px;background:color-mix(in oklab,var(--bad) 16%,transparent);color:var(--bad);font-weight:560;display:flex;gap:8px;align-items:center}
+.mon-dead[hidden]{display:none}
+.toast .undo{pointer-events:auto;margin-left:6px;border:1px solid color-mix(in oklab,var(--bg) 40%,transparent);background:none;color:inherit;font:inherit;border-radius:8px;padding:3px 10px;cursor:pointer}
 .muted-pill{display:inline-flex;align-items:center;gap:4px;color:var(--warn);font-weight:560}
 .dash::before{content:"";position:absolute;inset:-7px;border-radius:22px;pointer-events:none;opacity:0;transition:opacity .35s;
   background-image:radial-gradient(circle,var(--line2) 1.6px,transparent 1.8px);background-size:calc(var(--cw,80px) + 14px) 98px;background-position:calc(var(--cw,80px) / 2 + 7px) 49px}
@@ -1114,6 +1118,50 @@ async function api(path, method = 'GET', body, type = 'application/json') {
   if (write && !pending) sync('saved');
   return r.status === 204 ? null : r.json();
 }
+let undoLast = null; // el último borrado: Ctrl+Z lo deshace durante 10 s
+async function undoDel(ids) {
+  undoLast = null;
+  const res = await Promise.allSettled(ids.map(id => api(`log/${id}/undo`, 'POST')));
+  const ok = res.filter(r => r.status === 'fulfilled').length;
+  if (ok) toast(ok > 1 ? `${ok} recuperados` : 'Recuperado');
+  const one = res.length === 1 && res[0].value;
+  if (one && ['item', 'page', 'map', 'rack', 'subnet'].includes(one.kind)) location.hash = `#/${KINDS[one.kind][1]}/${one.id}`; else route(false);
+}
+// Borra sin preguntar y ofrece deshacer: el borrado queda en Actividad con su foto y se recupera con el mismo id
+async function delUndo(list, msg) {
+  const ids = [];
+  for (const [kind, path] of list) {
+    try { await api(path, 'DELETE'); } catch { continue; }
+    const l = await api(`log?kind=${kind}&ref=${path.split('/')[1]}`).catch(() => []);
+    const e = l.find(x => x.action === 'borrar'); if (e) ids.push(e.id);
+  }
+  if (!ids.length) return 0;
+  undoLast = {ids, at: Date.now()};
+  const t = document.createElement('div');
+  t.className = 'toast'; t.innerHTML = ui('check', 17) + `<span>${esc(msg)}</span><button class="undo">Deshacer <kbd style="opacity:.7">Ctrl+Z</kbd></button>`;
+  t.querySelector('.undo').onclick = () => { t.remove(); undoDel(ids); };
+  $('#toasts').append(t);
+  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 300); }, 10000);
+  return ids.length;
+}
+addEventListener('keydown', e => {
+  if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.key.toLowerCase() !== 'z' || !undoLast || Date.now() - undoLast.at > 10000) return;
+  if (e.target.closest?.('input,textarea,select,[contenteditable]')) return; // en un campo, Ctrl+Z es del campo
+  e.preventDefault(); document.querySelectorAll('#toasts .undo').forEach(b => b.closest('.toast').remove()); undoDel(undoLast.ids);
+});
+// Mantenimiento programado: sin avisos de esos equipos (o de los del rack) entre dos horas
+async function maintDialog(target, name) {
+  const local = d => new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 16), now = new Date();
+  const f = await dialog(`<h3>Programar mantenimiento</h3><p>${esc(name)}: mientras dure, catlan sigue comprobando pero no avisa ni suena. Vale para sus comprobaciones del monitor y de Salud.</p>
+    <div class="fields two"><div class="field"><label for="m-f">Desde</label><input id="m-f" name="from" type="datetime-local" required value="${local(now)}"></div>
+    <div class="field"><label for="m-t">Hasta</label><input id="m-t" name="to" type="datetime-local" required value="${local(new Date(+now + 2 * 36e5))}"></div></div>`, {ok: 'Programar'});
+  if (!f) return;
+  try {
+    const r = await api('maintenance', 'POST', {...target, from: new Date(f.get('from')).toISOString(), to: new Date(f.get('to')).toISOString()});
+    toast(r.muted ? `Mantenimiento programado: ${r.muted} ${r.muted === 1 ? 'comprobación' : 'comprobaciones'}` : 'Ninguna comprobación vigila esos equipos', r.muted ? undefined : 'bad');
+    pollMonitor();
+  } catch {}
+}
 function toast(msg, kind = '') {
   const t = document.createElement('div');
   t.className = 'toast ' + kind; t.innerHTML = ui(kind === 'bad' ? 'alert' : 'check', 17) + `<span>${esc(msg)}</span>`;
@@ -1300,8 +1348,10 @@ let monData = null, monPrev = null, monPaint = null, srcPrev = null, healthRange
 const monName = c => c.label || c.item_name || c.host;
 const CHECK_KINDS = {ping: 'Ping', tcp: 'Puerto TCP', http: 'Web (HTTP/HTTPS)', ssl: 'Certificado SSL', dns: 'DNS'};
 const checkTarget = c => c.kind === 'http' ? c.url : c.kind === 'tcp' || c.kind === 'ssl' ? `${c.host}:${c.port || 443}` : c.host;
-const isMuted = x => !!x.mute_until && date(x.mute_until) > Date.now();
-const muteTxt = x => 'silenciado hasta ' + date(x.mute_until).toLocaleString('es', {weekday: 'short', hour: '2-digit', minute: '2-digit'});
+const isMuted = x => !!x.mute_until && date(x.mute_until) > Date.now() && (!x.mute_from || date(x.mute_from) <= Date.now());
+const isPlanned = x => !!x.mute_from && date(x.mute_from) > Date.now() && date(x.mute_until) > Date.now(); // mantenimiento que aún no ha empezado
+const whenTxt = t => date(t).toLocaleString('es', {weekday: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'});
+const muteTxt = x => isPlanned(x) ? `mantenimiento ${whenTxt(x.mute_from)} – ${whenTxt(x.mute_until)}` : (x.mute_from ? 'en mantenimiento hasta ' : 'silenciado hasta ') + whenTxt(x.mute_until);
 async function muteDialog(title) {
   const f = await dialog(`<h3>${title}</h3><p>Mientras dure no sonará ni llegarán avisos. Si al acabar sigue fallando, avisa en ese momento.</p>
     <div class="fields"><div class="field"><label for="m-t">Durante</label><select id="m-t" name="m">${[[30, '30 minutos'], [60, '1 hora'], [120, '2 horas'], [240, '4 horas'], [480, '8 horas'], [1440, '24 horas'], [10080, '7 días']]
@@ -1315,6 +1365,10 @@ const mute = async (res, x, name) => { // x silenciado: quita el silencio; si no
 };
 async function pollMonitor() {
   try { const r = await fetch('/api/monitor'); if (!r.ok) return; monData = await r.json(); } catch { return; }
+  const md = monData.monitor, dead = md && md.age > 30; // late cada 2 s: medio minuto sin latido es que algo va mal
+  let bn = $('#mon-dead');
+  if (dead && !bn) { bn = Object.assign(document.createElement('div'), {id: 'mon-dead', className: 'mon-dead', role: 'alert'}); app.before(bn); }
+  if (bn) { bn.hidden = !dead; if (dead) bn.innerHTML = `${ui('alert', 16)}El monitor no da señales desde hace ${esc(upTxt(md.age))}: no se está vigilando nada.${md.error ? ` Último error: ${esc(md.error)}` : ''}`; }
   const down = monData.checks.filter(c => c.state === 'down' && !c.dep), b = $('#mon-badge'); // los que caen por otro no suman
   b.hidden = !down.length; b.textContent = down.length;
   if (monPrev) for (const c of monData.checks) {
@@ -2048,7 +2102,9 @@ const views = {
             <span class="ex">${us.length} ${us.length === 1 ? 'usuario' : 'usuarios'} · ${gs.length} ${gs.length === 1 ? 'grupo' : 'grupos'} · quién entra y quién puede editar</span></div><span style="display:flex;transform:rotate(-90deg)" class="dim">${ui('chev', 16)}</span></a>
           <a class="rowlink" href="#/inv" style="--i:1"><span class="badge-ic">${ui('signal', 18)}</span><div class="grow"><b>Kitty en los PCs</b>
             <span class="ex">En Inventario: «Añadir PC» y aceptar los que piden entrar</span></div><span style="display:flex;transform:rotate(-90deg)" class="dim">${ui('chev', 16)}</span></a>
-          <a class="rowlink" href="/api/backup" id="bk" style="--i:2"><span class="badge-ic">${ui('layers', 18)}</span><div class="grow"><b>Descargar copia de seguridad</b>
+          <a class="rowlink" href="#/sistema" style="--i:2"><span class="badge-ic">${ui('pulse', 18)}</span><div class="grow"><b>Salud de catlan</b>
+            <span class="ex">Tamaño de la base de datos, copias diarias, estado del monitor y comprobaciones atrasadas</span></div><span style="display:flex;transform:rotate(-90deg)" class="dim">${ui('chev', 16)}</span></a>
+          <a class="rowlink" href="/api/backup" id="bk" style="--i:3"><span class="badge-ic">${ui('layers', 18)}</span><div class="grow"><b>Descargar copia de seguridad</b>
             <span class="ex">Toda la base de datos, cifrada con una contraseña (lleva las credenciales de SNMP y avisos). Para restaurarla: <code>python catlan.py descifrar copia.catlan data/catlan.db</code> con catlan parado.</span></div>${ui('redo', 16)}</a></div>
         <section class="card pad mt" aria-labelledby="al-t"><h3 class="card-t" id="al-t">${ui('bell', 16)}Avisos fuera de catlan <span class="dim small" id="al-ch" style="font-weight:400"></span></h3>
           <p class="small muted" style="margin:0 0 12px">Cuando algo cae y cuando vuelve, avisos de Salud, incidencias críticas y garantías. Las contraseñas y tokens guardados no se vuelven a mostrar: déjalos en blanco para conservarlos.</p>
@@ -2437,7 +2493,7 @@ const views = {
       $('#more').onclick = e => menu(e.currentTarget, [
         ['Editar', () => location.hash = `#/wiki/${p.id}/edit`, {icon: 'edit'}],
         ['Copiar enlace', () => copy(`[[${p.title}]]`), {icon: 'link'}], '-',
-        ['Borrar página', async () => { if (await ask('¿Borrar esta página?', `«${esc(p.title)}» se borrará. Quedará una copia en Actividad.`)) { await api('pages/' + p.id, 'DELETE'); toast('Página borrada'); location.hash = '#/wiki'; } }, {icon: 'trash', danger: true}]]);
+        ['Borrar página', async () => { if (await delUndo([['page', 'pages/' + p.id]], 'Página borrada')) location.hash = '#/wiki'; }, {icon: 'trash', danger: true}]]);
       return;
     }
     crumbs([['Wiki', '#/wiki'], [p.title || 'Sin título', '#/wiki/' + p.id], ['Editar']]);
@@ -2481,6 +2537,7 @@ const views = {
             <td class="mono">${esc(i.ip)}</td><td class="muted hide-m">${esc(i.location)}</td><td>${i.status ? `<span class="pill ${tone(i.status)}"><i></i>${esc(i.status)}</span>` : ''}</td>
             <td class="mono dim hide-m">${esc(i.serial)}</td></tr>`).join('')}</tbody></table></div>
           <div class="actionbar ubar" id="ubar" hidden><b id="ucount"></b><span class="grow"></span>
+            <button class="btn" data-bulk="edit">${ui('edit', 15)}Cambiar…</button><button class="btn" data-bulk="maint">${ui('bell', 15)}Mantenimiento…</button>
             <button class="btn danger" data-bulk="del">${ui('trash', 15)}Borrar</button><button class="btn icon ghost" data-bulk="none" aria-label="Quitar la selección">${ui('x', 16)}</button></div>`
         : items.length ? empty('search', 'Sin resultados', `Ningún equipo coincide con «${esc(q)}».`)
         : empty('box', 'Inventario vacío', 'Añade switches, servidores, impresoras… y luego úsalos en esquemas y racks.', `<button class="btn pri" id="add">${ui('plus', 16)}Añadir el primer equipo</button>`));
@@ -2516,10 +2573,21 @@ const views = {
           const b = e.target.closest('[data-bulk]'); if (!b) return;
           if (b.dataset.bulk === 'none') { sel.clear(); return paintSel(); }
           const list = items.filter(i => sel.has(i.id));
-          if (!await ask(`¿Borrar ${list.length} ${list.length === 1 ? 'equipo' : 'equipos'}?`, `${list.slice(0, 6).map(i => esc(i.name || 'Sin nombre')).join(', ')}${list.length > 6 ? '…' : ''} desaparecerán del inventario. Sus enlaces quedarán tachados y habrá una copia de cada uno en Actividad.`)) return;
-          const res = await Promise.allSettled(list.map(i => api('items/' + i.id, 'DELETE')));
-          const bad = res.filter(r => r.status === 'rejected').length;
-          toast(bad ? `${list.length - bad} borrados, ${bad} fallaron` : `${list.length} borrados`, bad ? 'bad' : undefined); route(false);
+          if (b.dataset.bulk === 'maint') return maintDialog({items: list.map(i => i.id)}, `${list.length} equipos`);
+          if (b.dataset.bulk === 'edit') { // el mismo valor en un campo de todos los elegidos
+            const f = await dialog(`<h3>Cambiar ${list.length} ${list.length === 1 ? 'equipo' : 'equipos'}</h3><div class="fields two">
+              <div class="field"><label for="b-k">Campo</label><select id="b-k" name="k">${['location', 'status', 'kind', 'warranty'].map(k => `<option value="${k}">${ITEM_FIELDS.find(f => f[0] === k)[1]}</option>`).join('')}</select></div>
+              <div class="field"><label for="b-v">Nuevo valor</label><input id="b-v" name="v" list="dl-bulk" autocomplete="off"></div></div>
+              <datalist id="dl-bulk">${[...new Set(items.flatMap(i => [i.location, i.status, i.kind]).filter(Boolean))].map(v => `<option value="${esc(v)}">`).join('')}</datalist>
+              <p class="muted small">Vacío lo borra. La fecha de garantía va como AAAA-MM-DD. Cada cambio queda en el historial de su equipo.</p>`, {ok: 'Cambiar'});
+            if (!f) return;
+            const res = await Promise.allSettled(list.map(i => api('items/' + i.id, 'PUT', {[f.get('k')]: f.get('v').trim()})));
+            const bad = res.filter(r => r.status === 'rejected').length;
+            toast(bad ? `${list.length - bad} cambiados, ${bad} fallaron` : `${list.length} cambiados`, bad ? 'bad' : undefined); sel.clear(); return route(false);
+          }
+          const n = await delUndo(list.map(i => ['item', 'items/' + i.id]), `${list.length} ${list.length === 1 ? 'equipo borrado' : 'equipos borrados'}`);
+          if (n < list.length) toast(`${list.length - n} no se pudieron borrar`, 'bad');
+          route(false);
         };
       }
       $('#add') && ($('#add').onclick = create.item);
@@ -2569,7 +2637,7 @@ const views = {
             : `<p class="muted small">Aún no aparece en ningún sitio. Pega <code class="mono">${ref}</code> en una página o enlázalo desde un esquema o un rack.</p>`}</section>
           <section class="card pad" style="--i:2"><h3 class="card-t">${ui('clock', 15)}Historial <span class="count">${log.length}</span></h3><div class="scroll">${timeline(log)}</div></section></aside></div>
         ${sys.length ? `<section class="card pad mt"><h3 class="card-t">${ui('pulse', 15)}Syslog <span class="count">${sys.length}</span><span class="dim small" style="font-weight:400;margin-left:auto">últimos 30 días</span></h3>
-          <div class="scroll" style="max-height:340px"><table class="tbl"><tbody>${sys.map(l => `<tr><td class="mono dim small" style="white-space:nowrap">${esc(date(l.ts).toLocaleString('es'))}</td>
+          <div class="scroll" style="max-height:340px"><table class="tbl kv"><tbody>${sys.map(l => `<tr><td class="mono dim small" style="white-space:nowrap">${esc(date(l.ts).toLocaleString('es'))}</td>
             <td>${l.sev <= 3 ? `<span class="pill bad"><i></i>${l.sev <= 2 ? 'crítico' : 'error'}</span>` : l.sev === 4 ? '<span class="pill warn"><i></i>aviso</span>' : ''}</td>
             <td class="mono small" style="word-break:break-word">${esc(l.msg)}</td></tr>`).join('')}</tbody></table></div></section>` : ''}
         <datalist id="dl-status">${STATUSES.map(s => `<option value="${s}">`).join('')}</datalist><datalist id="dl-kind">${Object.values(ICONS).map(([n]) => `<option value="${n.toLowerCase()}">`).join('')}</datalist>`;
@@ -2590,7 +2658,25 @@ const views = {
     });
     $('#more').onclick = e => menu(e.currentTarget, [
       ['Copiar referencia', () => copy(ref), {icon: 'copy'}], '-',
-      ['Borrar equipo', async () => { if (await ask('¿Borrar este equipo?', `«${esc(i.name)}» desaparecerá del inventario. Sus enlaces quedarán tachados y habrá una copia en Actividad.`)) { await api('items/' + id, 'DELETE'); toast('Equipo borrado'); location.hash = '#/inv'; } }, {icon: 'trash', danger: true}]]);
+      ['Programar mantenimiento…', () => maintDialog({items: [i.id]}, i.name), {icon: 'bell'}], '-',
+      ['Borrar equipo', async () => { if (await delUndo([['item', 'items/' + id]], 'Equipo borrado')) location.hash = '#/inv'; }, {icon: 'trash', danger: true}]]);
+  },
+  async sistema() {
+    const h = await api('system'), mb = n => (n / 1048576).toFixed(n < 10485760 ? 1 : 0) + ' MB', m = h.monitor, ok = (v, t, f) => `<span class="pill ${v ? 'ok' : 'bad'}"><i></i>${v ? t : f}</span>`;
+    crumbs([['Opciones', '#/opts'], ['Salud de catlan']]);
+    const row = (k, v) => `<tr><td class="muted" style="width:40%">${k}</td><td>${v}</td></tr>`;
+    app.innerHTML = head('Salud de catlan', `catlan ${esc(h.version)} · base de datos v${h.schema} · en marcha desde ${esc(ago(h.started))}`)
+      + `<div class="split stagger"><section class="card pad" style="--i:0"><h3 class="card-t">${ui('pulse', 15)}Ahora</h3><table class="tbl kv"><tbody>
+          ${row('Monitor', ok(m.age <= 30, `late (hace ${m.age} s)`, `parado desde hace ${esc(upTxt(m.age))}`) + (m.error ? `<div class="small muted mt">Último error${m.error_ago != null ? ` (hace ${esc(upTxt(m.error_ago))})` : ''}: <span class="mono">${esc(m.error)}</span></div>` : ''))}
+          ${row('Comprobaciones atrasadas', h.late ? `<span class="pill warn"><i></i>${h.late}</span> <span class="small muted">llevan más de 3 vueltas sin hacerse</span>` : ok(true, 'ninguna'))}
+          ${row('Base de datos', ok(h.integrity === 'ok', 'íntegra', 'con daños: ' + esc(h.integrity)) + ` · ${mb(h.db_bytes)}${h.wal_bytes ? ` + ${mb(h.wal_bytes)} en WAL` : ''}`)}
+          ${row('Syslog', h.syslog ? `UDP ${h.syslog}` : '<span class="dim">apagado</span>')}${row('HTTPS', h.https ? 'propio' : '<span class="dim">no (o detrás de un proxy)</span>')}
+          ${Object.entries(h.counts).map(([k, v]) => row({items: 'Equipos', pages: 'Páginas', checks: 'Comprobaciones', sources: 'Fuentes de Salud', incidents: 'Incidencias', log: 'Entradas de Actividad', metrics: 'Lecturas (7 días)', syslog: 'Mensajes de syslog'}[k], v.toLocaleString('es'))).join('')}
+        </tbody></table></section>
+        <aside class="side-col"><section class="card pad" style="--i:1"><h3 class="card-t">${ui('layers', 15)}Copias diarias <span class="count">${h.backups.length}</span></h3>
+          ${h.backups.length ? `<ul class="rel">${h.backups.map(b => `<li><span style="display:flex;justify-content:space-between;gap:8px;padding:6px 0"><span class="mono small">${esc(b.name)}</span><span class="dim small">${mb(b.bytes)} · ${esc(ago(b.at))}</span></span></li>`).join('')}</ul>`
+            : '<p class="muted small">Aún ninguna: la primera se hace en los primeros minutos.</p>'}
+          <p class="muted small">En <span class="mono">data/backups/</span> del servidor, una al día; se guardan las 7 últimas. Para restaurar, con catlan parado, copia una sobre <span class="mono">data/catlan.db</span>.</p></section></aside></div>`;
   },
   async cad() {
     const [exps, items] = await Promise.all([api('expiries'), api('items')]), ro = ME.readonly, byId = Object.fromEntries(items.map(i => [i.id, i]));
@@ -2617,7 +2703,7 @@ const views = {
     if (!ro) app.querySelectorAll('tr[data-id]').forEach(tr => {
       const e = exps.find(x => x.id === +tr.dataset.id);
       tr.onclick = ev => !ev.target.closest('a') && menu(tr, [['Editar', () => edit(e), {icon: 'edit'}], '-',
-        ['Borrar', async () => { if (await ask('¿Borrar esta caducidad?', `«${esc(e.name)}» ya no avisará. Queda una copia en Actividad.`)) { await api('expiries/' + e.id, 'DELETE'); toast('Borrada'); route(false); } }, {icon: 'trash', danger: true}]]);
+        ['Borrar', async () => { if (await delUndo([['expiry', 'expiries/' + e.id]], 'Caducidad borrada')) route(false); }, {icon: 'trash', danger: true}]]);
       tr.onkeydown = ev => ev.key === 'Enter' && tr.onclick(ev);
     });
   },
@@ -2671,7 +2757,7 @@ const views = {
     $('#ed') && ($('#ed').onclick = () => subnetDialog(n));
     $('#scan') && ($('#scan').onclick = async e => { e.currentTarget.disabled = true; toast(`Escaneando ${n.cidr}…`); try { await api(`subnets/${n.id}/scan`, 'POST'); toast('Escaneo terminado'); } catch {} route(false); });
     $('#more').onclick = e => menu(e.currentTarget, [['Copiar red', () => copy(n.cidr), {icon: 'copy'}], ...(ro ? [] : ['-',
-      ['Borrar red', async () => { if (await ask('¿Borrar esta red?', `«${esc(n.cidr)}» desaparece de Redes. Los equipos del inventario no se tocan.`)) { await api('subnets/' + n.id, 'DELETE'); toast('Red borrada'); location.hash = '#/redes'; } }, {icon: 'trash', danger: true}]])]);
+      ['Borrar red', async () => { if (await delUndo([['subnet', 'subnets/' + n.id]], 'Red borrada')) location.hash = '#/redes'; }, {icon: 'trash', danger: true}]])]);
   },
   async maps(id) {
     if (!id) {
@@ -2850,7 +2936,7 @@ const views = {
     if (d.auto) $('#count').insertAdjacentHTML('afterend', `<span class="dim small"> · dibujado del switch el ${esc(date(d.auto.at).toLocaleString('es'))}</span>`);
     $('#more').onclick = e => menu(e.currentTarget, [
       ...(d.auto ? [['Volver a leer del switch', () => autoTopo(d.auto.source), {icon: 'redo'}], '-'] : []),
-      ['Borrar esquema', async () => { if (await ask('¿Borrar este esquema?', `«${esc($('#mname').value)}» y sus conexiones se borrarán. En Actividad queda una foto de sus iconos y conexiones.` + (m.has_image ? `<br><br><b>La imagen de fondo no se guarda.</b> <a href="/api/maps/${+m.id}/image" download="${esc($('#mname').value)}">Descárgala antes</a> si la necesitas.` : ''))) { clearTimeout(timer); await api('maps/' + m.id, 'DELETE'); toast('Esquema borrado'); location.hash = '#/maps'; } }, {icon: 'trash', danger: true}]]);
+      ['Borrar esquema', async () => { if (!m.has_image) { clearTimeout(timer); if (await delUndo([['map', 'maps/' + m.id]], 'Esquema borrado')) location.hash = '#/maps'; return; } if (await ask('¿Borrar este esquema?', `«${esc($('#mname').value)}» y sus conexiones se borrarán. En Actividad queda una foto de sus iconos y conexiones.` + (m.has_image ? `<br><br><b>La imagen de fondo no se guarda.</b> <a href="/api/maps/${+m.id}/image" download="${esc($('#mname').value)}">Descárgala antes</a> si la necesitas.` : ''))) { clearTimeout(timer); await api('maps/' + m.id, 'DELETE'); toast('Esquema borrado'); location.hash = '#/maps'; } }, {icon: 'trash', danger: true}]]);
     redraw = draw; draw(); panel();
   },
   async sla(month) {
@@ -2908,7 +2994,7 @@ const views = {
       $('#mon-sub').textContent = all.length ? `${all.length} vigilados · ${down ? `${down - deps} con fallos${deps ? ` y ${deps} afectados por ellos` : ''}` : 'todo funciona'}` : 'Ping, puertos, webs, certificados y DNS, con aviso si algo falla';
       $('#mon-list').innerHTML = cs.length ? cs.map(c => `<div class="mon-row ${c.state || ''}${c.dep ? ' dep' : ''}" data-id="${c.id}">
           <span class="mdot ${c.state || ''}" title="${c.state === 'up' ? 'Funciona' : c.state === 'down' ? 'Falla' : 'Comprobando…'}"></span>
-          <div class="mon-n"><b>${esc(monName(c))}</b><small>${isMuted(c) ? `<span class="muted-pill">${ui('bell', 12)}${esc(muteTxt(c))}</span> · ` : ''}<span class="dim">${CHECK_KINDS[c.kind || 'ping']}</span> · <span class="mono">${esc(checkTarget(c))}</span> · cada ${every(c.every)}${c.dep ? ` · <span class="dim">cae porque cae <b>${esc(c.dep.join(', '))}</b>: sin aviso</span>` : c.state === 'down' ? ` · <span class="t-bad">${esc(c.detail || 'no responde')}</span> desde ${esc(ago(c.since))}` : ''}</small></div>
+          <div class="mon-n"><b>${esc(monName(c))}</b><small>${isMuted(c) || isPlanned(c) ? `<span class="muted-pill">${ui('bell', 12)}${esc(muteTxt(c))}</span> · ` : ''}<span class="dim">${CHECK_KINDS[c.kind || 'ping']}</span> · <span class="mono">${esc(checkTarget(c))}</span> · cada ${every(c.every)}${c.dep ? ` · <span class="dim">cae porque cae <b>${esc(c.dep.join(', '))}</b>: sin aviso</span>` : c.state === 'down' ? ` · <span class="t-bad">${esc(c.detail || 'no responde')}</span> desde ${esc(ago(c.since))}` : ''}</small></div>
           <div class="spark" title="Últimas comprobaciones">${(c.recent || []).map(u => `<i class="${u ? '' : 'x'}"></i>`).join('')}</div>
           <div class="mon-k"><b class="mono">${c.state === 'down' ? 'falla' : c.state === 'up' && c.kind === 'ssl' ? esc(c.detail.replace('certificado caduca en ', '')) : c.state && c.rtt != null ? `${+(+c.rtt).toFixed(1)} ms` : '…'}</b><small>${c.uptime == null ? '—' : +(c.uptime * 100).toFixed(1) + '%'} en 24 h</small></div>
           <button class="btn icon ghost sm" data-more aria-label="Acciones de ${esc(monName(c))}" aria-haspopup="menu">${ui('more')}</button></div>`).join('')
@@ -2964,7 +3050,7 @@ const views = {
       menu(b, [['Editar', () => edit(c), {icon: 'edit'}], ['Ping ahora', () => { $('#ph').value = c.host; $('#pf').requestSubmit(); }, {icon: 'signal'}],
         [isMuted(c) ? 'Quitar silencio' : 'Silenciar…', () => mute('checks', c, monName(c)), {icon: 'bell'}],
         ['Crear incidencia', () => incidentDialog({title: `${monName(c)}: ${c.state === 'down' ? c.detail || 'no responde' : ''}`.replace(/: $/, ''), item: c.item, priority: c.state === 'down' ? 'alta' : 'media'}), {icon: 'ticket'}], '-',
-        ['Dejar de vigilar', async () => { if (await ask('¿Dejar de vigilar?', `«${esc(monName(c))}» dejará de recibir pings y avisos.`, 'Dejar de vigilar')) { await api('checks/' + c.id, 'DELETE'); toast('Ya no se vigila'); pollMonitor(); } }, {icon: 'trash', danger: true}]]);
+        ['Dejar de vigilar', async () => { if (await delUndo([['check', 'checks/' + c.id]], 'Ya no se vigila')) pollMonitor(); }, {icon: 'trash', danger: true}]]);
     };
     // Ping rápido: 4 pings, uno por petición, para verlos llegar en directo
     $('#pf').onsubmit = async e => {
@@ -3024,7 +3110,7 @@ const views = {
               ${h.state === 'error' ? `<p class="hc-err">${ui('alert', 14)}${esc(h.error)}</p>`
                 : h.problems.length ? `<ul class="probs">${h.problems.slice(0, 3).map(p => `<li>${ui('alert', 14)}${esc(p)}</li>`).join('')}${h.problems.length > 3 ? `<li class="dim">y ${h.problems.length - 3} más</li>` : ''}</ul>`
                 : h.state === 'ok' ? `<p class="hc-ok">${ui('check', 14)}Todo en orden</p>` : '<p class="dim small" style="margin:0">Leyendo por primera vez…</p>'}
-              <footer>${h.last ? `${h.kind === 'kitty' ? 'Enviado' : 'Leído'} ${esc(ago(h.last))}` : 'Pendiente'} · cada ${everyTxt(h.every)}${isMuted(h) ? ` · ${esc(muteTxt(h))}` : ''}</footer></a>`; }).join('')}</div>`
+              <footer>${h.last ? `${h.kind === 'kitty' ? 'Enviado' : 'Leído'} ${esc(ago(h.last))}` : 'Pendiente'} · cada ${everyTxt(h.every)}${isMuted(h) || isPlanned(h) ? ` · ${esc(muteTxt(h))}` : ''}</footer></a>`; }).join('')}</div>`
         : saludTab === 'kitty' && !kits ? empty('box', 'Ningún Kitten todavía', 'Instala Kitty en un PC o servidor y acéptalo en Inventario: aparecerá aquí con su sistema, CPU, memoria, discos y tiempo encendido.')
         : hs.length ? empty('search', 'Sin resultados', `Nada coincide con «${esc(q)}».`)
         : empty('thermo', 'Aún no lees ningún equipo', 'Activa SNMP en tu NAS o switch (o usa la API de tu grabador Hikvision) y catlan guardará sus temperaturas, discos y estado para dibujarlos y avisarte.'));
@@ -3042,7 +3128,7 @@ const views = {
       const lat = k => h.latest.filter(m => m.key.startsWith(k)), top = k => [...lat(k)].sort((a, b) => b.value - a.value)[0];
       const t = top('temp:'), d = top('disk:'), c = lat('cpu')[0], m = lat('mem')[0];
       const kit = h.kind === 'kitty', inf = h.info || {};
-      $('#h-sub').innerHTML = `${esc(kit ? inf.descr || 'Kitty' : SRC_KIND[h.kind] || h.kind)} · <span class="mono">${esc(h.host)}</span>${inf.uptime ? ` · encendido hace ${esc(upTxt(inf.uptime))}` : ''}${h.last ? ` · ${kit ? 'enviado' : 'leído'} ${esc(ago(h.last))}` : ''}${isMuted(h) ? ` · <span class="muted-pill">${ui('bell', 12)}${esc(muteTxt(h))}</span>` : ''}`;
+      $('#h-sub').innerHTML = `${esc(kit ? inf.descr || 'Kitty' : SRC_KIND[h.kind] || h.kind)} · <span class="mono">${esc(h.host)}</span>${inf.uptime ? ` · encendido hace ${esc(upTxt(inf.uptime))}` : ''}${h.last ? ` · ${kit ? 'enviado' : 'leído'} ${esc(ago(h.last))}` : ''}${isMuted(h) || isPlanned(h) ? ` · <span class="muted-pill">${ui('bell', 12)}${esc(muteTxt(h))}</span>` : ''}`;
       $('#h-state').innerHTML = h.state === 'error' ? `<div class="banner bad">${ui('alert', 16)}<span>${esc(h.error)}</span></div>`
         : h.problems.length ? `<div class="banner warn">${ui('alert', 16)}<ul>${h.problems.map(p => `<li>${esc(p)}</li>`).join('')}</ul></div>` : '';
       $('#kpis').innerHTML = (kit ? kpi('Encendido', inf.uptime ? upTxt(inf.uptime) : '—', inf.uptime && h.last ? 'desde ' + new Date(date(h.last) - inf.uptime * 1000).toLocaleString() : '') : kpi('Temperatura máxima', t ? fmtV(t.value, '°C') : '—', t?.label || 'sin sensores', t?.value > h.temp_max))
@@ -3290,7 +3376,8 @@ const views = {
     };
     $('#mname').oninput = save;
     $('#more').onclick = e => menu(e.currentTarget, [
-      ['Borrar rack', async () => { if (await ask('¿Borrar este rack?', `«${esc($('#mname').value)}» y su contenido se borrarán. Los equipos del inventario no se tocan.`)) { clearTimeout(timer); await api('maps/' + r.id, 'DELETE'); toast('Rack borrado'); location.hash = '#/racks'; } }, {icon: 'trash', danger: true}]]);
+      ['Programar mantenimiento…', () => maintDialog({rack: r.id}, $('#mname').value), {icon: 'bell'}], '-',
+      ['Borrar rack', async () => { clearTimeout(timer); if (await delUndo([['rack', 'maps/' + r.id]], 'Rack borrado')) location.hash = '#/racks'; }, {icon: 'trash', danger: true}]]);
     redraw = draw; draw(); panel();
   },
 };
@@ -3309,7 +3396,7 @@ async function route(animate = true) {
   document.body.classList.remove('nav-open');
   const [, view = 'home', ...rest] = location.hash.split('/');
   const v = views[view] ? view : 'home';
-  document.querySelectorAll('#nav a').forEach(a => { a.classList.toggle('on', a.dataset.v === ({p: 'wiki', discover: 'inv', cad: 'inv', sla: 'monitor', users: 'opts'}[v] || v)); a.toggleAttribute('aria-current', a.classList.contains('on')); });
+  document.querySelectorAll('#nav a').forEach(a => { a.classList.toggle('on', a.dataset.v === ({p: 'wiki', discover: 'inv', cad: 'inv', sla: 'monitor', users: 'opts', sistema: 'opts'}[v] || v)); a.toggleAttribute('aria-current', a.classList.contains('on')); });
   moveInd();
   delete app.dataset.w;
   try { await views[v](rest.join('/') || null); }
@@ -3480,7 +3567,8 @@ function showLogin() {
     <label>Usuario<input name="name" autocomplete="username" required autofocus></label>
     <label>Contraseña<input name="pass" type="password" autocomplete="current-password" required></label>
     <label hidden>Código de tu app de autenticación<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7"></label>
-    <p class="login-err" role="alert"></p><button class="btn pri">Entrar</button></form>`;
+    <p class="login-err" role="alert"></p><button class="btn pri">Entrar</button>
+    <details class="small muted" style="margin-top:12px"><summary style="cursor:pointer">¿Has olvidado la contraseña?</summary><p style="margin:8px 0 0">Pide a un administrador una nueva (Opciones → Usuarios). Si eres el único administrador, en el servidor de catlan ejecuta <code>python catlan.py restablecer tu-usuario</code> (con Docker: <code>docker compose exec catlan python catlan.py restablecer tu-usuario</code>).</p></details></form>`;
   document.body.append(el);
   const off = [...document.querySelectorAll('body > :not(#login):not([inert])')]; // detrás no se llega con el teclado
   off.forEach(x => x.inert = true);

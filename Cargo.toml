@@ -1,0 +1,40 @@
+[package]
+name = "catlan"
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.85"
+
+[dependencies]
+aes = "0.9.4"
+anyhow = "1.0.105"
+chrono = "0.4.45"
+ctrlc = { version = "3.5.3", features = ["termination"] }
+data-encoding = "2.11.1"
+dns-lookup = "4.0.2"
+flate2 = "1.1.11"
+form_urlencoded = "1.2.3"
+getrandom = "0.4.3"
+hmac = "0.13.0"
+httparse = "1.10.1"
+indexmap = "2.14.2"
+lettre = { version = "0.11.24", default-features = false, features = ["smtp-transport", "builder", "rustls", "ring", "rustls-native-certs"] }
+md-5 = "0.11.0"
+pbkdf2 = "0.13.0"
+regex = "1.13.2"
+roxmltree = "0.21.2"
+rpassword = "7.5.5"
+rusqlite = { version = "0.43.0", features = ["bundled", "backup"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+serde = "1.0.229"
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+sha1 = "0.11.0"
+sha2 = "0.11.1"
+shake = "0.1"
+ureq = { version = "2", features = ["native-certs"] }
+
+# La cripto (PBKDF2 de 600 000 vueltas, AES) se compila optimizada también en depuración y en las pruebas
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"

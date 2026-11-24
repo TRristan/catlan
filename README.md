@@ -7,8 +7,8 @@
 **El gato amigo de los IT.** Inventario, wiki, esquemas de red, racks, monitor, salud de equipos e incidencias en una sola web, autoalojada y 100 % local.
 
 ![Estado](https://img.shields.io/badge/estado-en%20desarrollo%20(WIP)-orange)
-![Python](https://img.shields.io/badge/python-3.12-3776ab)
-![Dependencias](https://img.shields.io/badge/dependencias-0-success)
+![Rust](https://img.shields.io/badge/rust-1.85%2B-b7410e)
+![Ejecutable](https://img.shields.io/badge/ejecutable-uno%2C%20sin%20dependencias-success)
 ![Datos](https://img.shields.io/badge/datos-solo%20en%20tu%20servidor-1f9d6a)
 ![Licencia](https://img.shields.io/badge/licencia-GPL--3.0-blue)
 
@@ -19,7 +19,7 @@
 > [!WARNING]
 > **Proyecto en desarrollo (WIP).** Funciona y tiene tests, pero aún cambia a menudo y puede haber fallos.
 > **No tiene actualizaciones automáticas ni online**: para actualizar, para catlan, haz una copia de `data/` y sustituye
-> `catlan.py`, `index.html` y `kitty.ps1` por los de la nueva versión. Al arrancar, catlan migra su base de datos solo
+> el ejecutable `catlan` (o `catlan.exe`) por el de la nueva versión: la web y los instaladores de Kitty van dentro. Al arrancar, catlan migra su base de datos solo
 > (y guarda una copia antes cuando hace falta).
 
 ## ¿Qué es?
@@ -28,8 +28,9 @@ catlan es la web de un equipo de sistemas para tener **todo enlazado por el ID d
 dónde está montado en el rack, en qué esquema aparece, qué páginas de la wiki lo mencionan, si responde al ping, cómo
 van sus discos y qué incidencias tiene abiertas. Con historial de cada cambio.
 
-- **Un archivo de servidor y un HTML.** Python 3.12 con la librería estándar: sin `pip install`, sin frameworks, sin
-  compilar. SNMP v2c/v3 (con AES-128) está escrito a mano.
+- **Un solo ejecutable.** Escrito en Rust: la web, la base de datos (SQLite) y los instaladores de Kitty van dentro;
+  nada que instalar en el servidor. SNMP v2c/v3 está escrito a mano; la criptografía (AES, HMAC, PBKDF2, TLS) usa crates
+  revisados de RustCrypto y rustls.
 - **Todo local.** Una base de datos SQLite en `data/`. Sin nube, sin cuentas externas, sin analítica ni telemetría; la web
   no carga nada de Internet.
 - **En español** y pensada para el día a día de un IT: atajos de teclado, buscador global, tema claro y oscuro, móvil.
@@ -54,7 +55,9 @@ van sus discos y qué incidencias tiene abiertas. Con historial de cada cambio.
 
 Además: **dashboard** personalizable (arrastrar, agrandar, líneas, barras o tarta), **Actividad** con una foto de cada versión,
 **tutorial** guiado la primera vez, aviso si dos personas editan lo mismo a la vez (wiki, inventario, esquemas, racks e
-incidencias), y la web se adapta al móvil.
+incidencias), **deshacer** (`Ctrl+Z` o el botón del aviso) al borrar equipos, páginas, esquemas, racks, comprobaciones,
+caducidades y redes, **cambios en lote** en el inventario, **mantenimientos programados** (de un equipo, de varios o de
+todo un rack, de tal hora a tal hora), una página de **Salud de catlan** en Opciones, y la web se adapta al móvil.
 
 <p align="center">
   <img src="docs/screenshots/dashboard-claro.png" width="64%" alt="Tema claro">
@@ -64,13 +67,18 @@ incidencias), y la web se adapta al móvil.
 
 ## Arranque rápido
 
-Con Python 3.12 (nada que instalar):
+Compílalo con Rust (1.85 o más nuevo, desde [rustup.rs](https://rustup.rs)) y arráncalo:
 
 ```bash
 git clone https://github.com/TRristan/catlan.git
 cd catlan
-python catlan.py
+cargo build --release
+./target/release/catlan            # en Windows: target\release\catlan.exe
+elease\catlan.exe
+eleasetlan.exe
 ```
+
+El ejecutable no necesita nada más: cópialo donde quieras. Los datos van a `data/`, junto a él.
 
 O con Docker:
 
@@ -79,6 +87,16 @@ docker compose up -d
 ```
 
 Abre **http://localhost:8080** y entra con **admin / admin**: catlan te pide cambiar la contraseña antes de nada.
+
+¿Contraseña olvidada? Un administrador te pone una nueva en **Opciones → Usuarios**. Si eres el único administrador,
+en el servidor (no hace falta parar catlan):
+
+```bash
+catlan restablecer admin          # o: docker compose exec catlan catlan restablecer admin
+```
+
+Saca una contraseña provisional (se pide cambiarla al entrar), quita la verificación en dos pasos de ese usuario y cierra
+sus sesiones. Sin usuario, lista los que hay.
 
 ## Mini tutorial: los primeros 10 minutos
 
@@ -128,7 +146,7 @@ Todo se configura desde la web. Opcionalmente, con variables de entorno:
 | Variable | Por defecto | Qué hace |
 |---|---|---|
 | `CATLAN_PORT` | `8080` | Puerto |
-| `CATLAN_DATA` | `./data` | Carpeta de la base de datos |
+| `CATLAN_DATA` | `data/` junto al ejecutable | Carpeta de la base de datos |
 | `CATLAN_PASSWORD` | (vacío) | Contraseña inicial de `admin`. Vacía: `admin`, a cambiar al entrar |
 | `CATLAN_SYSLOG_PORT` | `514` | Puerto UDP del receptor de syslog (`0`: sin syslog; en Linux, 514 necesita root o `CAP_NET_BIND_SERVICE`) |
 | `CATLAN_CERT` · `CATLAN_KEY` | (vacío) | Rutas del certificado y su clave (PEM): catlan sirve HTTPS en `CATLAN_PORT` |
@@ -143,23 +161,31 @@ Todo se configura desde la web. Opcionalmente, con variables de entorno:
 o copia `data/catlan.db` con catlan parado. Para restaurar, con catlan parado:
 
 ```bash
-python catlan.py descifrar catlan-20261120-1800.catlan data/catlan.db
+catlan descifrar catlan-20261120-1800.catlan data/catlan.db
 ```
 
-Al arrancar, catlan aplica las migraciones de base de datos que falten (numeradas, guarda una copia antes) y se niega a
-abrir una base de datos de una versión más nueva.
+Además, catlan hace **una copia al día** en `data/backups/` y guarda las 7 últimas (se ven en **Opciones → Salud de
+catlan**). Para restaurar una, con catlan parado, cópiala sobre `data/catlan.db`.
+
+Al arrancar, catlan comprueba la base de datos (`PRAGMA integrity_check`), aplica las migraciones que falten (numeradas,
+guarda una copia antes) y se niega a abrir una base de datos de una versión más nueva. Usa SQLite en modo WAL: aguanta
+mejor los cortes de luz, las lecturas no esperan a las escrituras y, al pararlo (`Ctrl+C` o `docker stop`), termina la
+escritura en curso y lo deja todo dentro de `catlan.db`. Si el monitor deja de latir, la web lo avisa en todas las vistas.
 
 ## Desarrollo y tests
 
 ```bash
-python test_catlan.py        # API completa, sin instalar nada (servidor, SMTP, webhook y agentes SNMP de mentira)
+cargo test                   # lo interno: BER, AES y claves USM (vectores oficiales), TOTP, copias cifradas, interfaces, SLA…
+cargo build --release
+python test_catlan.py        # API completa contra el ejecutable (servidor, SMTP, webhook y agentes SNMP de mentira)
 pip install snmpsim pysmi cryptography
 python test_snmpv3.py        # SNMPv3 contra el simulador snmpsim
 python test_topologia.py     # auto-topología (LLDP, CDP, MAC, ARP) contra snmpsim, por v2c y v3
 ```
 
-`catlan.py` es el servidor (API, autenticación, monitor, SNMP y SQLite) e `index.html` es toda la web (HTML, CSS y JS
-sin dependencias).
+El servidor está en `src/` (Rust): `web.rs` la API y las sesiones, `db.rs` SQLite y las migraciones, `monitor.rs` las
+comprobaciones y los avisos, `snmp.rs` y `health.rs` la lectura de equipos. `index.html` es toda la web (HTML, CSS y JS
+sin dependencias) y se mete en el ejecutable al compilar. Los tests de Python prueban el ejecutable desde fuera.
 
 ## Estado y límites conocidos
 

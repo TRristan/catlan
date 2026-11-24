@@ -1,7 +1,82 @@
-"""Prueba de humo de la API: python test_catlan.py"""
+"""Prueba de humo de la API contra el ejecutable de catlan (cargo build --release; o CATLAN_BIN=ruta): python test_catlan.py
+Lo interno (BER, AES, USM, interfaces, SLA…) lo prueban las pruebas de Rust: cargo test"""
 from pathlib import Path
-import base64, http.server, json, os, socket, socketserver, ssl, subprocess, sys, tempfile, threading, time, urllib.request, urllib.error
+import base64, gzip, hashlib, hmac, http.server, json, os, socket, sqlite3, socketserver, subprocess, sys, tempfile, threading, time, urllib.request, urllib.error
 from datetime import datetime, timedelta, timezone
+
+HERE = Path(__file__).parent
+BIN = os.environ.get("CATLAN_BIN") or str(HERE / "target" / "release" / ("catlan.exe" if os.name == "nt" else "catlan"))
+if not Path(BIN).exists():
+    sys.exit(f"No encuentro {BIN}: compila con «cargo build --release» o indica la ruta en CATLAN_BIN")
+MIGRATIONS = 28  # migraciones numeradas de src/db.rs
+SECRET = ("community", "pass", "priv_pass")
+SEAL = b"CATLAN-CIFRADO-1"
+sha = lambda t: hashlib.sha256(t.encode()).hexdigest()
+
+
+# BER a mano para el agente SNMP de mentira (independiente del de catlan: así se prueba el uno contra el otro)
+def tlv(tag, v):
+    n = len(v)
+    return bytes([tag]) + (bytes([n]) if n < 128 else (lambda b: bytes([0x80 | len(b)]) + b)(n.to_bytes((n.bit_length() + 7) // 8, "big"))) + v
+
+
+def ber_int(n, tag=2):
+    return tlv(tag, n.to_bytes(max(1, (n.bit_length() + 8) // 8), "big", signed=True))
+
+
+def ber_oid(oid):
+    p = [int(x) for x in oid.split(".")]
+    out = bytearray([40 * p[0] + p[1]])
+    for x in p[2:]:
+        chunk = [x & 0x7F]
+        x >>= 7
+        while x:
+            chunk.append(0x80 | (x & 0x7F))
+            x >>= 7
+        out += bytes(reversed(chunk))
+    return tlv(6, bytes(out))
+
+
+def ber_read(b, i):
+    tag, n = b[i], b[i + 1]
+    i += 2
+    if n & 0x80:
+        k = n & 0x7F
+        n, i = int.from_bytes(b[i:i + k], "big"), i + k
+    return tag, b[i:i + n], i + n
+
+
+def oid_str(v):
+    p, x = [v[0] // 40, v[0] % 40], 0
+    for c in v[1:]:
+        x = (x << 7) | (c & 0x7F)
+        if not c & 0x80:
+            p.append(x)
+            x = 0
+    return ".".join(map(str, p))
+
+
+def totp(secret, t=None):
+    mac = hmac.new(base64.b32decode(secret), int((time.time() if t is None else t) // 30).to_bytes(8, "big"), "sha1").digest()
+    o = mac[-1] & 15
+    return "%06d" % ((int.from_bytes(mac[o:o + 4], "big") & 0x7FFFFFFF) % 10 ** 6)
+
+
+def unseal(blob, pw):
+    """El formato de las copias cifradas, leído aquí en Python: el de Rust tiene que ser el mismo de siempre."""
+    if not blob.startswith(SEAL) or len(blob) < len(SEAL) + 64:
+        raise ValueError("no es una copia cifrada de catlan")
+    salt, nonce, ct, tag = blob[16:32], blob[32:48], blob[48:-32], blob[-32:]
+    k = hashlib.pbkdf2_hmac("sha256", pw.encode(), salt, 600_000, 64)
+    if not hmac.compare_digest(tag, hmac.new(k[32:], blob[:-32], "sha256").digest()):
+        raise ValueError("contraseña incorrecta o copia dañada")
+    stream = hashlib.shake_256(k[:32] + nonce).digest(len(ct))
+    return bytes(a ^ b for a, b in zip(ct, stream))
+
+
+def muted(row):
+    now = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+    return bool(row.get("mute_until")) and row["mute_until"] > now and (row.get("mute_from") or "") <= now
 
 mails = []  # correos recibidos por el servidor SMTP de mentira
 
@@ -58,10 +133,6 @@ web = http.server.ThreadingHTTPServer(("127.0.0.1", 0), FakeWeb)
 threading.Thread(target=web.serve_forever, daemon=True).start()
 WEB = f"http://127.0.0.1:{web.server_address[1]}"
 
-# catlan importado solo por sus funciones BER (su base de datos va a una carpeta temporal)
-os.environ["CATLAN_DATA"] = tempfile.mkdtemp()
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import catlan  # noqa: E402
 from email import message_from_string, policy  # noqa: E402
 
 # NAS Synology de mentira: disco 2 caliente, /volume1 al 96 % y el RAID degradado
@@ -85,21 +156,21 @@ KEY = lambda o: tuple(map(int, o.split(".")))
 class FakeAgent(socketserver.BaseRequestHandler):
     def handle(self):
         data, sock = self.request
-        _, msg, _ = catlan.ber_read(data, 0)
-        _, _, i = catlan.ber_read(msg, 0)
-        _, comm, i = catlan.ber_read(msg, i)
+        _, msg, _ = ber_read(data, 0)
+        _, _, i = ber_read(msg, 0)
+        _, comm, i = ber_read(msg, i)
         mib = {b"secreta": MIB, b"switch": SW}.get(comm)
         if mib is None:
             return  # comunidad incorrecta: silencio, como un equipo real
-        tag, pdu, _ = catlan.ber_read(msg, i)
-        _, rid, j = catlan.ber_read(pdu, 0)
-        _, _, j = catlan.ber_read(pdu, j)
-        _, rep, j = catlan.ber_read(pdu, j)
-        _, vbl, _ = catlan.ber_read(pdu, j)
+        tag, pdu, _ = ber_read(msg, i)
+        _, rid, j = ber_read(pdu, 0)
+        _, _, j = ber_read(pdu, j)
+        _, rep, j = ber_read(pdu, j)
+        _, vbl, _ = ber_read(pdu, j)
         oids, k = [], 0
         while k < len(vbl):
-            _, vb, k = catlan.ber_read(vbl, k)
-            oids.append(catlan.oid_str(catlan.ber_read(vb, 0)[1]))
+            _, vb, k = ber_read(vbl, k)
+            oids.append(oid_str(ber_read(vb, 0)[1]))
         out = []
         for o in oids:
             if tag == 0xA0:
@@ -107,21 +178,21 @@ class FakeAgent(socketserver.BaseRequestHandler):
             else:
                 nxt = [x for x in sorted(mib, key=KEY) if KEY(x) > KEY(o)][:int.from_bytes(rep, "big")]
                 out += [(x, mib[x]) for x in nxt] or [(o, (0x82, None))]
-        enc = lambda t, v: bytes([t, 0]) if v is None else catlan.tlv(4, v if isinstance(v, bytes) else v.encode()) if t == 4 else catlan.ber_oid(v) if t == 6 else catlan.ber_int(v, t)
-        vbs = b"".join(catlan.tlv(0x30, catlan.ber_oid(o) + enc(*tv)) for o, tv in out)
-        sock.sendto(catlan.tlv(0x30, catlan.ber_int(1) + catlan.tlv(4, comm) + catlan.tlv(0xA2, catlan.tlv(2, rid) + catlan.ber_int(0)
-                    + catlan.ber_int(0) + catlan.tlv(0x30, vbs))), self.client_address)
+        enc = lambda t, v: bytes([t, 0]) if v is None else tlv(4, v if isinstance(v, bytes) else v.encode()) if t == 4 else ber_oid(v) if t == 6 else ber_int(v, t)
+        vbs = b"".join(tlv(0x30, ber_oid(o) + enc(*tv)) for o, tv in out)
+        sock.sendto(tlv(0x30, ber_int(1) + tlv(4, comm) + tlv(0xA2, tlv(2, rid) + ber_int(0)
+                    + ber_int(0) + tlv(0x30, vbs))), self.client_address)
 
 
 # Switch de mentira para la auto-topología: Gi1/0/1 servidor por LLDP, Gi1/0/2 router por CDP, Gi1/0/3 un PC por su MAC (IP por ARP),
 # Gi1/0/4 dos MAC sin IP y Gi1/0/5 un enlace con 6 MAC detrás (no es «un equipo»)
-SW = {f"{catlan.IF['name']}.{n}": (S, f"Gi1/0/{n}") for n in range(1, 6)}
-SW.update({f"{catlan.BRIDGE_IF}.{n}": (2, n) for n in range(1, 6)})
-L, LM, LL, C, F = catlan.LLDP_REM, catlan.LLDP_MAN, catlan.LLDP_LOC, catlan.CDP, catlan.FDB_Q
+SW = {f"1.3.6.1.2.1.31.1.1.1.1.{n}": (S, f"Gi1/0/{n}") for n in range(1, 6)}
+SW.update({f"1.3.6.1.2.1.17.1.4.1.2.{n}": (2, n) for n in range(1, 6)})
+L, LM, LL, C, F = "1.0.8802.1.1.2.1.4.1.1", "1.0.8802.1.1.2.1.4.2.1", "1.0.8802.1.1.2.1.3.7.1", "1.3.6.1.4.1.9.9.23.1.2.1.1", "1.3.6.1.2.1.17.7.1.2.2.1.2"
 SW.update({f"{LL}.3.1": (S, "Gi1/0/1"), f"{L}.5.0.1.1": (S, bytes.fromhex("0050569a0001")), f"{L}.7.0.1.1": (S, "eth0"), f"{L}.8.0.1.1": (S, "eth0"),
            f"{L}.9.0.1.1": (S, "srv-web.empresa.lan"), f"{L}.12.0.1.1": (S, bytes([0x01, 0])), f"{LM}.3.0.1.1.1.4.10.0.0.10": (2, 2),
            f"{C}.4.2.1": (S, bytes([10, 0, 0, 1])), f"{C}.6.2.1": (S, "core-rtr"), f"{C}.7.2.1": (S, "Gi0/0"), f"{C}.9.2.1": (S, bytes([0, 0, 0, 1])),
-           f"{catlan.ARP}.3.10.0.1.15": (S, bytes.fromhex("aabbcc000003"))})
+           f"1.3.6.1.2.1.4.22.1.2.3.10.0.1.15": (S, bytes.fromhex("aabbcc000003"))})
 for port, macs in ((3, ["aabbcc000003"]), (4, ["aabbcc000041", "aabbcc000042"]), (5, [f"aabbcc0000{i:02x}" for i in range(0x50, 0x56)])):
     SW.update({F + ".1." + ".".join(str(b) for b in bytes.fromhex(m)): (2, port) for m in macs})
 
@@ -135,7 +206,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as _u:  # un puerto UDP li
     SYSLOG = _u.getsockname()[1]
 env = {**os.environ, "CATLAN_DATA": tempfile.mkdtemp(), "CATLAN_PORT": PORT, "CATLAN_PASSWORD": "miau", "CATLAN_SYSLOG_PORT": str(SYSLOG),
        "CATLAN_SMTP_HOST": "127.0.0.1", "CATLAN_SMTP_PORT": str(smtp.server_address[1]), "CATLAN_MAIL_TO": "it@example.com", "CATLAN_WEBHOOK_URL": WEB + "/hook"}
-srv = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(__file__), "catlan.py")], env=env)
+srv = subprocess.Popen([BIN], env=env)
 AUTH = "Basic " + base64.b64encode(b"admin:miau").decode()  # CATLAN_PASSWORD = la del admin inicial
 
 
@@ -169,7 +240,7 @@ try:
             return e.code, "", json.loads(e.read() or b"null")
 
     st, adm, me = raw("/api/login", "POST", {"name": "admin", "pass": "miau"})
-    assert st == 200 and adm.startswith(f"catlan_{catlan.sha(str(Path(env['CATLAN_DATA']).resolve()))[:10]}=") and me == {"id": 1, "name": "admin", "admin": 1, "must_change": 0, "totp": 0, "readonly": False, "groups": []}
+    assert st == 200 and adm.startswith(f"catlan_{sha(str(Path(env['CATLAN_DATA']).resolve()))[:10]}=") and me == {"id": 1, "name": "admin", "admin": 1, "must_change": 0, "totp": 0, "readonly": False, "groups": []}
     assert raw("/api/pages", cookie=adm)[0] == 200 and raw("/api/login", "POST", {"name": "admin", "pass": "mal"})[0] == 401
     # Instalación nueva: la wiki trae la «Guía de catlan» (uso, funciones y qué hace con los datos), una sola vez
     guia = call("/api/pages")[1]
@@ -178,7 +249,7 @@ try:
     assert not body.startswith("# ") and all(t in body for t in ("## Primeros pasos", "## Qué hace cada sección", "## Tus datos", "## Qué no hace", "telemetría", "api.telegram.org"))
     # Dos catlan en la misma máquina: el navegador comparte cookies entre puertos; entrar en uno no debe echar del otro
     import http.cookiejar
-    otro = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(__file__), "catlan.py")],
+    otro = subprocess.Popen([BIN],
                             env={**env, "CATLAN_DATA": tempfile.mkdtemp(), "CATLAN_PORT": "18100"}, stdout=subprocess.DEVNULL)
     try:
         jar = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
@@ -288,9 +359,6 @@ try:
     for bad in [{"kind": "smtp", "host": "x"}, {"kind": "tcp", "host": "127.0.0.1"}, {"kind": "http", "host": "x"}, {"kind": "tcp", "host": "x", "port": 70000},
                 {"kind": "http", "host": "x", "url": "javascript:alert(1)"}, {"kind": "ssl", "host": "x", "port": 443, "warn_days": 0}]:
         assert call("/api/checks", "POST", bad)[0] == 400, bad
-    ctx = ssl.create_default_context()  # caducidad leída a mano = la que lee Python, en todas las CA del sistema
-    assert ctx.get_ca_certs() and all(catlan.cert_expiry(d) == ssl.cert_time_to_seconds(i["notAfter"])
-                                      for d, i in zip(ctx.get_ca_certs(True), ctx.get_ca_certs()))
     new = lambda **b: call("/api/checks", "POST", {"host": "127.0.0.1", "every": 10, **b})[1]["id"]
     tcp_id, web_id, dns_id = new(kind="tcp", port=smtp.server_address[1]), new(kind="http", url=WEB + "/", expect="miau"), new(kind="dns", host="localhost", expect="127.0.0.1")
     roto = new(kind="http", url=WEB + "/roto", label="web rota")
@@ -335,39 +403,14 @@ try:
     snd = call("/api/sounds?name=Gong", "POST", b"RIFF-fake-wav", ctype="audio/wav")[1]
     assert call(f"/api/sounds/{snd['id']}/audio")[1] == b"RIFF-fake-wav"
     assert call(f"/api/sounds/{snd['id']}", "DELETE")[0] == 204 and call("/api/sounds")[1] == []
-    # SNMP: la codificación coincide byte a byte con un GetRequest calculado a mano
-    assert catlan.snmp_msg("public", 0xA0, 1, ["1.3.6.1.2.1.1.1.0"]).hex() == (
-        "3026020101" "04067075626c6963" "a019" "020101" "020100" "020100" "300e" "300c" "06082b06010201010100" "0500")
-    assert catlan.oid_str(catlan.ber_oid("1.3.6.1.4.1.14988.1")[2:]) == "1.3.6.1.4.1.14988.1"  # arcos grandes
-    # SNMPv3: vectores oficiales de AES (FIPS-197, NIST SP 800-38A) y de las claves USM (RFC 3414 A.3)
-    assert catlan.aes_block(catlan.aes_keys(bytes(range(16))), bytes.fromhex("00112233445566778899aabbccddeeff")).hex() == "69c4e0d86a7b0430d8cdb78070b4c55a"
-    k, iv = bytes.fromhex("2b7e151628aed2a6abf7158809cf4f3c"), bytes(range(16))
-    pt = bytes.fromhex("6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e51")
-    assert catlan.aes_cfb(k, iv, pt, True).hex() == "3b3fd92eb72dad20333449f8e83cfb4ac8a64537a0b3a93fcde3cdad9f1ce58b"
-    assert catlan.aes_cfb(k, iv, catlan.aes_cfb(k, iv, pt[:20], True), False) == pt[:20]  # bloque final incompleto
-    e = bytes.fromhex("000000000000000000000002")
-    assert catlan.usm_key("md5", "maplesyrup", e).hex() == "526f5eed9fcce26f8964c2930787d82b"
-    assert catlan.usm_key("sha", "maplesyrup", e).hex() == "6695febc9288e36282235fc7151f128497b38f3f"
-    # SNMPv3 con firma y cifrado: solo vale una respuesta con esa misma seguridad
-    s = catlan.SNMP("127.0.0.1", v3={"user": "lector", "auth": "sha", "pass": "clave-larga", "priv": "aes", "priv_pass": "otra-clave"})
-    s.eng, s.boots, s.etime, s.at = e, 1, 100, time.monotonic()
-    s.ka, s.kp = catlan.usm_key("sha", "clave-larga", e), catlan.usm_key("sha", "otra-clave", e)[:16]
-    ok = s._v3_msg(0xA2, ["1.3.6.1.2.1.1.5.0"], 0)
-    assert s._v3_parse(ok) == (s.rid, 0xA2, 0, [("1.3.6.1.2.1.1.5.0", 5, None)])
-    assert s._v3_parse(ok[:-1] + bytes([ok[-1] ^ 1])) is None  # un bit cambiado: la firma ya no vale
-    for lvl in (0, 1):  # respuesta falsa sin firma, o firmada pero sin cifrar
-        s.lvl = lvl
-        forged = s._v3_msg(0xA2, ["1.3.6.1.2.1.1.5.0"], 0)
-        s.lvl = 3
-        assert s._v3_parse(forged) is None, lvl
     v3 = {"host": "127.0.0.1", "v3": True, "user": "lector", "auth": "sha", "pass": "clave-larga", "priv": "aes", "priv_pass": "otra-clave"}
     for bad in [{**v3, "user": ""}, {**v3, "auth": "none"}, {**v3, "pass": "corta"}, {**v3, "auth": "sha1"}, {**v3, "priv": "des"}, {**v3, "v3": 2}]:
         assert call("/api/sources", "POST", bad)[0] == 400, bad
     s3, r3 = call("/api/sources", "POST", {**v3, "label": "v3 sin equipo"})
-    assert s3 == 201 and r3["v3"] == 1 and r3["auth"] == "sha" and not set(catlan.SECRET) & set(r3), r3  # contraseñas fuera
+    assert s3 == 201 and r3["v3"] == 1 and r3["auth"] == "sha" and not set(SECRET) & set(r3), r3  # contraseñas fuera
     assert call(f"/api/sources/{r3['id']}", "DELETE")[0] == 204
     hist3 = call(f"/api/log?kind=source&ref={r3['id']}")[1]
-    assert len(hist3) == 2 and all(not set(catlan.SECRET) & set(json.loads(h["data"])) for h in hist3)  # ni en el historial
+    assert len(hist3) == 2 and all(not set(SECRET) & set(json.loads(h["data"])) for h in hist3)  # ni en el historial
     nas = {"host": "127.0.0.1", "port": APORT, "kind": "synology", "community": "secreta"}
     for bad in [{**nas, "kind": "nope"}, {**nas, "every": 30}, {**nas, "host": "-x"}, {**nas, "temp_max": "a"}]:
         assert call("/api/sources", "POST", bad)[0] == 400, bad
@@ -394,11 +437,6 @@ try:
         time.sleep(0.5)
     assert any("NAS CPD" in str(message_from_string(m, policy=policy.default)["subject"]) for m in mails)  # aviso por correo
     assert any(x["state"] == "warn" for x in call("/api/monitor")[1]["sources"])  # para el aviso en pantalla
-    # Grabador Hikvision: disco con error y uso calculado
-    hik = b"""<hddList xmlns="http://www.hikvision.com/ver20/XMLSchema"><hdd><id>1</id><hddName>hdd1</hddName><status>ok</status>
-      <capacity>1000</capacity><freeSpace>250</freeSpace></hdd><hdd><id>2</id><hddName>hdd2</hddName><status>error</status>
-      <capacity>1000</capacity><freeSpace>1000</freeSpace></hdd></hddList>"""
-    assert catlan.parse_hik(hik) == ([("disk:hdd1", "hdd1", 75.0, "%"), ("disk:hdd2", "hdd2", 0.0, "%")], ["hdd2: error"])
     # Dashboard: uno compartido; el frontal pinta lo guardado, así que solo entran campos conocidos
     assert call("/api/dashboard") == (200, None)  # sin guardar: el frontal pone el de por defecto
     dash = {"widgets": [{"id": "a1", "kind": "inv", "by": "status", "view": "pie", "x": 0, "y": 0, "w": 4, "h": 3, "title": "Estado"},
@@ -412,39 +450,7 @@ try:
     assert call("/api/dashboard") == (200, dash)  # lo rechazado no pisa lo guardado
     lat = call("/api/latency?hours=1")[1]
     assert lat[str(ok_id)] and all(isinstance(v, (int, float)) for _, v in lat[str(ok_id)]) and str(down_id) not in lat  # el caído no tiene latencia
-    # Interfaces: Mbps a partir de dos lecturas; contador reiniciado = sin dato; vuelta del contador de 32 bits
-    class FakeIf:  # walk() como el de catlan: {ifIndex: valor}
-        def __init__(self, d): self.d = d
-        def walk(self, oid): return self.d.get(oid, {})
-    I, t0 = catlan.IF, time.time()
-    sw = {I["type"]: {"1": 6, "2": 6, "3": 24, "4": 6}, I["name"]: {"1": "Gi1", "2": "Gi2", "3": "lo", "4": "Gi4"}, I["alias"]: {"1": "UPLINK", "4": "SRV"},
-          I["oper"]: {"1": 1, "2": 1, "3": 1, "4": 2}, I["admin"]: {"1": 1, "2": 1, "3": 1, "4": 1}, I["speed"]: {"1": 1000, "2": 100, "4": 1000},
-          I["hin"]: {"1": 10 ** 12 + 7_500_000_000, "2": 100, "4": 0}, I["hout"]: {"1": 10 ** 12, "2": 100, "4": 0}}
-    catlan.IF_PREV[99] = {"1": (t0 - 60, 10 ** 12, 10 ** 12, 0), "2": (t0 - 60, 200, 100, 0)}  # Gi2: el contador bajó (reinicio)
-    out, probs = [], []
-    ports = catlan.interfaces(FakeIf(sw), 99, out, probs)
-    assert [x["name"] for x in ports] == ["Gi1", "Gi2", "Gi4"] and abs(ports[0]["rx"] - 1000) < 2 and ports[0]["tx"] == 0, ports
-    assert "rx" not in ports[1] and {k for k, *_ in out} == {"rx:Gi1", "tx:Gi1", "err:Gi1"}, out  # sin dato inventado; Gi4 caído no guarda tráfico
-    assert probs == ["Gi1: al 100 % de su capacidad", "Gi4 (SRV): caído"], probs
-    catlan.IF_PREV[98] = {"1": (t0 - 1, 2 ** 32 - 1000, 0, 0)}
-    old = {I["type"]: {"1": 6}, I["oper"]: {"1": 1}, "1.3.6.1.2.1.2.2.1.10": {"1": 1000}, "1.3.6.1.2.1.2.2.1.16": {"1": 0}}
-    assert abs(catlan.interfaces(FakeIf(old), 98, [], [])[0]["rx"] - 0.016) < .002  # 2000 bytes en ~1 s, pese a la vuelta
-    # Historial por horas y disponibilidad (en la BD del catlan importado, con horas fijas de enero)
-    Q = catlan.q
-    cid = Q("INSERT INTO checks(host, every) VALUES('sla', 60)").lastrowid
-    for ts, up, rtt in [("10:01", 1, 10), ("10:20", 1, 20), ("10:40", 1, 30), ("10:59", 1, 40), ("11:05", 0, None), ("11:06", 0, None)]:
-        Q("INSERT INTO pings(check_id, ts, up, rtt) VALUES(?, ?, ?, ?)", [cid, f"2026-01-15 {ts}:00", up, rtt])
-    Q("INSERT INTO pings(check_id, ts, up, rtt) VALUES(?, '2026-02-01 12:00:00', 0, NULL)", [cid])  # otro mes
-    for ts, v in [("10:05", 50), ("10:35", 70)]:
-        Q("INSERT INTO metrics(source_id, ts, key, label, value, unit) VALUES(7, ?, 'disk:/', '/', ?, '%')", [f"2026-01-15 {ts}:00", v])
-    catlan.rollup(); catlan.rollup()  # repetir no duplica
-    assert [tuple(r) for r in Q("SELECT hour, n, up, rtt, rtt_min, rtt_max FROM pings_h WHERE check_id=? ORDER BY hour", [cid])] == [
-        ("2026-01-15 10:00:00", 4, 4, 25, 10, 40), ("2026-01-15 11:00:00", 2, 0, None, None, None), ("2026-02-01 12:00:00", 1, 0, None, None, None)]
-    assert tuple(Q("SELECT v, v_min, v_max FROM metrics_h WHERE source_id=7").fetchone()) == (60, 50, 70)
-    assert catlan.series(7, catlan.MAX_HOURS)["disk:/"]["points"] == [["2026-01-15 10:00:00", 60]]  # más de 7 días: sale de los resúmenes
-    r = next(x for x in catlan.sla("2026-01")["checks"] if x["id"] == cid)
-    assert (r["n"], r["up"], r["down_min"], r["hours"], r["rtt"]) == (6, 4, 2, 2, 25) and abs(r["uptime"] - 4 / 6) < 1e-9, r
-    assert catlan.sla("2026-01")["hours"] == 31 * 24 and catlan.sla("2099-01")["checks"][0]["uptime"] is None
+    # Resúmenes por hora y disponibilidad: en cargo test; aquí, la API
     assert call("/api/sla?month=2026-13")[0] == 400 and call("/api/sla")[0] == 200
     # Descubrir red: solo IPv4 pequeñas; marca lo que ya está en el inventario y en el monitor
     for bad in [{"net": "nada"}, {"net": "10.0.0.0/16"}, {"net": "::1/128"}, {"net": "127.0.0.1/32", "community": 5}]:
@@ -452,9 +458,6 @@ try:
     loc = call("/api/items", "POST", {"name": "este", "ip": "127.0.0.1"})[1]
     st, found = call("/api/discover", "POST", {"net": "127.0.0.1/32"})
     assert st == 200 and len(found) == 1 and found[0]["ip"] == "127.0.0.1" and found[0]["item"] == loc["id"] and found[0]["watched"] is True, found
-    assert catlan.guess("HP LaserJet Pro M404", "1.3.6.1.4.1.11.2.3.9.1") == ("HP", "printer")  # HP: la descripción decide
-    assert catlan.guess("ProCurve J9773A Switch 2530", "1.3.6.1.4.1.11.2.3.7.11.160") == ("HP", "switch")
-    assert catlan.guess("Linux nas 4.4", "1.3.6.1.4.1.6574.1") == ("Synology", "nas") and catlan.guess("", None) == ("", "")
     # Altas en bloque: todo se valida antes de guardar nada; sin contraseña se genera una provisional
     basic = lambda n, pw: "Basic " + base64.b64encode(f"{n}:{pw}".encode()).decode()
     for bad in [[], [{"name": "a b"}], [{"name": "uno"}, {"name": "UNO"}], [{"name": "ok1"}, {"name": "admin"}], [{"name": "ok2", "groups": [999]}], [{"name": "ok3", "pass": "corta"}]]:
@@ -535,7 +538,7 @@ try:
     assert kitty("corta")[0] == 400 and kitty(K1, name="")[0] == 400
     assert kitty(K1) == (200, {"state": "pendiente", "catlan": CAT}) and kitty(K1)[1]["state"] == "pendiente" and len(call("/api/items")[1]) == n_items
     ag = next(a for a in call("/api/agents")[1] if a["name"] == "pc-kitty")
-    assert "key" not in ag and ag["code"] == catlan.sha(K1)[:8] and ag["state"] == "pendiente"
+    assert "key" not in ag and ag["code"] == sha(K1)[:8] and ag["state"] == "pendiente"
     kitty("c" * 64, name="pc-sin-ip", ip="")  # el Kitty de PowerShell no manda IP: la de su conexión
     assert next(a for a in call("/api/agents")[1] if a["name"] == "pc-sin-ip")["ip"] == "127.0.0.1"
     assert call("/api/agents", auth=LEC)[0] == 403 and call(f"/api/agents/{ag['id']}", "PUT", {"state": "adoptado"}, auth=LEC)[0] == 403
@@ -597,18 +600,17 @@ try:
     assert {("agent", "aceptar"), ("agent", "rechazar"), ("agent", "olvidar")} <= {(h["kind"], h["action"]) for h in call("/api/log")[1]}
     assert call("/api/nope")[0] == 404
     # Auto-topología: LLDP, CDP y tabla MAC del switch -> quién está en qué puerto, casado con el inventario y dibujado
-    nb = catlan.topology(catlan.SNMP("127.0.0.1", "switch", APORT))
-    got = [(n["port"], n["via"], n["name"], n["ip"], n["mac"], n["rport"], n["icon"]) for n in nb]
-    assert got == [("Gi1/0/1", "lldp", "srv-web.empresa.lan", "10.0.0.10", "00:50:56:9a:00:01", "eth0", "pc"),
-                   ("Gi1/0/2", "cdp", "core-rtr", "10.0.0.1", None, "Gi0/0", "router"),
-                   ("Gi1/0/3", "mac", "", "10.0.1.15", "aa:bb:cc:00:00:03", "", None),
-                   ("Gi1/0/4", "mac", "", None, "aa:bb:cc:00:00:41", "", None),
-                   ("Gi1/0/4", "mac", "", None, "aa:bb:cc:00:00:42", "", None)], got  # Gi1/0/5 (6 MAC) es un enlace: fuera
     srv_it = call("/api/items", "POST", {"name": "srv-web", "kind": "servidor", "ip": "192.168.99.10"})[1]  # por nombre (sin dominio)
     pc = call("/api/items", "POST", {"name": "pc-topo", "kind": "pc", "ip": "10.0.1.15"})[1]  # por la IP de la ARP
     sw_src = call("/api/sources", "POST", {"host": "127.0.0.1", "port": APORT, "community": "switch", "kind": "generic", "label": "sw-planta"})[1]
     st, tp = call(f"/api/sources/{sw_src['id']}/topology", "POST")
     assert st == 200 and tp["name"] == "Topología · sw-planta" and len(tp["neighbors"]) == 5, (st, tp)
+    got = [(n["port"], n["via"], n["name"], n["ip"], n["mac"], n["rport"], n["icon"]) for n in tp["neighbors"]]
+    assert got == [("Gi1/0/1", "lldp", "srv-web.empresa.lan", "10.0.0.10", "00:50:56:9a:00:01", "eth0", "pc"),
+                   ("Gi1/0/2", "cdp", "core-rtr", "10.0.0.1", None, "Gi0/0", "router"),
+                   ("Gi1/0/3", "mac", "", "10.0.1.15", "aa:bb:cc:00:00:03", "", None),
+                   ("Gi1/0/4", "mac", "", None, "aa:bb:cc:00:00:41", "", None),
+                   ("Gi1/0/4", "mac", "", None, "aa:bb:cc:00:00:42", "", None)], got  # Gi1/0/5 (6 MAC) es un enlace: fuera
     m = call(f"/api/maps/{tp['map']}")[1]["data"]
     byid = {n["id"]: n for n in m["nodes"]}
     assert m["auto"]["source"] == sw_src["id"] and byid["sw"]["t"] == "switch" and len(m["nodes"]) == 6
@@ -642,8 +644,13 @@ try:
             CREATE TABLE log(id INTEGER PRIMARY KEY, ts TEXT DEFAULT CURRENT_TIMESTAMP, who TEXT, action TEXT, kind TEXT, ref INTEGER, name TEXT, data TEXT);
             INSERT INTO items(id, name) VALUES(1, 'switch'), (2, 'nas');
             INSERT INTO items(id, name, warranty) VALUES(3, 'portatil-caduca-hoy', date('now', 'localtime'));
-            INSERT INTO log(who, action, kind, ref, name, data) VALUES('admin', 'borrar', 'item', 7, 'viejo', '{}');""")
-    vieja = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(__file__), "catlan.py")],
+            INSERT INTO log(who, action, kind, ref, name, data) VALUES('admin', 'borrar', 'item', 7, 'viejo', '{}');
+            CREATE TABLE users(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE COLLATE NOCASE, hash TEXT NOT NULL,
+              admin INTEGER DEFAULT 0, must_change INTEGER DEFAULT 0, created TEXT DEFAULT CURRENT_TIMESTAMP);""")
+        # la contraseña del admin, guardada como la guardaba la versión en Python: tiene que seguir valiendo
+        salt = os.urandom(16)
+        con.execute("INSERT INTO users(name, hash, admin) VALUES('admin', ?, 1)", [f"pbkdf2${salt.hex()}${hashlib.pbkdf2_hmac('sha256', b'miau', salt, 600_000).hex()}"])
+    vieja = subprocess.Popen([BIN],
                              env={**env, "CATLAN_DATA": str(olddir), "CATLAN_PORT": "18103"}, stdout=subprocess.DEVNULL)
     try:
         old = lambda path, method="GET", body=None: json.loads(urllib.request.urlopen(urllib.request.Request(
@@ -682,38 +689,49 @@ try:
     with urllib.request.urlopen(req) as r:
         assert r.headers["Content-Disposition"].endswith('.catlan"')
         blob = r.read()
-    assert blob.startswith(catlan.SEAL) and b"SQLite format 3" not in blob
-    assert catlan.unseal(blob, "copia-segura").startswith(b"SQLite format 3\x00")
+    assert blob.startswith(SEAL) and b"SQLite format 3" not in blob
+    assert unseal(blob, "copia-segura").startswith(b"SQLite format 3\x00")
     for bad in ((blob, "otra-clave"), (blob[:-40] + bytes([blob[-40] ^ 1]) + blob[-39:], "copia-segura"), (b"SQLite", "copia-segura")):
         try:
-            catlan.unseal(*bad); raise AssertionError("abrió una copia mala")
+            unseal(*bad); raise AssertionError("abrió una copia mala")
         except ValueError:
             pass
-    assert catlan.unseal(catlan.seal(b"", "x" * 8), "x" * 8) == b""
     assert call("/api/backup", "POST", {"password": "corta"})[0] == 400 and call("/api/backup", "POST", {"password": "copia-segura"}, auth=LEC)[0] == 403
     with tempfile.TemporaryDirectory() as tmp:  # y se descifra desde la consola
         (Path(tmp) / "c.catlan").write_bytes(blob)
-        out = subprocess.run([sys.executable, str(Path(__file__).parent / "catlan.py"), "descifrar", str(Path(tmp) / "c.catlan"), str(Path(tmp) / "c.db")],
+        out = subprocess.run([BIN, "descifrar", str(Path(tmp) / "c.catlan"), str(Path(tmp) / "c.db")],
                              input="copia-segura\n", capture_output=True, text=True, env={**os.environ, "CATLAN_DATA": tmp + "/nada"})
         assert (Path(tmp) / "c.db").read_bytes().startswith(b"SQLite format 3\x00") and not Path(tmp, "nada").exists(), out.stderr
     # Verificación en dos pasos (TOTP, RFC 6238)
-    assert catlan.totp(base64.b32encode(b"12345678901234567890").decode(), 59) == "287082"  # vector del RFC
+    assert totp(base64.b32encode(b"12345678901234567890").decode(), 59) == "287082"  # vector del RFC
     call("/api/users", "POST", {"name": "dospasos", "pass": "provisional-1"})
     ck = raw("/api/login", "POST", {"name": "dospasos", "pass": "provisional-1"})[1]
     assert raw("/api/me/password", "POST", {"old": "provisional-1", "new": "segura-dos-pasos"}, cookie=ck)[0] == 204
     sec = raw("/api/me/totp", "POST", {}, cookie=ck)[2]["secret"]
-    assert raw("/api/me/totp", "POST", {"secret": sec, "code": "000000" if catlan.totp(sec) != "000000" else "111111"}, cookie=ck)[0] == 400
-    assert raw("/api/me/totp", "POST", {"secret": sec, "code": catlan.totp(sec)}, cookie=ck)[2]["totp"] == 1
+    assert raw("/api/me/totp", "POST", {"secret": sec, "code": "000000" if totp(sec) != "000000" else "111111"}, cookie=ck)[0] == 400
+    assert raw("/api/me/totp", "POST", {"secret": sec, "code": totp(sec)}, cookie=ck)[2]["totp"] == 1
     st, _, body = raw("/api/login", "POST", {"name": "dospasos", "pass": "segura-dos-pasos"})
     assert st == 401 and body["totp"] is True
-    assert raw("/api/login", "POST", {"name": "dospasos", "pass": "mal", "code": catlan.totp(sec)})[2].get("totp") is None  # sin pista con mala contraseña
-    assert raw("/api/login", "POST", {"name": "dospasos", "pass": "segura-dos-pasos", "code": catlan.totp(sec)})[0] == 200
+    assert raw("/api/login", "POST", {"name": "dospasos", "pass": "mal", "code": totp(sec)})[2].get("totp") is None  # sin pista con mala contraseña
+    assert raw("/api/login", "POST", {"name": "dospasos", "pass": "segura-dos-pasos", "code": totp(sec)})[0] == 200
     assert call("/api/pages", auth="Basic " + base64.b64encode(b"dospasos:segura-dos-pasos").decode())[0] == 401  # por Basic, no
     uid = next(u["id"] for u in call("/api/users")[1] if u["name"] == "dospasos")
     assert call(f"/api/users/{uid}", "PUT", {"totp": False})[1]["totp"] == 0  # perdió el móvil
     assert raw("/api/login", "POST", {"name": "dospasos", "pass": "segura-dos-pasos"})[0] == 200
     call(f"/api/users/{uid}", "DELETE")
-    catlan.FAILS.clear()
+    # Contraseña olvidada: desde la consola del servidor, con catlan en marcha
+    cli = lambda *a: subprocess.run([BIN, "restablecer", *a], capture_output=True, text=True, env=env)
+    call("/api/users", "POST", {"name": "olvidadizo", "pass": "no-me-acuerdo"})
+    old = raw("/api/login", "POST", {"name": "olvidadizo", "pass": "no-me-acuerdo"})[1]
+    out = cli("olvidadizo")
+    pw = out.stdout.split("olvidadizo: ")[1].split()[0]
+    assert out.returncode == 0 and raw("/api/me", cookie=old)[0] == 401  # sus sesiones, cerradas
+    st, _, me2 = raw("/api/login", "POST", {"name": "olvidadizo", "pass": pw})
+    assert st == 200 and me2["must_change"] == 1 and raw("/api/login", "POST", {"name": "olvidadizo", "pass": "no-me-acuerdo"})[0] == 401
+    assert any(l["action"] == "restablecer contraseña" for l in call("/api/log")[1])
+    out = cli("nadie")
+    assert out.returncode == 1 and "olvidadizo" in out.stdout and "admin (admin)" in out.stdout
+    call(f"/api/users/{next(u['id'] for u in call('/api/users')[1] if u['name'] == 'olvidadizo')}", "DELETE")
     # Ediciones a la vez: con _seen, si otro lo cambió desde entonces, 409 con quién; sin _seen, como siempre
     pg = call("/api/pages", "POST", {"title": "Conflicto", "body": "v1"})[1]
     assert call(f"/api/pages/{pg['id']}", "PUT", {"body": "v2", "_seen": pg["updated"]})[0] == 200  # nadie en medio: guarda
@@ -736,13 +754,8 @@ try:
     assert call(f"/api/incidents/{inc['id']}", "PUT", {"body": "b", "_seen": inc["version"]})[0] == 409
     assert call(f"/api/incidents/{inc['id']}")[1]["body"] == "a" and call(f"/api/incidents/{inc['id']}", "PUT", {"body": "b"})[0] == 200
     call(f"/api/incidents/{inc['id']}", "DELETE")
-    assert catlan.db.execute("PRAGMA user_version").fetchone()[0] == len(catlan.MIGRATIONS)  # migraciones numeradas al día
-    # Aviso de garantías: una vez al día, solo las que caducan hoy o dentro de 30 días
-    sent = []
-    catlan.notify, catlan.channels = (lambda subject, text: sent.append(text)), (lambda: ["correo"])
-    catlan.q("DELETE FROM meta WHERE k='warranty_day'")
-    for name, days in (("caduca-hoy", 0), ("caduca-en-30", 30), ("caduca-en-31", 31)):
-        catlan.q("INSERT INTO items(name, warranty) VALUES(?, date('now', 'localtime', ?))", [name, f"+{days} days"])
+    with sqlite3.connect(Path(env["CATLAN_DATA"]) / "catlan.db") as con:  # migraciones numeradas al día
+        assert con.execute("PRAGMA user_version").fetchone()[0] == MIGRATIONS
     # Caducidades que no son garantías (licencias, dominios…): mismo aviso
     day = lambda n: (datetime.now() + timedelta(days=n)).strftime("%Y-%m-%d")
     dom = call("/api/expiries", "POST", {"name": "midominio.es", "kind": "dominio", "date": day(30)})[1]
@@ -750,10 +763,6 @@ try:
     for bad in ({"name": "x", "date": "2026-02-30"}, {"name": "", "date": day(1)}, {"name": "x", "kind": "coche", "date": day(1)}, {"name": "x"}):
         assert call("/api/expiries", "POST", bad)[0] == 400, bad
     assert call(f"/api/expiries/{dom['id']}", "PUT", {"date": "mañana"})[0] == 400
-    catlan.q("INSERT INTO expiries(name, kind, date) VALUES('midominio.es', 'dominio', ?), ('Office', 'licencia', ?)", [day(30), day(31)])
-    catlan.warranties(), catlan.warranties()
-    assert len(sent) == 1 and "caduca-hoy: hoy" in sent[0] and "caduca-en-30: el " in sent[0] and "caduca-en-31" not in sent[0], sent
-    assert "midominio.es: el " in sent[0] and "(dominio)" in sent[0] and "Office" not in sent[0], sent
     it = call("/api/items", "POST", {"name": "con-licencia"})[1]
     call(f"/api/expiries/{dom['id']}", "PUT", {"item": it["id"]})
     assert [e["name"] for e in call(f"/api/items/{it['id']}/refs")[1]["expiries"]] == ["midominio.es"]
@@ -799,6 +808,65 @@ try:
             assert (Path(tmp) / "state").read_text().splitlines()[0] == "adoptado" and (Path(tmp) / "since").exists()
             h = next(s for s in call("/api/health")[1] if s["kind"] == "kitty" and s["info"].get("name") == socket.gethostname())
             assert h["info"]["mem_total"] and h["info"]["disks"] and h["info"]["cores"], h["info"]
+    # El JavaScript de la página, sin errores de sintaxis (si hay Node; en GitHub Actions lo hay)
+    import shutil
+    if shutil.which("node"):
+        page = (Path(__file__).parent / "index.html").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "app.js").write_text(page[page.rindex("<script>") + 8:page.rindex("</script>")], encoding="utf-8")
+            out = subprocess.run(["node", "--check", str(Path(tmp) / "app.js")], capture_output=True, text=True)
+            assert out.returncode == 0, out.stderr
+    # La página: comprimida, con ETag y 304 si ya la tiene el navegador
+    req = urllib.request.Request(f"http://127.0.0.1:{PORT}/", headers={"Accept-Encoding": "gzip"})
+    with urllib.request.urlopen(req) as r:
+        tag, body = r.headers["ETag"], r.read()
+        assert r.headers["Content-Encoding"] == "gzip" and gzip.decompress(body).startswith(b"<!doctype html>") and len(body) < 150_000
+    try:
+        urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{PORT}/", headers={"If-None-Match": tag}))
+        raise AssertionError("sin 304")
+    except urllib.error.HTTPError as e:
+        assert e.code == 304
+    # Deshacer un borrado: vuelve con su id; dos veces no, y lo que no se puede deshacer, tampoco
+    eq = call("/api/items", "POST", {"name": "se-borra", "ip": "10.9.9.9", "notes": "con [[#1]]"})[1]
+    call(f"/api/items/{eq['id']}", "DELETE")
+    lid = call(f"/api/log?kind=item&ref={eq['id']}")[1][0]["id"]
+    assert call(f"/api/log/{lid}/undo", "POST")[0] == 200
+    back = call(f"/api/items/{eq['id']}")[1]
+    assert (back["name"], back["ip"], back["notes"]) == ("se-borra", "10.9.9.9", "con [[#1]]") and call(f"/api/log/{lid}/undo", "POST")[0] == 409
+    rk2 = call("/api/maps?type=rack&name=Rack-deshacer", "POST")[1]
+    call(f"/api/maps/{rk2['id']}", "PUT", {"data": {"type": "rack", "height": 12, "devices": [{"id": "d1", "t": "server", "u": 1, "h": 1, "item": eq["id"]}]}})
+    call(f"/api/maps/{rk2['id']}", "DELETE")
+    call(f"/api/log/{call(f'/api/log?kind=rack&ref={rk2['id']}')[1][0]['id']}/undo", "POST")
+    assert call(f"/api/maps/{rk2['id']}")[1]["data"]["devices"][0]["item"] == eq["id"]
+    assert call(f"/api/log/{call('/api/log')[1][-1]['id']}/undo", "POST")[0] == 400  # no es un borrado
+    # Mantenimiento programado: de un equipo o de todo un rack; mientras no empieza, avisa como siempre
+    ck = call("/api/checks", "POST", {"host": "10.9.9.9", "every": 3600})[1]
+    iso = lambda m: (datetime.now(timezone.utc) + timedelta(minutes=m)).isoformat()
+    for bad in ({"items": [eq["id"]], "from": iso(60), "to": iso(30)}, {"items": [], "from": iso(1), "to": iso(2)},
+                {"items": [eq["id"]], "from": "ayer", "to": iso(2)}, {"items": [eq["id"]], "from": iso(0), "to": iso(60 * 24 * 40)}):
+        assert call("/api/maintenance", "POST", bad)[0] == 400, bad
+    r = call("/api/maintenance", "POST", {"rack": rk2["id"], "from": iso(60), "to": iso(120)})[1]
+    assert r["muted"] == 1 and not muted(dict(call(f"/api/checks/{ck['id']}")[1]))  # aún no ha empezado
+    call("/api/maintenance", "POST", {"items": [eq["id"]], "from": iso(-1), "to": iso(60)})
+    assert muted(dict(call(f"/api/checks/{ck['id']}")[1]))
+    call(f"/api/checks/{ck['id']}/mute", "POST", {"minutes": 0})  # quitar el silencio quita también el programado
+    assert not muted(dict(call(f"/api/checks/{ck['id']}")[1])) and call(f"/api/checks/{ck['id']}")[1]["mute_from"] is None
+    call(f"/api/checks/{ck['id']}", "DELETE")
+    # Salud de catlan (solo admin): BD íntegra, monitor con latido, sin atrasos
+    st, sy = call("/api/system")
+    assert st == 200 and sy["integrity"] == "ok" and sy["monitor"]["age"] < 10 and sy["schema"] == MIGRATIONS and sy["db_bytes"] > 0, sy
+    assert call("/api/system", auth=LEC)[0] == 403 and call("/api/monitor")[1]["monitor"]["age"] < 10
+    assert sy["backups"] and sy["backups"][0]["name"].startswith("catlan-")  # la copia diaria se hace al arrancar
+    # Apagado limpio con SIGTERM (docker stop): en Linux, el WAL queda volcado en catlan.db
+    if sys.platform.startswith("linux"):
+        d3 = tempfile.mkdtemp()
+        p3 = subprocess.Popen([BIN], env={**env, "CATLAN_DATA": d3, "CATLAN_PORT": "18104", "CATLAN_SYSLOG_PORT": "0"},
+                              stdout=subprocess.PIPE, text=True)
+        for _ in range(50):
+            try: urllib.request.urlopen("http://127.0.0.1:18104/"); break
+            except OSError: time.sleep(0.1)
+        p3.terminate()
+        assert "catlan parado" in p3.communicate(timeout=10)[0] and not (Path(d3) / "catlan.db-wal").stat().st_size
     # Sonido por dispositivo: se guarda en la comprobación; borrar un sonido subido devuelve a sus usuarios al general
     ck = call("/api/checks", "POST", {"host": "127.0.0.1", "label": "con sirena", "sound": "siren", "every": 3600})[1]
     assert ck["sound"] == "siren" and call("/api/checks", "POST", {"host": "127.0.0.1", "sound": "trompeta"})[0] == 400

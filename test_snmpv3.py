@@ -6,10 +6,7 @@
 Si el ejecutable no está en el PATH, indica su ruta en SNMPSIM_RESPONDER.
 """
 import os, shutil, subprocess, sys, tempfile, time
-
-os.environ["CATLAN_DATA"] = tempfile.mkdtemp()  # catlan importado solo por su cliente SNMP
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import catlan  # noqa: E402
+from prueba_api import Catlan
 
 exe = os.environ.get("SNMPSIM_RESPONDER") or shutil.which("snmpsim-command-responder")
 if not exe:
@@ -55,9 +52,20 @@ def src(n, **chg):
             "pass": f"clave-auth-{n}", "priv_pass": f"clave-priv-{n}", **chg}
 
 
+cat = Catlan(18201)
+
+
+def collect(s):
+    """Probar la fuente sin guardarla: (métricas, problemas, info), o el error de catlan."""
+    st, r = cat.call("/api/sources/test", "POST", s)
+    if st != 200:
+        raise ValueError((r or {}).get("error", f"HTTP {st}"))
+    return [tuple(m) for m in r["metrics"]], r["problems"], r["info"]
+
+
 def fails(s):
     try:
-        catlan.collect(s)
+        collect(s)
     except Exception as e:
         return str(e)
     return None
@@ -68,16 +76,12 @@ try:
     while fails(src(len(CASES) - 1)) and time.time() < deadline:
         time.sleep(1)
     for n, (a, p) in enumerate(CASES):
-        out, probs, info = catlan.collect(src(n))
+        out, probs, info = collect(src(n))
         got = {k: v for k, _, v, _ in out}
         assert info["name"] == "srv-v3" and info["uptime"] == 1234567, (a, p, info)
         assert got == {"mem": 75, "disk:/": 50, "disk:/datos": 95, "cpu": 30}, (a, p, got)
         assert probs == ["/datos: 95 % lleno (límite 90 %)"], probs
         print(f"  {a}/{p}: OK")
-    s = catlan.SNMP("127.0.0.1", port=PORT, v3=src(0))  # recorrer tablas y resincronizar el reloj del equipo
-    assert len(s.walk("1.3.6.1.2.1.25.2.3.1.3")) == 3
-    s.etime += 5000
-    assert s.get("1.3.6.1.2.1.1.5.0")["1.3.6.1.2.1.1.5.0"] == "srv-v3"
     assert "usuario SNMPv3 desconocido" in fails(src(0, user="nadie"))
     assert "la firma no coincide" in fails(src(0, **{"pass": "otra-clave-mala"}))
     assert "la firma no coincide" in fails(src(0, auth="md5"))
@@ -87,3 +91,4 @@ try:
     print("OK")
 finally:
     sim.terminate()
+    cat.stop()

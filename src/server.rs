@@ -1,0 +1,169 @@
+//! Servidor HTTP/1.1 mínimo: un hilo por conexión y una petición por conexión, como el ThreadingHTTPServer de antes.
+//! HTTPS propio con rustls si hay certificado.
+use crate::config::{CERT, KEY, MAX_BODY, PORT};
+use std::io::{self, Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+pub struct Req {
+    pub method: String,
+    pub path: String,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+    pub ip: String,
+}
+
+impl Req {
+    pub fn header(&self, k: &str) -> &str {
+        self.opt_header(k).unwrap_or("")
+    }
+    pub fn opt_header(&self, k: &str) -> Option<&str> {
+        self.headers.iter().find(|(n, _)| n.eq_ignore_ascii_case(k)).map(|(_, v)| v.as_str())
+    }
+}
+
+pub struct Resp {
+    pub code: u16,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
+impl Resp {
+    pub fn new(code: u16, body: Vec<u8>, mime: &str) -> Resp {
+        Resp { code, headers: vec![("Content-Type".into(), mime.into())], body }
+    }
+    pub fn header(mut self, k: &str, v: impl Into<String>) -> Resp {
+        self.headers.push((k.into(), v.into()));
+        self
+    }
+}
+
+fn reason(code: u16) -> &'static str {
+    match code {
+        200 => "OK",
+        201 => "Created",
+        204 => "No Content",
+        304 => "Not Modified",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        409 => "Conflict",
+        413 => "Payload Too Large",
+        429 => "Too Many Requests",
+        431 => "Request Header Fields Too Large",
+        _ => "Internal Server Error",
+    }
+}
+
+const MAX_CONNS: usize = 512;
+static ACTIVE: AtomicUsize = AtomicUsize::new(0);
+
+fn tls_config() -> anyhow::Result<Arc<rustls::ServerConfig>> {
+    use rustls::pki_types::pem::PemObject;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+    let certs = CertificateDer::pem_file_iter(&*CERT)?.collect::<Result<Vec<_>, _>>()?;
+    let key = PrivateKeyDer::from_pem_file(if KEY.is_empty() { &*CERT } else { &*KEY })?;
+    Ok(Arc::new(rustls::ServerConfig::builder().with_no_client_auth().with_single_cert(certs, key)?))
+}
+
+pub fn serve(handler: fn(&Req) -> Resp) -> anyhow::Result<()> {
+    let tls = if CERT.is_empty() { None } else { Some(tls_config()?) };
+    let listener = TcpListener::bind(("0.0.0.0", *PORT))?;
+    for s in listener.incoming() {
+        let Ok(s) = s else { continue };
+        if ACTIVE.load(Ordering::Relaxed) >= MAX_CONNS {
+            continue; // inundación: se cierra sin más
+        }
+        ACTIVE.fetch_add(1, Ordering::Relaxed);
+        let tls = tls.clone();
+        std::thread::spawn(move || {
+            let _ = conn(s, tls, handler); // escáneres y navegadores que rechazan el certificado: sin traza en la consola
+            ACTIVE.fetch_sub(1, Ordering::Relaxed);
+        });
+    }
+    Ok(())
+}
+
+fn conn(s: TcpStream, tls: Option<Arc<rustls::ServerConfig>>, handler: fn(&Req) -> Resp) -> io::Result<()> {
+    // una conexión que no habla (ni termina el saludo TLS) suelta su hilo
+    s.set_read_timeout(Some(Duration::from_secs(60)))?;
+    s.set_write_timeout(Some(Duration::from_secs(60)))?;
+    let ip = s.peer_addr()?.ip().to_canonical().to_string();
+    match tls {
+        Some(cfg) => {
+            let c = rustls::ServerConnection::new(cfg).map_err(io::Error::other)?;
+            let mut st = rustls::StreamOwned::new(c, s);
+            one(&mut st, ip, handler)?;
+            st.conn.send_close_notify();
+            st.flush()
+        }
+        None => {
+            let mut st = s;
+            one(&mut st, ip, handler)
+        }
+    }
+}
+
+fn write_resp(st: &mut impl Write, r: &Resp) -> io::Result<()> {
+    let mut head = format!("HTTP/1.1 {} {}\r\n", r.code, reason(r.code));
+    for (k, v) in &r.headers {
+        head += &format!("{k}: {v}\r\n");
+    }
+    if r.code != 304 {
+        head += &format!("Content-Length: {}\r\n", r.body.len());
+    }
+    head += "X-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n";
+    st.write_all(head.as_bytes())?;
+    if r.code != 304 {
+        st.write_all(&r.body)?;
+    }
+    st.flush()
+}
+
+fn json_err(code: u16, msg: &str) -> Resp {
+    Resp::new(code, serde_json::json!({"error": msg}).to_string().into_bytes(), "application/json")
+}
+
+fn one(st: &mut (impl Read + Write), ip: String, handler: fn(&Req) -> Resp) -> io::Result<()> {
+    let mut buf = Vec::with_capacity(8192);
+    let mut tmp = [0u8; 8192];
+    let (len, method, path, headers) = loop {
+        let n = st.read(&mut tmp)?;
+        if n == 0 {
+            return Ok(());
+        }
+        buf.extend_from_slice(&tmp[..n]);
+        let mut hs = [httparse::EMPTY_HEADER; 100];
+        let mut r = httparse::Request::new(&mut hs);
+        match r.parse(&buf) {
+            Ok(httparse::Status::Complete(len)) => {
+                let headers: Vec<(String, String)> =
+                    r.headers.iter().map(|h| (h.name.to_string(), String::from_utf8_lossy(h.value).into_owned())).collect();
+                break (len, r.method.unwrap_or("").to_string(), r.path.unwrap_or("/").to_string(), headers);
+            }
+            Ok(httparse::Status::Partial) if buf.len() < 64 * 1024 => continue,
+            Ok(httparse::Status::Partial) => return write_resp(st, &json_err(431, "cabeceras demasiado grandes")),
+            Err(_) => return write_resp(st, &json_err(400, "petición no válida")),
+        }
+    };
+    let n: usize = headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("content-length")).and_then(|(_, v)| v.trim().parse().ok()).unwrap_or(0);
+    if n > MAX_BODY {
+        return write_resp(st, &json_err(400, "demasiado grande"));
+    }
+    let mut body = buf.split_off(len);
+    body.truncate(n);
+    if body.len() < n {
+        let missing = n - body.len();
+        st.take(missing as u64).read_to_end(&mut body)?;
+        if body.len() < n {
+            return Ok(()); // el cliente se fue a medias
+        }
+    }
+    let req = Req { method, path, headers, body, ip };
+    let resp = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(&req))).unwrap_or_else(|_| json_err(500, "error interno"));
+    write_resp(st, &resp)
+}
