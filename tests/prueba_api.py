@@ -2,7 +2,7 @@
 import base64, json, os, subprocess, sys, tempfile, time, urllib.error, urllib.request
 from pathlib import Path
 
-BIN = os.environ.get("CATLAN_BIN") or str(Path(__file__).parent / "target" / "release" / ("catlan.exe" if os.name == "nt" else "catlan"))
+BIN = os.environ.get("CATLAN_BIN") or str(Path(__file__).parent.parent / "target" / "release" / ("catlan.exe" if os.name == "nt" else "catlan"))
 AUTH = "Basic " + base64.b64encode(b"admin:prueba-api").decode()
 
 

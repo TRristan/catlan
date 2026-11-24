@@ -3,7 +3,7 @@ RUN apk add --no-cache build-base
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY src src
-COPY index.html kitty.ps1 kitty.sh ./
+COPY kitty kitty
 RUN cargo build --release --locked
 
 FROM alpine:3

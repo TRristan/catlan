@@ -79,13 +79,13 @@ struct Page {
     etag: String,
 }
 static PAGE: LazyLock<Page> = LazyLock::new(|| {
-    let raw: &'static [u8] = include_bytes!("../index.html");
+    let raw: &'static [u8] = include_bytes!("index.html");
     let mut e = GzEncoder::new(vec![], Compression::best());
     let _ = e.write_all(raw);
     Page { raw, gz: e.finish().unwrap_or_default(), etag: format!("\"{}\"", &crate::crypto::hex(&<sha2::Sha256 as sha2::Digest>::digest(raw))[..20]) }
 });
-const KITTY_PS1: &str = include_str!("../kitty.ps1");
-const KITTY_SH: &str = include_str!("../kitty.sh");
+const KITTY_PS1: &str = include_str!("../kitty/kitty.ps1");
+const KITTY_SH: &str = include_str!("../kitty/kitty.sh");
 
 fn js(code: u16, v: impl serde::Serialize) -> Resp {
     Resp::new(code, serde_json::to_vec(&v).unwrap_or_default(), "application/json")

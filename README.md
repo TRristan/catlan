@@ -7,8 +7,8 @@
 **El gato amigo de los IT.** Inventario, wiki, esquemas de red, racks, monitor, salud de equipos e incidencias en una sola web, autoalojada y 100 % local.
 
 ![Estado](https://img.shields.io/badge/estado-en%20desarrollo%20(WIP)-orange)
-![Rust](https://img.shields.io/badge/rust-1.85%2B-b7410e)
-![Ejecutable](https://img.shields.io/badge/ejecutable-uno%2C%20sin%20dependencias-success)
+![Rust](https://img.shields.io/badge/hecho%20en-Rust-b7410e)
+![Ejecutable](https://img.shields.io/badge/servidor-un%20solo%20ejecutable-success)
 ![Datos](https://img.shields.io/badge/datos-solo%20en%20tu%20servidor-1f9d6a)
 ![Licencia](https://img.shields.io/badge/licencia-GPL--3.0-blue)
 
@@ -16,11 +16,15 @@
 
 </div>
 
+> [!IMPORTANT]
+> **catlan ahora está escrito en Rust.** La versión 1.0 en Python (`catlan.py`) se ha reescrito entera: el servidor es
+> un **único ejecutable** (`catlan` / `catlan.exe`) con la web dentro, y Kitty pasa a ser un **programa** con un gato en
+> la bandeja para que cada usuario avise a IT. La web, la API, la base de datos, las contraseñas y las copias cifradas
+> son **las mismas**: una instalación en Python se actualiza sin perder nada ([cómo](#vienes-de-la-versión-en-python)).
+
 > [!WARNING]
-> **Proyecto en desarrollo (WIP).** Funciona y tiene tests, pero aún cambia a menudo y puede haber fallos.
-> **No tiene actualizaciones automáticas ni online**: para actualizar, para catlan, haz una copia de `data/` y sustituye
-> el ejecutable `catlan` (o `catlan.exe`) por el de la nueva versión: la web y los instaladores de Kitty van dentro. Al arrancar, catlan migra su base de datos solo
-> (y guarda una copia antes cuando hace falta).
+> **Proyecto en desarrollo (WIP).** Funciona y tiene tests, pero aún cambia a menudo y puede haber fallos. No tiene
+> actualizaciones automáticas: para actualizar, para catlan, haz una copia de `data/` y sustituye el ejecutable.
 
 ## ¿Qué es?
 
@@ -28,11 +32,12 @@ catlan es la web de un equipo de sistemas para tener **todo enlazado por el ID d
 dónde está montado en el rack, en qué esquema aparece, qué páginas de la wiki lo mencionan, si responde al ping, cómo
 van sus discos y qué incidencias tiene abiertas. Con historial de cada cambio.
 
-- **Un solo ejecutable.** Escrito en Rust: la web, la base de datos (SQLite) y los instaladores de Kitty van dentro;
-  nada que instalar en el servidor. SNMP v2c/v3 está escrito a mano; la criptografía (AES, HMAC, PBKDF2, TLS) usa crates
-  revisados de RustCrypto y rustls.
-- **Todo local.** Una base de datos SQLite en `data/`. Sin nube, sin cuentas externas, sin analítica ni telemetría; la web
-  no carga nada de Internet.
+- **Un solo ejecutable.** La web, SQLite y los instaladores de Kitty van dentro: nada que instalar en el servidor, ni
+  Python, ni Node, ni base de datos aparte. Cópialo a una carpeta y arráncalo.
+- **Fiable.** Rust: sin errores de tipos en producción, memoria segura y un ejecutable que no depende de lo que haya
+  instalado en la máquina. La criptografía (AES, HMAC, PBKDF2, TLS) usa crates revisados de RustCrypto y rustls.
+- **Todo local.** Una base de datos SQLite en `data/`. Sin nube, sin cuentas externas, sin analítica ni telemetría; la
+  web no carga nada de Internet.
 - **En español** y pensada para el día a día de un IT: atajos de teclado, buscador global, tema claro y oscuro, móvil.
 
 ## Funciones
@@ -43,21 +48,20 @@ van sus discos y qué incidencias tiene abiertas. Con historial de cada cambio.
 | <img src="docs/screenshots/equipo.png" alt="Ficha de un equipo"> | **Ficha de cada equipo** · copiar IP, ping al momento, abrir su web, su estado en el monitor y todo lo que lo menciona: páginas, esquemas, racks e incidencias. |
 | <img src="docs/screenshots/topologia.png" alt="Topología automática"> | **Esquemas y topología automática** · diagramas de red con iconos y, con un clic, catlan lee **LLDP, CDP y la tabla MAC** de un switch y dibuja qué equipo está en qué puerto. |
 | <img src="docs/screenshots/rack.png" alt="Rack"> | **Racks** · armarios montados U a U, con bocas de switch, patch panel y PDU anotables. |
-| | **Redes (IPAM)** · subredes con sus IPs libres y en uso, cuadrícula de ocupación, escaneo y **conflictos**: IP repetida en el inventario o equipo que responde sin estar en él. |
+| | **Redes (IPAM)** · subredes con sus IPs libres y en uso, escaneo y **conflictos**: IP repetida en el inventario o equipo que responde sin estar en él. |
 | | **Caducidades** · licencias, dominios, certificados y contratos con aviso 30 días antes y el mismo día, como las garantías. |
 | | **Syslog** · catlan escucha en UDP 514 y lo que envía cada equipo del inventario sale en su ficha (30 días). |
 | <img src="docs/screenshots/monitor.png" alt="Monitor"> | **Monitor** · ping, puertos TCP, webs, certificados SSL y DNS cada pocos segundos. Avisa en pantalla, con el **sonido de cada dispositivo** y por correo, Telegram o webhook. Si cae un switch, avisa de él y no de todo lo que cuelga de él. Informe mensual de disponibilidad. |
-| <img src="docs/screenshots/salud-kittens.png" alt="Salud"> | **Salud** · temperaturas, discos, ventiladores, RAID y puertos por **SNMP** (Synology, QNAP, Cisco, HP/Aruba, Ubiquiti, MikroTik…), grabadores Hikvision y **PCs Windows con Kitty**, con gráficos de hasta 90 días. |
-| <img src="docs/screenshots/incidencias.png" alt="Incidencias"> | **Incidencias** · prioridad, estado, persona o grupo asignado, seguimiento e incidencias hijas. Las críticas avisan por tus canales. |
+| <img src="docs/screenshots/salud-kittens.png" alt="Salud"> | **Salud** · temperaturas, discos, ventiladores, RAID y puertos por **SNMP v2c y v3** (Synology, QNAP, Cisco, HP/Aruba, Ubiquiti, MikroTik…), grabadores Hikvision y **PCs con Kitty**, con gráficos de hasta 90 días. |
+| <img src="docs/screenshots/incidencias.png" alt="Incidencias"> | **Incidencias** · prioridad, estado, persona o grupo asignado, seguimiento e incidencias hijas. Los usuarios las abren **desde Kitty**, en su PC; las críticas avisan por tus canales. |
 | <img src="docs/screenshots/wiki-guia.png" alt="Wiki"> | **Wiki** · procedimientos en Markdown con editor visual. `[[#id]]` enlaza un equipo y `[[Página]]` otra página. Una instalación nueva trae la **Guía de catlan**. |
 | <img src="docs/screenshots/buscador.png" alt="Buscador"> | **Buscador global** (`Alt+C` o `/`) · busca en todo; `W:` wiki, `U:` equipos, `T:` incidencias. |
 | <img src="docs/screenshots/opciones.png" alt="Opciones"> | **Opciones** (administradores) · usuarios y grupos con permisos de edición o solo vista, **avisos** configurables con prueba, **copia de seguridad** descargable y zona de peligro. |
 
 Además: **dashboard** personalizable (arrastrar, agrandar, líneas, barras o tarta), **Actividad** con una foto de cada versión,
-**tutorial** guiado la primera vez, aviso si dos personas editan lo mismo a la vez (wiki, inventario, esquemas, racks e
-incidencias), **deshacer** (`Ctrl+Z` o el botón del aviso) al borrar equipos, páginas, esquemas, racks, comprobaciones,
-caducidades y redes, **cambios en lote** en el inventario, **mantenimientos programados** (de un equipo, de varios o de
-todo un rack, de tal hora a tal hora), una página de **Salud de catlan** en Opciones, y la web se adapta al móvil.
+**tutorial** guiado la primera vez, aviso si dos personas editan lo mismo a la vez, **deshacer** (`Ctrl+Z`) al borrar,
+**cambios en lote** en el inventario, **mantenimientos programados**, **verificación en dos pasos**, una página de
+**Salud de catlan** en Opciones, y la web se adapta al móvil.
 
 <p align="center">
   <img src="docs/screenshots/dashboard-claro.png" width="64%" alt="Tema claro">
@@ -67,21 +71,18 @@ todo un rack, de tal hora a tal hora), una página de **Salud de catlan** en Opc
 
 ## Arranque rápido
 
-Compílalo con Rust (1.85 o más nuevo, desde [rustup.rs](https://rustup.rs)) y arráncalo:
+Compílalo con Rust 1.85 o más nuevo ([rustup.rs](https://rustup.rs)):
 
 ```bash
 git clone https://github.com/TRristan/catlan.git
 cd catlan
-cargo build --release
-./target/release/catlan            # en Windows: target\release\catlan.exe
+cargo build --release              # el servidor: target/release/catlan (en Windows, catlan.exe)
+cargo build --release -p kitty     # solo en Windows: kitty.exe, el programa de los PCs
+./target/release/catlan
 ```
 
-En Windows, `cargo build --release -p kitty` compila también **Kitty** (el programa de los PCs), que catlan reparte
-desde la misma carpeta.
-
-El ejecutable no necesita nada más: cópialo donde quieras. Los datos van a `data/`, junto a él.
-
-O con Docker:
+El ejecutable no necesita nada más: cópialo donde quieras (con `kitty.exe` al lado, si lo usas). Los datos van a
+`data/`, junto a él. O con Docker:
 
 ```bash
 docker compose up -d
@@ -99,6 +100,21 @@ catlan restablecer admin          # o: docker compose exec catlan catlan restabl
 Saca una contraseña provisional (se pide cambiarla al entrar), quita la verificación en dos pasos de ese usuario y cierra
 sus sesiones. Sin usuario, lista los que hay.
 
+## Vienes de la versión en Python
+
+Todo sigue igual por dentro: misma base de datos (con sus migraciones numeradas), mismos usuarios y contraseñas, mismas
+copias cifradas, misma web y misma API. Para pasarte:
+
+1. Para catlan (`Ctrl+C` o `docker compose down`) y haz una copia de la carpeta `data/`.
+2. Compila (o descarga) `catlan` y ponlo **en la carpeta donde estaba `catlan.py`**, junto a `data/`; o indica la
+   carpeta con `CATLAN_DATA`. Ya no hacen falta `catlan.py`, `index.html` ni Python.
+3. Arráncalo. Al ver la base de datos, aplica lo que falte y guarda antes una copia en `data/`.
+
+Los comandos cambian de nombre, no de uso: `python catlan.py restablecer` → `catlan restablecer`, y
+`python catlan.py descifrar` → `catlan descifrar`. Los Kitty que ya tenías instalados **siguen enviando** con su tarea
+programada de PowerShell; vuelve a pegar la línea de instalación en cada PC para pasar al programa nuevo con su
+ventana: conserva la ficha del equipo.
+
 ## Mini tutorial: los primeros 10 minutos
 
 <img src="docs/screenshots/tutorial.png" alt="Tutorial guiado" width="100%">
@@ -113,13 +129,13 @@ sus sesiones. Sin usuario, lista los que hay.
    para dar de alta muchos equipos de golpe.
 5. **Monitor**: «Vigilar» lo que no puede caerse; elige cada cuánto y qué sonido suena si cae.
 6. **Salud**: «Añadir equipo» con la IP y la comunidad SNMP de tu NAS o switch. Desde ahí, **Dibujar topología**.
-7. **PCs Windows**: en **Inventario → Añadir PC** copia una línea, pégala en PowerShell como administrador en el PC y
+7. **PCs**: en **Inventario → Añadir con Kitty** copia una línea, pégala en PowerShell como administrador en el PC y
    acéptalo cuando pida entrar. Aparecerá en **Salud → Kittens**.
 
 ## Kitty: el gato de catlan en cada PC
 
 `irm http://tu-catlan:8080/kitty.ps1 | iex` (PowerShell como administrador) instala **Kitty**, un programa pequeño
-(`kitty.exe`, unos 3,5 MB, en `Archivos de programa\Kitty`) que sirve el propio catlan:
+(`kitty.exe`, unos 3,5 MB, en `Archivos de programa\Kitty`) que reparte el propio catlan:
 
 - **Cada 5 minutos y al arrancar**, una tarea programada (`kitty enviar`, como SYSTEM) envía **solo** nombre, sistema,
   modelo, CPU, memoria, discos, IPs, tiempo encendido, nº de serie y los **errores y críticos del Visor de eventos**
@@ -137,11 +153,11 @@ hora). Volver a pegar la línea actualiza Kitty sin perder la ficha. Para quitar
 Unregister-ScheduledTask Kitty -Confirm:$false; Stop-Process -Name kitty -Force; Remove-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run Kitty; Remove-Item -Recurse "$env:ProgramFiles\Kitty", "$env:ProgramData\Kitty", HKLM:\SOFTWARE\Kitty
 ```
 
-catlan sirve `kitty.exe` si está **junto a su ejecutable** o en su carpeta de datos (en Docker, en `/data`). Se compila
-en Windows con `cargo build --release -p kitty`, que lo deja al lado de `catlan.exe`.
+catlan reparte `kitty.exe` si está **junto a su ejecutable** o en su carpeta de datos (en Docker, en `/data`).
 
 En **Linux** (con curl), `curl -fsSL http://tu-catlan:8080/kitty.sh | sudo sh` deja un temporizador de systemd (o cron)
-que envía lo mismo, con los errores y críticos del journal. Para quitarlo: `sudo sh /usr/local/lib/kitty-agent.sh quitar`.
+que envía lo mismo, con los errores y críticos del journal (sin ventana). Para quitarlo:
+`sudo sh /usr/local/lib/kitty-agent.sh quitar`.
 
 ## Tus datos
 
@@ -189,26 +205,41 @@ guarda una copia antes) y se niega a abrir una base de datos de una versión má
 mejor los cortes de luz, las lecturas no esperan a las escrituras y, al pararlo (`Ctrl+C` o `docker stop`), termina la
 escritura en curso y lo deja todo dentro de `catlan.db`. Si el monitor deja de latir, la web lo avisa en todas las vistas.
 
+## El repositorio
+
+```text
+src/          el servidor (Rust)
+  web.rs        la API, las sesiones y los permisos
+  db.rs         SQLite: esquema y migraciones numeradas
+  monitor.rs    comprobaciones, avisos, resúmenes, SLA, syslog e IPAM
+  snmp.rs       SNMP v2c y v3 (BER a mano, firma y cifrado USM)
+  health.rs     perfiles por fabricante, interfaces, topología y Kitty
+  crypto.rs     contraseñas, copias cifradas y TOTP
+  index.html    toda la web (HTML, CSS y JS sin dependencias), dentro del ejecutable
+kitty/        Kitty: el programa de los PCs (kitty.exe) y sus instaladores (kitty.ps1, kitty.sh)
+tests/        tests de la API contra el ejecutable (Python, sin dependencias)
+docs/         logo y capturas
+```
+
 ## Desarrollo y tests
 
 ```bash
-cargo test                   # lo interno: BER, AES y claves USM (vectores oficiales), TOTP, copias cifradas, interfaces, SLA…
+cargo test                           # lo interno: BER, AES y claves USM (vectores oficiales), TOTP, copias cifradas, SLA…
 cargo build --release
-python test_catlan.py        # API completa contra el ejecutable (servidor, SMTP, webhook y agentes SNMP de mentira)
+python tests/test_catlan.py          # API completa contra el ejecutable (SMTP, webhook y agentes SNMP de mentira)
 pip install snmpsim pysmi cryptography
-python test_snmpv3.py        # SNMPv3 contra el simulador snmpsim
-python test_topologia.py     # auto-topología (LLDP, CDP, MAC, ARP) contra snmpsim, por v2c y v3
+python tests/test_snmpv3.py          # SNMPv3 contra el simulador snmpsim, en las 7 combinaciones de firma y cifrado
+python tests/test_topologia.py       # auto-topología (LLDP, CDP, MAC, ARP) contra snmpsim, por v2c y v3
 ```
 
-El servidor está en `src/` (Rust): `web.rs` la API y las sesiones, `db.rs` SQLite y las migraciones, `monitor.rs` las
-comprobaciones y los avisos, `snmp.rs` y `health.rs` la lectura de equipos. `index.html` es toda la web (HTML, CSS y JS
-sin dependencias) y se mete en el ejecutable al compilar. Los tests de Python prueban el ejecutable desde fuera.
-`kitty/` es el programa de los PCs: `facts.rs` lo que cuenta del equipo, `net.rs` el envío, `app.rs` la bandeja y la
-ventana (WebView2) y `ui.html` su interfaz.
+Los tests de Python prueban el ejecutable desde fuera, por su API, igual que lo usa la web. GitHub Actions compila y
+pasa todo en cada cambio (el servidor en Linux, Kitty en Windows).
 
 ## Estado y límites conocidos
 
 - **WIP**: la interfaz y la API pueden cambiar entre versiones.
+- La ventana de Kitty es **solo para Windows**; en Linux, Kitty envía el estado del equipo sin ventana.
+- La imagen de Docker no incluye `kitty.exe`: cópialo a `/data` para repartirlo.
 - Perfiles SNMP de Cisco, HP/Aruba, Ubiquiti, MikroTik y Hikvision **sin probar todavía con hardware real**;
   la auto-topología está probada con agentes simulados (snmpsim), no con un switch físico.
 - Sin actualizaciones automáticas.

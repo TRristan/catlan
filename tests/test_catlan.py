@@ -1,10 +1,10 @@
-"""Prueba de humo de la API contra el ejecutable de catlan (cargo build --release; o CATLAN_BIN=ruta): python test_catlan.py
+"""Prueba de humo de la API contra el ejecutable de catlan (cargo build --release; o CATLAN_BIN=ruta): python tests/test_catlan.py
 Lo interno (BER, AES, USM, interfaces, SLA…) lo prueban las pruebas de Rust: cargo test"""
 from pathlib import Path
 import base64, gzip, hashlib, hmac, http.server, json, os, socket, sqlite3, socketserver, subprocess, sys, tempfile, threading, time, urllib.request, urllib.error
 from datetime import datetime, timedelta, timezone
 
-HERE = Path(__file__).parent
+HERE = Path(__file__).parent.parent  # la raíz del repositorio
 BIN = os.environ.get("CATLAN_BIN") or str(HERE / "target" / "release" / ("catlan.exe" if os.name == "nt" else "catlan"))
 if not Path(BIN).exists():
     sys.exit(f"No encuentro {BIN}: compila con «cargo build --release» o indica la ruta en CATLAN_BIN")
@@ -831,7 +831,7 @@ try:
     # El JavaScript de la página, sin errores de sintaxis (si hay Node; en GitHub Actions lo hay)
     import shutil
     if shutil.which("node"):
-        page = (Path(__file__).parent / "index.html").read_text(encoding="utf-8")
+        page = (HERE / "src" / "index.html").read_text(encoding="utf-8")
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "app.js").write_text(page[page.rindex("<script>") + 8:page.rindex("</script>")], encoding="utf-8")
             out = subprocess.run(["node", "--check", str(Path(tmp) / "app.js")], capture_output=True, text=True)
