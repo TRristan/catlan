@@ -170,17 +170,18 @@ pub fn run(start_hidden: bool) {
                     }
                     "hide" => window.set_visible(false),
                     "min" => window.set_minimized(true),
-                    "mine" => {
-                        if let Ok(c) = &conf {
-                            ask(&proxy, "mine", format!("{}/api/agent/mine", c.url), json!({"ukey": c.ukey}));
-                        }
-                    }
-                    "send" => {
-                        if let Ok(c) = &conf {
+                    op @ ("mine" | "send") => match &conf {
+                        Ok(c) if op == "mine" => ask(&proxy, "mine", format!("{}/api/agent/mine", c.url), json!({"ukey": c.ukey})),
+                        Ok(c) => {
                             let body = json!({"ukey": c.ukey, "title": m["title"], "body": m["body"], "priority": m["priority"]});
                             ask(&proxy, "sent", format!("{}/api/agent/incident", c.url), body);
                         }
-                    }
+                        // sin instalar: la página tiene que saberlo, o el botón se queda esperando
+                        Err(e) => {
+                            let f = if op == "mine" { "mine" } else { "sent" };
+                            let _ = webview.evaluate_script(&js_call(f, &json!({"status": 0, "body": {"error": e}})));
+                        }
+                    },
                     _ => {}
                 }
             }

@@ -255,18 +255,19 @@ kbd{font:11px var(--mono);color:var(--tx3);border:1px solid var(--line2);border-
 <script>
 'use strict';
 const $ = s => document.querySelector(s);
-const ipc = o => window.ipc && window.ipc.postMessage(JSON.stringify(o));
+// «ipc» ya lo declara WebView2 (wry): este nombre no puede chocar con él
+const toRust = o => window.ipc && window.ipc.postMessage(JSON.stringify(o));
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const ui = (n, s = 18) => `<svg class="ic" width="${s}" height="${s}" aria-hidden="true"><use href="#u-${n}"/></svg>`;
 const S = {state: 'connecting', configured: true, view: 'avisar', prio: 'media', sending: false, mine: null, mineAt: 0};
 
 // ── Ventana: arrastrar desde la barra, minimizar, cerrar (sigue en la bandeja) ──
 document.addEventListener('mousedown', e => {
-  if (e.button === 0 && e.target.closest('[data-drag]') && !e.target.closest('button')) ipc({op: 'drag'});
+  if (e.button === 0 && e.target.closest('[data-drag]') && !e.target.closest('button')) toRust({op: 'drag'});
 });
-$('#bmin').onclick = () => ipc({op: 'min'});
-$('#bclose').onclick = () => ipc({op: 'hide'});
-document.addEventListener('keydown', e => { if (e.key === 'Escape') ipc({op: 'hide'}); });
+$('#bmin').onclick = () => toRust({op: 'min'});
+$('#bclose').onclick = () => toRust({op: 'hide'});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') toRust({op: 'hide'}); });
 
 // ── Segmentados con pastilla deslizante ──
 function seg(el) {
@@ -326,7 +327,7 @@ $('#form').onsubmit = e => {
   S.sending = true; setConn();
   $('#send').innerHTML = '<span class="spin"></span><span>Enviando…</span>';
   $('#ferr').innerHTML = '';
-  ipc({op: 'send', title, body: $('#body').value.trim(), priority: S.prio});
+  toRust({op: 'send', title, body: $('#body').value.trim(), priority: S.prio});
 };
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && S.view === 'avisar' && !$('#send').disabled) $('#form').requestSubmit(); });
 function showErr(msg) {
@@ -376,7 +377,7 @@ function ago(ts) {
 function loadMine() {
   if (!S.configured) return renderMine();
   if (!S.mine) $('#mine').innerHTML = '<div class="list"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>';
-  ipc({op: 'mine'});
+  toRust({op: 'mine'});
 }
 function mine(r) {
   S.mineAt = Date.now();
@@ -469,7 +470,7 @@ window.kitty = {
 setInterval(() => { if (S.configured && !document.hidden) loadMine(); }, 60000);
 document.querySelectorAll('.seg').forEach(seg);
 setConn();
-ipc({op: 'ready'});
+toRust({op: 'ready'});
 </script>
 </body>
 </html>
