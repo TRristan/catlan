@@ -10,7 +10,7 @@
 
 ## Qué hace cada sección
 - **Dashboard**: tu tablero. En «Personalizar» eliges las tarjetas, las arrastras y las agrandas.
-- **Wiki**: procedimientos y documentación en Markdown, con editor visual. Enlaza un equipo con `[[#id]]` y otra página con `[[Nombre de la página]]`.
+- **Wiki**: procedimientos y documentación en Markdown, con editor visual. Enlaza un equipo con `[[#id]]`, una incidencia con `[[INC-n]]` (sale en su ficha, en «Enlazada desde») y otra página con `[[Nombre de la página]]`.
 - **Inventario**: cada equipo con su IP, nº de serie, ubicación, estado, fin de garantía y notas. Filtra, exporta a CSV y, desde la ficha, copia la IP, haz ping o abre su web. Las garantías que caducan salen arriba y avisan 30 días antes; en **Caducidades**, lo mismo para licencias, dominios, certificados y contratos. Si un equipo envía su **syslog** a catlan (UDP 514), sale en su ficha.
 - **Esquemas**: diagramas de red con iconos y conexiones. **Topología automática** lo dibuja solo leyendo LLDP, CDP y la tabla MAC de un switch.
 - **Racks**: armarios montados U a U, con bocas de switch, patch panel y PDU.

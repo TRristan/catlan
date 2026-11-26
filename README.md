@@ -1,8 +1,9 @@
 <div align="center">
 
-<img src="docs/logo.svg" width="88" alt="">
-
-# catlan
+<h1><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/logo/kit/catlan-horizontal-dark.svg">
+  <img src="docs/logo/kit/catlan-horizontal.svg" width="300" alt="catlan">
+</picture></h1>
 
 **El gato amigo de los IT.** Inventario, wiki, esquemas de red, racks, monitor, salud de equipos e incidencias en una sola web, autoalojada y 100 % local.
 
@@ -25,6 +26,37 @@
 > [!WARNING]
 > **Proyecto en desarrollo (WIP).** Funciona y tiene tests, pero aún cambia a menudo y puede haber fallos. No tiene
 > actualizaciones automáticas: para actualizar, para catlan, haz una copia de `data/` y sustituye el ejecutable.
+
+## Novedades
+
+- **Control remoto con Kitty.** Desde la ficha del equipo o desde Salud, un técnico pide conectarse a un PC, y la
+  persona que lo usa lo **acepta o lo rechaza** en su pantalla. El técnico ve la pantalla en el navegador y usa el ratón y el
+  teclado. El PC no abre ningún puerto, porque todo pasa por catlan. El usuario puede cortar cuando quiera, y en el historial
+  del equipo queda quién se conectó, cuándo y cuánto tiempo.
+- **Kitty casi en directo.** Cada PC envía su estado **cada 15 segundos** y Salud se refresca sola cada 15 s. La
+  ventana de Kitty comprueba la conexión cada 3 s y ya no dice «sin conexión» por un corte suelto.
+- **Cerrar Kitty requiere un administrador.** «Salir de Kitty» pide usuario y contraseña de un **admin de catlan**,
+  y el código de la verificación en dos pasos si la tiene. El cierre queda anotado en el historial.
+- **Kitty como servicio.** `kitty servicio` se queda en marcha como SYSTEM desde que arranca el PC, aunque no haya nadie
+  con la sesión iniciada. El gato de la bandeja se abre solo al iniciar sesión.
+- **Mis tareas y notas.** En Incidencias, un tablero personal (solo lo ves tú) con columnas que se arrastran, junto a las
+  incidencias de tus grupos.
+- **Enlaces a incidencias en la wiki.** `[[INC-n]]` enlaza una incidencia, y en su ficha aparece en «Enlazada desde».
+- **`catlan restablecer` más seguro.** Si no encuentra la base de datos, no crea una nueva y te dice cómo indicar la
+  carpeta correcta.
+- **Nuevo logo** de catlan y de Kitty, con kit de iconos y guía de uso en [`docs/logo/`](docs/logo/README.md).
+
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/logo/kit/catlan-horizontal-dark.svg">
+  <img src="docs/logo/kit/catlan-horizontal.svg" width="220" alt="catlan">
+</picture>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/logo/kitty/kit/kitty-horizontal-dark.svg">
+  <img src="docs/logo/kitty/kit/kitty-horizontal.svg" width="190" alt="Kitty">
+</picture>
+</p>
 
 ## ¿Qué es?
 
@@ -53,8 +85,9 @@ van sus discos y qué incidencias tiene abiertas. Con historial de cada cambio.
 | | **Syslog** · catlan escucha en UDP 514 y lo que envía cada equipo del inventario sale en su ficha (30 días). |
 | <img src="docs/screenshots/monitor.png" alt="Monitor"> | **Monitor** · ping, puertos TCP, webs, certificados SSL y DNS cada pocos segundos. Avisa en pantalla, con el **sonido de cada dispositivo** y por correo, Telegram o webhook. Si cae un switch, avisa de él y no de todo lo que cuelga de él. Informe mensual de disponibilidad. |
 | <img src="docs/screenshots/salud-kittens.png" alt="Salud"> | **Salud** · temperaturas, discos, ventiladores, RAID y puertos por **SNMP v2c y v3** (Synology, QNAP, Cisco, HP/Aruba, Ubiquiti, MikroTik…), grabadores Hikvision y **PCs con Kitty**, con gráficos de hasta 90 días. |
-| <img src="docs/screenshots/incidencias.png" alt="Incidencias"> | **Incidencias** · prioridad, estado, persona o grupo asignado, seguimiento e incidencias hijas. Los usuarios las abren **desde Kitty**, en su PC; las críticas avisan por tus canales. |
-| <img src="docs/screenshots/wiki-guia.png" alt="Wiki"> | **Wiki** · procedimientos en Markdown con editor visual. `[[#id]]` enlaza un equipo y `[[Página]]` otra página. Una instalación nueva trae la **Guía de catlan**. |
+| <img src="docs/screenshots/incidencias.png" alt="Incidencias"> | **Incidencias** · prioridad, estado, persona o grupo asignado, seguimiento e incidencias hijas, en lista o en **tablero**, con tus **tareas y notas personales** al lado. Los usuarios las abren **desde Kitty**, en su PC; las críticas avisan por tus canales. |
+| <img src="docs/screenshots/salud-kitty.png" alt="Kitty en Salud"> | **Control remoto** · ver y manejar la pantalla de un PC con Kitty desde el navegador, siempre con el permiso de quien lo está usando. Sin abrir puertos en el PC y con registro de cada sesión. |
+| <img src="docs/screenshots/wiki-guia.png" alt="Wiki"> | **Wiki** · procedimientos en Markdown con editor visual. `[[#id]]` enlaza un equipo, `[[INC-n]]` una incidencia y `[[Página]]` otra página. Una instalación nueva trae la **Guía de catlan**. |
 | <img src="docs/screenshots/buscador.png" alt="Buscador"> | **Buscador global** (`Alt+C` o `/`) · busca en todo; `W:` wiki, `U:` equipos, `T:` incidencias. |
 | <img src="docs/screenshots/opciones.png" alt="Opciones"> | **Opciones** (administradores) · usuarios y grupos con permisos de edición o solo vista, **avisos** configurables con prueba, **copia de seguridad** descargable y zona de peligro. |
 
@@ -134,16 +167,29 @@ ventana: conserva la ficha del equipo.
 
 ## Kitty: el gato de catlan en cada PC
 
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/logo/kitty/kit/kitty-horizontal-dark.svg">
+  <img src="docs/logo/kitty/kit/kitty-horizontal.svg" width="240" alt="Kitty">
+</picture>
+</p>
+
 `irm http://tu-catlan:8080/kitty.ps1 | iex` (PowerShell como administrador) instala **Kitty**, un programa pequeño
 (`kitty.exe`, unos 3,5 MB, en `Archivos de programa\Kitty`) que reparte el propio catlan:
 
-- **Cada 5 minutos y al arrancar**, una tarea programada (`kitty enviar`, como SYSTEM) envía **solo** nombre, sistema,
-  modelo, CPU, memoria, discos, IPs, tiempo encendido, nº de serie y los **errores y críticos del Visor de eventos**
-  (Sistema y Aplicación, con las rutas de usuario tapadas), que se ven en su ficha de Salud; un crítico, como un apagado
+- **Cada 15 segundos**, `kitty servicio` (una tarea programada que arranca con el PC, como SYSTEM) envía **solo** nombre, sistema,
+  modelo, CPU, memoria, discos, IPs, tiempo encendido, nº de serie y, cada 5 minutos, los **errores y críticos del Visor de
+  eventos** (Sistema y Aplicación, con las rutas de usuario tapadas), que se ven en su ficha de Salud; un crítico, como un apagado
   inesperado, avisa. Nada de usuarios, programas, procesos ni archivos.
 - **Un gato en la bandeja** de cada usuario: una ventana con el diseño de catlan para **avisar a IT** («¿Qué está
   fallando?»), seguir **sus avisos** (recibido, en curso, resuelto) y ver **cómo va el PC** en vivo. Cada aviso llega
   a catlan como una incidencia enlazada a la ficha del equipo; si es urgente, avisa por correo, Telegram o webhook.
+  La ventana comprueba cada 3 s si llega a catlan y lo muestra arriba.
+- **Control remoto** cuando IT lo pide: la ventana pregunta «¿Permitir?» (si nadie responde en 60 s, se rechaza sola).
+  Si el usuario acepta, Kitty envía la pantalla (JPEG, solo cuando cambia, hasta unos 10 por segundo) y aplica el ratón
+  y el teclado del técnico. Una barra avisa mientras dura y tiene un botón para **cortar**.
+- **Arranca solo** al iniciar sesión (clave `Run` de Windows) y **solo un administrador de catlan puede cerrarlo**
+  desde «Salir de Kitty». Sin conexión con catlan, no se puede cerrar desde el menú. La X de la ventana solo la esconde.
 
 Un administrador acepta cada PC en catlan; hasta entonces no envía eventos ni deja abrir incidencias. La clave del
 equipo solo la lee SYSTEM; la ventana usa otra, que solo sirve para abrir incidencias de ese PC (como mucho 10 por
@@ -156,7 +202,7 @@ Unregister-ScheduledTask Kitty -Confirm:$false; Stop-Process -Name kitty -Force;
 catlan reparte `kitty.exe` si está **junto a su ejecutable** o en su carpeta de datos (en Docker, en `/data`).
 
 En **Linux** (con curl), `curl -fsSL http://tu-catlan:8080/kitty.sh | sudo sh` deja un temporizador de systemd (o cron)
-que envía lo mismo, con los errores y críticos del journal (sin ventana). Para quitarlo:
+que envía lo mismo **cada 5 minutos**, con los errores y críticos del journal (sin ventana ni control remoto). Para quitarlo:
 `sudo sh /usr/local/lib/kitty-agent.sh quitar`.
 
 ## Tus datos
@@ -210,6 +256,7 @@ escritura en curso y lo deja todo dentro de `catlan.db`. Si el monitor deja de l
 ```text
 src/          el servidor (Rust)
   web.rs        la API, las sesiones y los permisos
+  remote.rs     control remoto: el relevo entre la web del técnico y la Kitty del PC
   db.rs         SQLite: esquema y migraciones numeradas
   monitor.rs    comprobaciones, avisos, resúmenes, SLA, syslog e IPAM
   snmp.rs       SNMP v2c y v3 (BER a mano, firma y cifrado USM)
@@ -217,8 +264,11 @@ src/          el servidor (Rust)
   crypto.rs     contraseñas, copias cifradas y TOTP
   index.html    toda la web (HTML, CSS y JS sin dependencias), dentro del ejecutable
 kitty/        Kitty: el programa de los PCs (kitty.exe) y sus instaladores (kitty.ps1, kitty.sh)
+  src/app.rs    la bandeja y la ventana (WebView2)
+  src/remote.rs el control remoto: captura de pantalla, ratón y teclado
+  src/net.rs    hablar con catlan y enviar el estado del PC
 tests/        tests de la API contra el ejecutable (Python, sin dependencias)
-docs/         logo y capturas
+docs/         capturas, y en docs/logo/ el logo de catlan y de Kitty con su guía
 ```
 
 ## Desarrollo y tests
@@ -242,6 +292,11 @@ pasa todo en cada cambio (el servidor en Linux, Kitty en Windows).
 - La imagen de Docker no incluye `kitty.exe`: cópialo a `/data` para repartirlo.
 - Perfiles SNMP de Cisco, HP/Aruba, Ubiquiti, MikroTik y Hikvision **sin probar todavía con hardware real**;
   la auto-topología está probada con agentes simulados (snmpsim), no con un switch físico.
+- El control remoto ve y maneja **solo la pantalla principal** del PC.
+- Un usuario puede terminar `kitty.exe` desde el Administrador de tareas. El envío del estado no se corta (lo hace
+  el servicio de SYSTEM) y Kitty vuelve a abrirse en el siguiente inicio de sesión.
+- Con envíos cada 15 s, el historial de métricas ocupa más. Se borra solo a los 7 días; se guardan medias por hora
+  durante más tiempo.
 - Sin actualizaciones automáticas.
 
 ## Licencia

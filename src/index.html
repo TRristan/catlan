@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>catlan</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23e8772e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 9.5V4l4 3h6l4-3v5.5A7.5 7.5 0 0 1 12 20a7.5 7.5 0 0 1-7-10.5z'/%3E%3Cpath d='M9.5 13h.01M14.5 13h.01'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cpath fill='%23e8772e' fill-rule='evenodd' d='M40 32L96 88H160L216 32V164A56 56 0 0 1 160 220H96A56 56 0 0 1 40 164Z M118 146A22 22 0 1 0 74 146A22 22 0 1 0 118 146Z M144 135.0H176A11.0 11.0 0 0 1 176 157.0H144A11.0 11.0 0 0 1 144 135.0Z'/%3E%3C/svg%3E">
 <script>/* ajustes antes del primer pintado: sin parpadeo de tema */try{const s=JSON.parse(localStorage.getItem('catlan')||'{}'),h=document.documentElement;h.dataset.theme=s.theme||'auto';h.dataset.density=s.density||'comfy';h.dataset.motion=s.motion||'auto';if(s.rail)h.setAttribute('data-rail','');if(s.accent)h.style.setProperty('--acc',s.accent)}catch(e){}</script>
 <style>
 /* ── Tokens ─────────────────────────────────────────── */
@@ -85,6 +85,7 @@ select{appearance:none;padding-right:34px;background-image:url("data:image/svg+x
 .seg::before{content:"";position:absolute;z-index:-1;top:3px;bottom:3px;left:0;width:var(--w,0);transform:translateX(var(--x,0));background:var(--s1);border-radius:8px;box-shadow:var(--sh1);transition:transform .38s var(--spring),width .38s var(--spring)}
 .seg button{border:0;background:none;height:30px;padding:0 12px;border-radius:8px;font:inherit;font-size:13px;font-weight:560;color:var(--tx2);cursor:pointer;transition:color .2s;white-space:nowrap}
 .seg button:hover,.seg button.on{color:var(--tx)}
+.seg button .ic{display:inline-block;vertical-align:-3px;margin-right:6px}
 /* Interruptor */
 .switch{position:relative;width:40px;height:24px;border-radius:99px;border:0;background:var(--s3);cursor:pointer;transition:background .25s var(--e);flex:none}
 .switch::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgb(0 0 0/.25);transition:transform .35s var(--spring)}
@@ -94,7 +95,7 @@ select{appearance:none;padding-right:34px;background-image:url("data:image/svg+x
 .shell{display:grid;grid-template-columns:var(--side) minmax(0,1fr);min-height:100vh;transition:grid-template-columns .4s var(--e)}
 .side{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:4px;padding:18px 12px 14px;border-right:1px solid var(--line);overflow:hidden;z-index:40;background:var(--bg)}
 .brand{display:flex;align-items:center;gap:11px;height:40px;padding:0 12px;margin-bottom:14px;font-weight:700;font-size:16.5px;letter-spacing:-.02em;text-decoration:none}
-.brand .ic{color:var(--acc);transition:transform .5s var(--spring)}.brand:hover .ic{transform:rotate(-12deg) scale(1.08)}
+.brand .wm{display:block}.brand .ic{color:var(--acc);transition:transform .5s var(--spring)}.brand:hover .ic{transform:rotate(-12deg) scale(1.08)}
 .nav{position:relative;display:flex;flex-direction:column;gap:2px}
 .nav a,.navbtn{position:relative;z-index:1;display:flex;align-items:center;gap:12px;height:38px;padding:0 13px;border-radius:10px;border:0;background:none;color:var(--tx2);font:inherit;font-weight:540;text-decoration:none;cursor:pointer;white-space:nowrap;transition:color .2s,background .2s}
 .nav a:hover,.navbtn:hover{color:var(--tx)}
@@ -199,9 +200,9 @@ select{appearance:none;padding-right:34px;background-image:url("data:image/svg+x
 .prose ul{margin:0 0 1.1em;padding-left:1.3em}.prose li{margin:.3em 0;padding-left:.2em}.prose li::marker{color:var(--tx3)}
 .prose a{text-decoration:underline;text-decoration-color:var(--acc-line);text-decoration-thickness:1.5px;text-underline-offset:3px;transition:text-decoration-color .2s}
 .prose a:hover{text-decoration-color:var(--acc)}
-a.ref{text-decoration:none;color:inherit;display:inline-flex;align-items:center;gap:5px;padding:0 .5em;border-radius:7px;background:var(--acc-soft);font-weight:560;font-size:.94em;transition:background .2s}
-a.ref::before{content:"";width:6px;height:6px;border-radius:2px;background:var(--acc)}
-a.ref:hover{background:color-mix(in oklab,var(--acc) 24%,transparent)}
+a.ref,a.iref{text-decoration:none;color:inherit;display:inline-flex;align-items:center;gap:5px;padding:0 .5em;border-radius:7px;background:var(--acc-soft);font-weight:560;font-size:.94em;transition:background .2s}
+a.ref::before,a.iref::before{content:"";width:6px;height:6px;border-radius:2px;background:var(--acc)}
+a.ref:hover,a.iref:hover{background:color-mix(in oklab,var(--acc) 24%,transparent)}
 .prose code{font:.86em var(--mono);background:var(--s2);border:1px solid var(--line);padding:.12em .4em;border-radius:6px}
 .prose pre{background:var(--s1);border:1px solid var(--line);border-radius:14px;padding:16px 18px;overflow:auto;font-size:13px;line-height:1.65;box-shadow:var(--sh1)}
 .prose pre code{background:none;border:0;padding:0;font-size:inherit}
@@ -628,7 +629,7 @@ textarea[hidden]{display:none} /* el editor visual guarda en él su Markdown */
 .login-card{width:min(360px,100%);display:flex;flex-direction:column;gap:14px;padding:30px 28px 26px;background:var(--s1);border:1px solid var(--line);border-radius:22px;box-shadow:var(--sh3);animation:rise .6s var(--spring) both}
 .login-card.bad{animation:shake .45s}
 .login-logo{display:grid;place-items:center;width:56px;height:56px;margin:0 auto 2px;border-radius:17px;background:var(--acc-soft);color:var(--acc)}
-.login-card h1{margin:0;text-align:center;font-size:24px;letter-spacing:-.02em}
+.login-card h1{margin:0;text-align:center;font-size:24px;letter-spacing:-.02em;line-height:0}.login-card h1 .wm{display:inline-block}
 .login-card>p{margin:-8px 0 6px;text-align:center;color:var(--tx3);font-size:13px}
 .login-card label{display:flex;flex-direction:column;gap:6px;font-size:12.5px;font-weight:560;color:var(--tx2)}
 .login-card .btn{height:40px;margin-top:4px}
@@ -769,12 +770,45 @@ button.inc-tg{cursor:pointer;transition:background .2s,color .2s}button.inc-tg:h
 .uchip .ic{color:var(--ok)}.uchip.bad{background:color-mix(in oklab,var(--bad) 13%,transparent)}.uchip.bad .ic,.uchip.bad>span{color:var(--bad)}
 .gpick{display:flex;flex-wrap:wrap;gap:6px 14px}.gpick label{display:flex;align-items:center;gap:6px;font-size:13.5px}
 .creds{max-height:300px;overflow:auto}
+.rm{display:flex;flex-direction:column;gap:12px;min-height:calc(100vh - 130px)}
+.rm:fullscreen{padding:12px;background:var(--bg)}
+.rm-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px}.rm-bar .seg{margin-left:4px}
+.rm-stage{position:relative;flex:1;display:grid;place-items:center;min-height:320px;border:1px solid var(--line);border-radius:14px;background:#0b0b0a;overflow:hidden}
+.rm-stage canvas{display:block;max-width:100%;max-height:calc(100vh - 170px);cursor:default;outline:none}
+.rm:fullscreen .rm-stage canvas{max-height:calc(100vh - 80px)}
+.rm-stage canvas.view{cursor:not-allowed}.rm-stage canvas:focus-visible{box-shadow:0 0 0 2px var(--acc)}
+.rm-wait{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:6px;padding:20px;text-align:center;color:#eee;background:color-mix(in oklab,#0b0b0a 88%,transparent)}
+.rm-wait[hidden]{display:none}.rm-wait h3{margin:10px 0 0;font-size:17px}.rm-wait p{max-width:420px;margin:0;color:#aaa}
+.rm-pulse{display:grid;place-items:center;width:64px;height:64px;border-radius:20px;background:color-mix(in oklab,var(--acc) 22%,transparent);color:var(--acc);animation:rmPulse 1.6s ease-in-out infinite}
+.rm-wait.end .rm-pulse{animation:none;background:#2a2a28;color:#aaa}
+@keyframes rmPulse{50%{transform:scale(1.08);box-shadow:0 0 0 12px color-mix(in oklab,var(--acc) 0%,transparent)}0%{box-shadow:0 0 0 0 color-mix(in oklab,var(--acc) 35%,transparent)}}
+.kb-h{margin:26px 0 12px;font-size:15px;font-weight:620;display:flex;align-items:center;gap:8px}.kb-h:first-of-type{margin-top:6px}
+.kb{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(185px,1fr);gap:12px;overflow-x:auto;padding-bottom:6px;align-items:start}
+.kb-col{display:flex;flex-direction:column;gap:8px;padding:10px;background:var(--s2);border:1px solid var(--line);border-radius:14px;transition:box-shadow .2s}
+.kb-col.over{box-shadow:0 0 0 2px var(--acc)}
+.kb-col>header{display:flex;align-items:center;gap:6px;min-height:28px;font-size:13px;font-weight:620;color:var(--tx2)}
+.kb-col>header .count{color:var(--tx3);font-weight:560}.kb-col>header .btn{margin-left:auto}
+.kb-list{display:flex;flex-direction:column;gap:8px;min-height:44px}
+.kc{position:relative;padding:10px 34px 10px 12px;background:var(--s1);border:1px solid var(--line);border-radius:10px;box-shadow:var(--sh1);font-size:13.5px;overflow-wrap:anywhere}
+.kc{transition:transform .25s var(--spring),box-shadow .25s,border-color .2s}
+.kc[data-drag]{cursor:grab;user-select:none}.kc[data-drag]:hover{transform:translateY(-2px);box-shadow:var(--sh2)}
+.kc.drag{border-style:dashed;border-color:var(--acc-line);background:var(--acc-soft);box-shadow:none;transform:none}.kc.drag>*{visibility:hidden}
+.kc-fly{position:fixed;left:0;top:0;z-index:60;margin:0;pointer-events:none;box-shadow:var(--sh3);border-color:var(--acc-line);will-change:transform}
+body.kb-dragging,body.kb-dragging *{cursor:grabbing!important;user-select:none}
+.page.in .kb .kc{animation:rise .5s var(--e) both;animation-delay:calc(160ms + var(--i,0)*35ms)}
+.kb-col>header .count{transition:color .2s}
+.kc-t{display:block;color:var(--tx);font-weight:560;text-decoration:none}.kc-t:hover{text-decoration:underline}
+.kc-m{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}
+.kc .prose{font-size:13.5px}.kc .prose>:first-child{margin-top:0}.kc .prose>:last-child{margin-bottom:0}
+.kc-more{position:absolute;top:5px;right:4px}
+.kb-col[data-col=hecho] .kc .prose{color:var(--tx3);text-decoration:line-through}
+.kb-add input{width:100%;background:transparent;border:1px dashed var(--line)}.kb-add input:focus{background:var(--s1);border-style:solid}
 </style>
 </head>
 <body>
 <div class="shell">
   <aside class="side" id="side" aria-label="Navegación">
-    <a class="brand" href="#/home" title="Inicio"><svg class="ic" width="24" height="24" aria-hidden="true"><use href="#u-cat"/></svg><span class="lbl">catlan</span></a>
+    <a class="brand" href="#/home" title="Inicio"><svg class="ic" width="24" height="24" aria-hidden="true"><use href="#u-cat"/></svg><span class="lbl"><svg class="wm" viewBox="0 0 541 137.5" width="51" height="13" role="img" aria-label="catlan"><use href="#wm-catlan"/></svg></span></a>
     <nav class="nav" id="nav"><span class="ind" aria-hidden="true"></span>
       <a href="#/dash" data-v="dash" title="Dashboard"><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-grid"/></svg><span class="lbl">Dashboard</span></a>
       <a href="#/wiki" data-v="wiki" title="Wiki"><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-book"/></svg><span class="lbl">Wiki</span></a>
@@ -833,7 +867,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 
 // ── Ajustes (por navegador) ─────────────────────────────
 const ACCENTS = [['Mandarina', '#e8772e'], ['Cobalto', '#4f6ef7'], ['Jade', '#1f9d6a'], ['Lavanda', '#8b6cf0'], ['Coral', '#e5566b'], ['Grafito', '#7d828c']];
-const DEF = {theme: 'auto', accent: '#e8772e', density: 'comfy', motion: 'auto', rail: false, dock: true, sound: 'bell', soundOn: true, vol: .7};
+const DEF = {theme: 'auto', accent: '#e8772e', density: 'comfy', motion: 'auto', rail: false, dock: true, incView: 'list', sound: 'bell', soundOn: true, vol: .7};
 let S = {...DEF};
 try { S = {...DEF, ...JSON.parse(localStorage.getItem('catlan') || '{}')}; } catch {}
 function applySettings() {
@@ -874,11 +908,13 @@ const UI = {
   ticket: '<path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z"/><path d="M9 9.5h6M9 13.5h4"/>',
   users: '<circle cx="9" cy="8.5" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.6a3 3 0 0 1 0 5.8M17.5 14.2A5.5 5.5 0 0 1 20.5 19"/>',
   user: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>',
+  screen: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8.5 20h7M12 16v4"/><path d="m10.5 7.5 4.5 2.5-4.5 2.5z"/>',
+  kanban: '<rect x="3.5" y="3.5" width="5" height="13" rx="1.5"/><rect x="9.5" y="3.5" width="5" height="9" rx="1.5"/><rect x="15.5" y="3.5" width="5" height="17" rx="1.5"/>',
   grid: '<rect x="3.5" y="3.5" width="7" height="9" rx="2"/><rect x="13.5" y="3.5" width="7" height="5" rx="2"/><rect x="13.5" y="11.5" width="7" height="9" rx="2"/><rect x="3.5" y="15.5" width="7" height="5" rx="2"/>',
   bars: '<path d="M4 20h16"/><rect x="5.5" y="11" width="3" height="6" rx="1"/><rect x="10.5" y="5" width="3" height="12" rx="1"/><rect x="15.5" y="8" width="3" height="9" rx="1"/>',
   pie: '<path d="M12 3a9 9 0 1 0 9 9h-9z"/><path d="M15 3.4A9 9 0 0 1 20.6 9H15z"/>',
   line: '<path d="M4 19.5h16"/><path d="m4 15 4.5-5 4 3L20 6"/>',
-  cat: '<path d="M5 9.5V4l4 3h6l4-3v5.5A7.5 7.5 0 0 1 12 20a7.5 7.5 0 0 1-7-10.5z"/><path d="M9.5 13h.01M14.5 13h.01M11 16.2l1 .6 1-.6"/>',
+  cat: '<path fill="currentColor" stroke="none" fill-rule="evenodd" transform="scale(.09375)" d="M40 32L96 88H160L216 32V164A56 56 0 0 1 160 220H96A56 56 0 0 1 40 164Z M118 146A22 22 0 1 0 74 146A22 22 0 1 0 118 146Z M144 135.0H176A11.0 11.0 0 0 1 176 157.0H144A11.0 11.0 0 0 1 144 135.0Z"/>',
   book: '<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19M9 7.5h6"/>',
   box: '<path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5z"/><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9"/>',
   nodes: '<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8.5 6h7M7.2 8.2l3.6 7.6M16.8 8.2l-3.6 7.6"/>',
@@ -928,7 +964,7 @@ const ICONS = {
   user: ['Usuario', '<circle cx="24" cy="16" r="7"/><path d="M10 41a14 14 0 0 1 28 0"/>'],
   rack: ['Rack', '<rect x="12" y="4" width="24" height="40" rx="2"/><path d="M12 14h24M12 24h24M12 34h24M17 9h2M17 19h2M17 29h2M17 39h2"/>'],
 };
-document.body.insertAdjacentHTML('beforeend', `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>${
+document.body.insertAdjacentHTML('beforeend', `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><symbol id="wm-catlan" viewBox="10 -36 541 137.5"><path fill="currentColor" fill-rule="evenodd" d="M100.95 16.90A51.5 51.5 0 1 0 100.95 83.10L85.63 70.25A31.5 31.5 0 1 1 85.63 29.75Z"/><path fill="currentColor" fill-rule="evenodd" d="M216.0 50A51.5 51.5 0 1 0 113.0 50A51.5 51.5 0 1 0 216.0 50Z M196.0 50A31.5 31.5 0 1 1 133.0 50A31.5 31.5 0 1 1 196.0 50Z"/><path fill="currentColor" fill-rule="evenodd" d="M196 0H216V100H196Z"/><path fill="currentColor" fill-rule="evenodd" d="M250 -36H270V100H250Z"/><path fill="currentColor" fill-rule="evenodd" d="M228 0H292V18H228Z"/><path fill="currentColor" fill-rule="evenodd" d="M306 -36H326V100H306Z"/><path fill="currentColor" fill-rule="evenodd" d="M443.0 50A51.5 51.5 0 1 0 340.0 50A51.5 51.5 0 1 0 443.0 50Z M423.0 50A31.5 31.5 0 1 1 360.0 50A31.5 31.5 0 1 1 423.0 50Z"/><path fill="currentColor" fill-rule="evenodd" d="M423 0H443V100H423Z"/><path fill="currentColor" fill-rule="evenodd" d="M461 0H481V100H461Z"/><path fill="currentColor" fill-rule="evenodd" d="M461 45A45 45 0 0 1 551 45V100H531V45A25 25 0 0 0 481 45Z"/></symbol>${
   Object.entries(UI).map(([k, p]) => `<symbol id="u-${k}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">${p}</symbol>`).join('')}${
   Object.entries(ICONS).map(([k, [, p]]) => `<symbol id="i-${k}" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">${p}</symbol>`).join('')}</defs></svg>`);
 // Tipos montables en rack: [nombre, U por defecto]. Los que coinciden con ICONS usan su icono.
@@ -1229,12 +1265,13 @@ async function copy(text) {
 }
 
 // ── Texto ───────────────────────────────────────────────
-// Markdown mínimo: títulos, listas, código, negrita, cursiva, enlaces, [[#id]] (equipo) y [[Página]]
+// Markdown mínimo: títulos, listas, código, negrita, cursiva, enlaces, [[#id]] (equipo), [[INC-n]] (incidencia) y [[Página]]
 function md(src, names = {}) {
   const inline = s => String(s).split(/(`[^`]+`)/).map((part, k) => k % 2 ? `<code>${esc(part.slice(1, -1))}</code>` : esc(part) // el código, tal cual
     .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
     .replace(/\*([^*]+)\*/g, '<i>$1</i>')
     .replace(/\[\[#(\d+)\]\]/g, (_, n) => n in names ? `<a class="ref" href="#/inv/${n}">${esc(names[n])}</a>` : `<s title="equipo borrado">#${n}</s>`)
+    .replace(/\[\[INC-(\d+)\]\]/gi, (_, n) => `<a class="iref" href="#/inc/${+n}">${incId(+n)}</a>`)
     .replace(/\[\[([^\]]+)\]\]/g, (_, t) => `<a href="#/p/${encodeURIComponent(t)}">${t}</a>`)
     .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, t, u) => /^(https?:|\/|#)/.test(u) ? `<a href="${u}" target="_blank" rel="noopener">${t}</a>` : m)).join('');
   let out = '', list = false, code = null;
@@ -1352,6 +1389,12 @@ const isMuted = x => !!x.mute_until && date(x.mute_until) > Date.now() && (!x.mu
 const isPlanned = x => !!x.mute_from && date(x.mute_from) > Date.now() && date(x.mute_until) > Date.now(); // mantenimiento que aún no ha empezado
 const whenTxt = t => date(t).toLocaleString('es', {weekday: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'});
 const muteTxt = x => isPlanned(x) ? `mantenimiento ${whenTxt(x.mute_from)} – ${whenTxt(x.mute_until)}` : (x.mute_from ? 'en mantenimiento hasta ' : 'silenciado hasta ') + whenTxt(x.mute_until);
+async function testAlerts() { // Opciones → Avisos y Monitor: el mismo aviso de prueba
+  try {
+    const r = await api('monitor/test', 'POST'), bad = Object.entries(r).filter(([, err]) => err);
+    toast(bad.length ? `Falló: ${bad.map(([ch, err]) => `${ch} (${err})`).join(' · ')}` : `Aviso de prueba enviado por ${Object.keys(r).join(', ')}`, bad.length ? 'bad' : undefined);
+  } catch {}
+}
 async function muteDialog(title) {
   const f = await dialog(`<h3>${title}</h3><p>Mientras dure no sonará ni llegarán avisos. Si al acabar sigue fallando, avisa en ese momento.</p>
     <div class="fields"><div class="field"><label for="m-t">Durante</label><select id="m-t" name="m">${[[30, '30 minutos'], [60, '1 hora'], [120, '2 horas'], [240, '4 horas'], [480, '8 horas'], [1440, '24 horas'], [10080, '7 días']]
@@ -1675,6 +1718,7 @@ function mapPreview(box, m, W, H) {
     ${d.nodes.length ? '' : `<text x="600" y="400" text-anchor="middle" class="tick" style="font-size:40px">Esquema vacío</text>`}</svg>`;
 }
 // ── Incidencias ──
+const incId = id => 'INC-' + id; // para el seguimiento y para enlazarla con [[INC-n]]
 const INC_STATUS = ['abierta', 'en curso', 'en espera', 'resuelta', 'cerrada'], INC_PRIO = ['baja', 'media', 'alta', 'crítica'];
 const incOpen = n => !['resuelta', 'cerrada'].includes(n.status);
 const incMine = n => n.assignee === ME?.id || (ME?.groups || []).includes(n.grp);
@@ -1683,7 +1727,7 @@ const prioPill = p => `<span class="pill ${{'crítica': 'bad', alta: 'warn'}[p] 
 const optList = (list, cur, none) => (none ? `<option value="">${none}</option>` : '') + list.map(x => `<option value="${x.id ?? x}" ${(x.id ?? x) === cur ? 'selected' : ''}>${esc(x.name ?? x)}</option>`).join('');
 async function incidentDialog(pre = {}) {
   const [users, groups, items] = await Promise.all([api('users'), api('groups'), api('items')]);
-  const f = await dialog(`<h3>${pre.parent ? `Nueva incidencia hija de #${+pre.parent}` : 'Nueva incidencia'}</h3>${pre.parent ? '<p>Cuando se resuelva la padre, esta se resolverá con ella.</p>' : ''}<div class="fields">
+  const p = dialog(`<h3>${pre.parent ? `Nueva incidencia hija de ${incId(+pre.parent)}` : 'Nueva incidencia'}</h3>${pre.parent ? '<p>Cuando se resuelva la padre, esta se resolverá con ella.</p>' : ''}<div class="fields">
     <div class="field"><label for="i-t">Título</label><input id="i-t" name="title" required maxlength="200" value="${esc(pre.title || '')}" autofocus></div>
     <div class="field"><label for="i-b">Descripción <span class="dim">· opcional</span></label><textarea id="i-b" name="body" rows="4" placeholder="Qué pasa, desde cuándo, a quién afecta…"></textarea></div>
     <div class="fields two">
@@ -1691,11 +1735,12 @@ async function incidentDialog(pre = {}) {
       <div class="field"><label for="i-i">Equipo</label><select id="i-i" name="item">${optList(items, pre.item, 'Ninguno')}</select></div>
       <div class="field"><label for="i-a">Asignar a</label><select id="i-a" name="assignee">${optList(users, pre.assignee, 'Nadie todavía')}</select></div>
       <div class="field"><label for="i-g">Grupo <span class="dim">· para trabajos de varias personas</span></label><select id="i-g" name="grp">${optList(groups, pre.grp, 'Ninguno')}</select></div></div></div>`, {ok: 'Crear incidencia'});
-  richEditor(document.querySelector('dialog[open] #i-b'), Object.fromEntries(items.map(i => [i.id, i.name])));
+  richEditor(document.querySelector('dialog[open] #i-b'), Object.fromEntries(items.map(i => [i.id, i.name]))); // con el diálogo abierto: cerrado ya no está
+  const f = await p;
   if (!f) return;
   const num = k => f.get(k) ? +f.get(k) : null;
   const n = await api('incidents', 'POST', {title: f.get('title').trim(), body: f.get('body'), priority: f.get('priority'), assignee: num('assignee'), grp: num('grp'), item: num('item'), parent: pre.parent || null});
-  toast(`Incidencia #${n.id} creada`); location.hash = '#/inc/' + n.id;
+  toast(`Incidencia ${incId(n.id)} creada`); location.hash = '#/inc/' + n.id;
 }
 async function groupDialog(g = {}, users) {
   const f = await dialog(`<h3>${g.id ? 'Editar grupo' : 'Nuevo grupo'}</h3><p>Para repartir incidencias entre varias personas (técnicos N1, N2…) y para dar permisos.</p><div class="fields">
@@ -1708,6 +1753,16 @@ async function groupDialog(g = {}, users) {
   await (g.id ? api('groups/' + g.id, 'PUT', b) : api('groups', 'POST', b)); toast('Grupo guardado'); return true;
 }
 let incFilter = 'open';
+const incViews = cur => `<div class="seg" id="iv" role="group" aria-label="Vista">${[['list', 'Lista', 'ul'], ['board', 'Tablero', 'kanban']]
+  .map(([k, t, ic]) => `<button data-v="${k}" class="${k === cur ? 'on' : ''}" aria-pressed="${k === cur}">${ui(ic, 15)}${t}</button>`).join('')}</div>`;
+const incViewsBind = () => {
+  seg($('#iv'));
+  $('#iv').onclick = e => {
+    const b = e.target.closest('[data-v]'); if (!b || S.incView === b.dataset.v) return;
+    S.incView = b.dataset.v; applySettings();
+    location.hash === '#/inc' ? route() : location.hash = '#/inc';
+  };
+};
 const incOpenTree = new Set(); // padres desplegadas: se recuerdan al volver a la lista
 // ── Editor visual: se escribe como en un procesador de textos y se guarda en Markdown (lo que entiende md()) ──
 const BLOCKS = /^(P|DIV|H[1-6]|UL|OL|PRE|BLOCKQUOTE)$/;
@@ -1722,6 +1777,7 @@ function toMd(root) {
     if ((t === 'I' || t === 'EM') && x.trim()) return `*${x}*`;
     if (t === 'A' && c.classList.contains('ref')) return `[[#${href.split('/').pop()}]]`;
     if (t === 'S' && /^#\d+$/.test(c.textContent)) return `[[${c.textContent}]]`; // equipo borrado: se conserva su id
+    if (t === 'A' && c.classList.contains('iref')) return `[[${incId(+href.split('/').pop())}]]`;
     if (t === 'A' && href.startsWith('#/p/')) return `[[${c.textContent}]]`;
     if (t === 'A' && href) return `[${x}](${href})`;
     return x; // span, font, u…: solo su texto
@@ -1746,7 +1802,7 @@ function toMd(root) {
   return out.map(l => l.replace(/\s+$/, '')).join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 const RTE = [['bold', 'Negrita (Ctrl+B)', 'B'], ['italic', 'Cursiva (Ctrl+I)', 'I'], '|', ['h2', 'Título', 'H1'], ['h3', 'Subtítulo', 'H2'], '|',
-  ['ul', 'Lista', 'ul'], ['ol', 'Lista numerada', 'ol'], ['code', 'Código', 'code'], '|', ['link', 'Enlace (Ctrl+K)', 'link'], ['item', 'Enlazar un equipo', 'box'], ['page', 'Enlazar una página de la wiki', 'book'], '|',
+  ['ul', 'Lista', 'ul'], ['ol', 'Lista numerada', 'ol'], ['code', 'Código', 'code'], '|', ['link', 'Enlace (Ctrl+K)', 'link'], ['item', 'Enlazar un equipo', 'box'], ['inc', 'Enlazar una incidencia', 'ticket'], ['page', 'Enlazar una página de la wiki', 'book'], '|',
   ['undo', 'Deshacer (Ctrl+Z)', 'undo'], ['redo', 'Rehacer', 'redo']];
 function richEditor(ta, names = {}) {
   const w = document.createElement('div');
@@ -1791,6 +1847,8 @@ function richEditor(ta, names = {}) {
     else if (c === 'item') { const items = await api('items'), r = await pick('Enlazar un equipo', items.map(i => [i.id, `${i.name}${i.ip ? ' · ' + i.ip : ''}`]));
       if (!r) return back(); names[r[0]] = items.find(i => i.id === r[0]).name;
       return html(`<a class="ref" href="#/inv/${r[0]}" contenteditable="false">${esc(names[r[0]])}</a>&nbsp;`); }
+    else if (c === 'inc') { const incs = await api('incidents'), r = await pick('Enlazar una incidencia', incs.map(x => [x.id, `${incId(x.id)} ${x.title}`]));
+      if (!r) return back(); return html(`<a class="iref" href="#/inc/${r[0]}" contenteditable="false">${incId(r[0])}</a>&nbsp;`); }
     else if (c === 'page') { const ps = await api('pages'), r = await pick('Enlazar una página', ps.map(x => [x.id, x.title || 'Sin título']));
       if (!r) return back(); return html(`<a href="#/p/${encodeURIComponent(r[1])}">${esc(r[1])}</a>&nbsp;`); }
     ed.focus(); sync(); state();
@@ -1838,7 +1896,7 @@ async function spotlight() {
     ...pages.map(x => ({k: 'page', ic: 'book', t: x.title || 'Sin título', sub: excerpt(x.body), more: x.body, go: '#/wiki/' + x.id})),
     ...items.map(x => ({k: 'item', ic: 'box', t: x.name || 'Sin nombre', sub: [x.kind, x.ip, x.location].filter(Boolean).join(' · '), uid: `[[#${x.id}]]`,
       more: [x.ip, x.serial, x.location, x.kind, x.status, x.notes, '#' + x.id].join(' '), go: '#/inv/' + x.id})),
-    ...incs.map(x => ({k: 'incident', ic: 'ticket', t: `#${x.id} ${x.title}`, sub: [x.status, x.priority, x.assignee_name, x.item_name].filter(Boolean).join(' · '), more: x.body, go: '#/inc/' + x.id, done: !incOpen(x)})),
+    ...incs.map(x => ({k: 'incident', ic: 'ticket', t: `${incId(x.id)} ${x.title}`, sub: [x.status, x.priority, x.assignee_name, x.item_name].filter(Boolean).join(' · '), more: x.body, go: '#/inc/' + x.id, done: !incOpen(x)})),
     ...maps.map(x => ({k: x.type === 'rack' ? 'rack' : 'map', ic: x.type === 'rack' ? 'rack' : 'nodes', t: x.name, sub: x.type === 'rack' ? 'Rack' : 'Esquema', more: '', go: `#/${x.type === 'rack' ? 'racks' : 'maps'}/${x.id}`})),
     ...(monData?.checks || []).map(x => ({k: 'check', ic: 'signal', t: monName(x), sub: `Monitor · ${x.host}`, more: x.host, go: '#/monitor'}))];
   const GROUP = {page: 'Wiki', item: 'Equipos', incident: 'Incidencias', map: 'Esquemas', rack: 'Racks', check: 'Monitor'};
@@ -1956,11 +2014,206 @@ async function groupsDialog(gs, us) {
 // ── Vistas ──────────────────────────────────────────────
 const findPage = (pages, t) => pages.find(p => esc(p.title).toLowerCase() === t.toLowerCase()); // [[título]] llega escapado
 let logFilter = 'all', saludTab = 'all';
+// Rebote de gelatina al soltar algo en su sitio (Dashboard y tableros)
+const squish = (el, origin = '50% 50%', k = 1) => { el.style.transformOrigin = origin; anim(el, [{transform: 'none'},
+  {transform: `scale(${1 + .045 * k},${1 - .04 * k})`}, {transform: `scale(${1 - .03 * k},${1 + .03 * k})`}, {transform: `scale(${1 + .012 * k},${1 - .01 * k})`}, {transform: 'none'}],
+  {duration: 680, easing: 'cubic-bezier(.3,.7,.4,1)'}); };
+// Control remoto: desde Salud (Kitty) y desde la ficha del equipo, el mismo camino
+async function remoteStart(agent) {
+  try { location.hash = '#/remoto/' + (await api('remote', 'POST', {agent})).id; } catch {} // el porqué (Kitty cerrado, ya hay otra…) ya sale en un aviso
+}
+const TASK_COLS = {notas: 'Notas', pendiente: 'Por hacer', hoy: 'Hoy', hecho: 'Hecho'};
+let kbLand = null; // {board, id, from: rect antes de moverla | null = nueva}: se anima al volver a pintar el tablero
+const kbMark = (board, id, card) => { kbLand = {board, id: String(id), from: card?.getBoundingClientRect() || null}; };
+function kbLanded() {
+  const l = kbLand; kbLand = null;
+  const c = l && document.querySelector(`#kb-${l.board} .kc[data-id="${l.id}"]`); if (!c) return;
+  const acc = getComputedStyle(c).getPropertyValue('--acc').trim(), r = c.getBoundingClientRect(), dx = l.from ? l.from.left - r.left : 0, dy = l.from ? l.from.top - r.top : -8;
+  if (l.from && Math.abs(dx) < 4 && Math.abs(dy) < 4) squish(c); else anim(c, [{transform: `translate(${dx}px,${dy}px) scale(${l.from ? 1.04 : .94})`, opacity: l.from ? 1 : 0}, {transform: 'none', opacity: 1}], {duration: 450, easing: 'cubic-bezier(.34,1.3,.64,1)'});
+  anim(c, [{boxShadow: `0 0 0 2px ${acc}`}, {boxShadow: '0 0 0 2px transparent'}], {duration: 1100, delay: 250, easing: 'ease-out'});
+  const n = c.closest('.kb-col').querySelector('header .count'); anim(n, [{transform: 'scale(1.5)', color: acc}, {transform: 'none'}], {duration: 450, easing: 'cubic-bezier(.34,1.45,.64,1)'});
+}
+const kbGone = async card => { await anim(card, [{opacity: 1}, {opacity: 0, transform: 'scale(.92)'}], {duration: 170, easing: 'ease-in', fill: 'forwards'})?.finished; };
+// Arrastrar tarjetas .kc[data-drag] entre las .kb-list de un tablero, como en el Dashboard: la tarjeta flota bajo el ratón y se inclina
+// según la velocidad; en su sitio queda el hueco y las demás se apartan. Al soltarla en otro sitio, commit(tarjeta, lista).
+function kanban(root, commit) {
+  root.addEventListener('pointerdown', e => {
+    const card = e.target.closest('.kc[data-drag]');
+    // shortcut: con el dedo no se arrastra (taparía el desplazamiento de la página); en el móvil se mueve con el menú ⋯
+    if (!card || e.button || e.pointerType === 'touch' || e.target.closest('button,input')) return;
+    e.preventDefault(); // sin seleccionar texto ni arrastrar el enlace
+    const sx = e.clientX, sy = e.clientY, from = [card.parentNode, card.nextSibling];
+    let fly = null, ox = 0, oy = 0, x = sx, y = sy, vx = 0, lx = sx, live = true;
+    const start = () => {
+      const rc = card.getBoundingClientRect(); ox = sx - rc.left; oy = sy - rc.top;
+      fly = card.cloneNode(true); fly.classList.add('kc-fly'); fly.removeAttribute('data-drag'); fly.style.width = rc.width + 'px';
+      document.body.append(fly); card.classList.add('drag'); document.body.classList.add('kb-dragging');
+      const tilt = () => { if (!live) return; vx *= .86; fly.style.transform = `translate(${x - ox}px,${y - oy}px) rotate(${Math.max(-8, Math.min(8, vx * .7))}deg) scale(1.04)`; requestAnimationFrame(tilt); };
+      tilt();
+    };
+    const move = ev => {
+      x = ev.clientX; y = ev.clientY;
+      if (!fly) { if (Math.hypot(x - sx, y - sy) < 5) return; start(); } // un clic no es arrastrar
+      vx += x - lx; lx = x;
+      const col = document.elementFromPoint(x, y)?.closest('.kb-col'), list = col && root.contains(col) ? col.querySelector('.kb-list') : null;
+      root.querySelectorAll('.kb-col.over').forEach(c => c !== col && c.classList.remove('over'));
+      if (!list) return;
+      col.classList.add('over');
+      const before = [...list.querySelectorAll('.kc:not(.drag)')].find(c => { const rc = c.getBoundingClientRect(); return y < rc.top + rc.height / 2; });
+      if (before ? card.nextSibling === before : list.lastElementChild === card) return;
+      const near = [...new Set([list, card.parentNode])].flatMap(l => [...l.querySelectorAll('.kc:not(.drag)')]), was = new Map(near.map(c => [c, c.getBoundingClientRect().top]));
+      list.insertBefore(card, before || null);
+      near.forEach(c => { const d = was.get(c) - c.getBoundingClientRect().top; if (d) anim(c, [{transform: `translateY(${d}px)`}, {transform: 'none'}], {duration: 220, easing: 'cubic-bezier(.2,.8,.2,1)'}); });
+    };
+    const up = ev => {
+      removeEventListener('pointermove', move); removeEventListener('pointerup', up); removeEventListener('pointercancel', up);
+      live = false;
+      if (!fly) return; // fue un clic
+      addEventListener('click', stop, true); setTimeout(() => removeEventListener('click', stop, true)); // el clic de soltar no abre el enlace
+      if (ev.type === 'pointercancel') from[0].insertBefore(card, from[1]);
+      const rc = card.getBoundingClientRect(), moved = card.parentNode !== from[0] || card.nextSibling !== from[1];
+      const done = () => {
+        fly.remove(); card.classList.remove('drag'); document.body.classList.remove('kb-dragging');
+        root.querySelectorAll('.kb-col.over').forEach(c => c.classList.remove('over'));
+        if (moved && ev.type !== 'pointercancel') commit(card, card.parentNode); else squish(card);
+      };
+      const a = anim(fly, [{transform: fly.style.transform}, {transform: `translate(${rc.left}px,${rc.top}px)`}], {duration: 240, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'forwards'});
+      a ? a.finished.then(done) : done();
+    };
+    const stop = ev => { ev.preventDefault(); ev.stopPropagation(); };
+    addEventListener('pointermove', move); addEventListener('pointerup', up); addEventListener('pointercancel', up);
+  });
+}
 const views = {
+  async remoto(sid) {
+    const st0 = sid && await api('remote/' + sid).catch(() => null);
+    if (!st0) { app.innerHTML = empty('alert', 'Esta sesión ya no existe', 'Pide otra desde la ficha del equipo o desde Salud.'); return crumbs([['Control remoto']]); }
+    crumbs([['Salud', '#/salud'], [st0.pc], ['Control remoto']]);
+    app.dataset.w = 'wide';
+    app.innerHTML = `<div class="rm" id="rm">
+        <header class="rm-bar"><span class="pill" id="rm-st"><i></i><span></span></span><b>${esc(st0.pc)}</b><span class="dim small" id="rm-t"></span><span class="grow"></span>
+          <div class="seg" id="rm-mode" role="group" aria-label="Modo"><button data-v="ctl" class="on">${ui('edit', 15)}Controlar</button><button data-v="view">${ui('eye', 15)}Solo ver</button></div>
+          <button class="btn sm" id="rm-fs" title="Pantalla completa">${ui('layers', 15)}<span class="hide-s">Pantalla completa</span></button>
+          <button class="btn sm danger" id="rm-end">${ui('x', 15)}Terminar</button></header>
+        <div class="rm-stage"><canvas id="rm-cv" tabindex="0" aria-label="Pantalla de ${esc(st0.pc)}: con el foco aquí, el teclado va al PC"></canvas>
+          <div class="rm-wait" id="rm-wait"><span class="rm-pulse">${ui('screen', 30)}</span><h3 id="rm-w-t"></h3><p class="muted" id="rm-w-x"></p></div></div></div>`;
+    const cv = $('#rm-cv'), cx = cv.getContext('2d');
+    let alive = true, done = false, seq = 0, ctl = true, q = [], lastMove = 0, since = null;
+    const show = st => {
+      const [tone, txt] = {pedida: ['warn', 'Esperando permiso'], aceptada: ['ok', 'Conectado'], rechazada: ['bad', 'Rechazada'], cerrada: ['', 'Terminada']}[st.state] || ['', st.state];
+      $('#rm-st').className = 'pill ' + tone; $('#rm-st span').textContent = txt;
+      if (st.state === 'aceptada' && st.secs != null) since ??= Date.now() - st.secs * 1000;
+      const w = $('#rm-wait');
+      if (st.state === 'pedida') { $('#rm-w-t').textContent = `Esperando a que acepten en ${st.pc}`; $('#rm-w-x').textContent = 'A la persona del PC le ha salido un aviso de Kitty; tiene 60 segundos para permitirlo.'; w.hidden = false; }
+      else if (st.state === 'rechazada' || st.state === 'cerrada') {
+        done = true; w.hidden = false; w.classList.add('end');
+        $('#rm-w-t').textContent = st.state === 'rechazada' ? 'No se ha podido conectar' : 'Sesión terminada';
+        $('#rm-w-x').innerHTML = `${esc(st.why || '')}<br><button class="btn mt" id="rm-back">Volver</button>`;
+        $('#rm-back').onclick = () => history.back();
+        $('#rm-end').hidden = true; $('#rm-mode').hidden = true;
+      }
+    };
+    show(st0); seg($('#rm-mode'));
+    const clock = setInterval(() => { if (since && !done) { const s = Math.floor((Date.now() - since) / 1000); $('#rm-t').textContent = `· ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; } }, 1000);
+    // la pantalla: cada petición espera (hasta 15 s) al siguiente fotograma
+    (async () => {
+      while (alive && !done) {
+        let r;
+        try { r = await fetch(`/api/remote/${sid}/frame?after=${seq}`); } catch { await new Promise(ok => setTimeout(ok, 1000)); continue; }
+        if (r.status === 404) { show({state: 'cerrada', why: 'La sesión ya no existe.'}); break; }
+        if ((r.headers.get('content-type') || '').startsWith('image/')) {
+          seq = +r.headers.get('x-seq');
+          const bmp = await createImageBitmap(await r.blob()).catch(() => null); if (!bmp || !alive) continue;
+          if (cv.width !== bmp.width || cv.height !== bmp.height) { cv.width = bmp.width; cv.height = bmp.height; }
+          cx.drawImage(bmp, 0, 0); bmp.close();
+          if (!$('#rm-wait').hidden) { $('#rm-wait').hidden = true; show({state: 'aceptada', pc: st0.pc, secs: 0}); cv.focus(); }
+        } else show(await r.json());
+      }
+    })();
+    // ratón y teclado: en tandas cada 50 ms
+    const flush = () => { if (!q.length || done) return; const evs = q.splice(0); fetch(`/api/remote/${sid}/input`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(evs)}).catch(() => {}); };
+    const pump = setInterval(flush, 50);
+    const at = e => { const r = cv.getBoundingClientRect(); return {x: +((e.clientX - r.left) / r.width).toFixed(4), y: +((e.clientY - r.top) / r.height).toFixed(4)}; };
+    cv.onpointermove = e => { if (!ctl || performance.now() - lastMove < 30) return; lastMove = performance.now(); q.push({t: 'm', ...at(e)}); };
+    cv.onpointerdown = e => { if (!ctl) return; e.preventDefault(); cv.focus(); cv.setPointerCapture(e.pointerId); q.push({t: 'd', b: e.button, ...at(e)}); flush(); };
+    cv.onpointerup = e => { if (!ctl) return; q.push({t: 'u', b: e.button, ...at(e)}); flush(); };
+    cv.oncontextmenu = e => e.preventDefault();
+    cv.addEventListener('wheel', e => { if (!ctl) return; e.preventDefault(); q.push({t: 'w', d: Math.round(e.deltaY)}); }, {passive: false});
+    // con el foco en la pantalla, todas las teclas van al PC (también /, Alt+C o Ctrl+S, que catlan usa para lo suyo)
+    cv.onkeydown = cv.onkeyup = e => { if (!ctl) return; e.preventDefault(); e.stopPropagation(); q.push({t: 'k', c: e.code, k: e.key, d: e.type === 'keydown'}); flush(); };
+    $('#rm-mode').onclick = e => { const b = e.target.closest('[data-v]'); if (!b) return; ctl = b.dataset.v === 'ctl';
+      $('#rm-mode').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); seg($('#rm-mode')); cv.classList.toggle('view', !ctl); };
+    $('#rm-fs').onclick = () => document.fullscreenElement ? document.exitFullscreen() : $('#rm').requestFullscreen?.();
+    const stop = () => { if (!done) { done = true; fetch('/api/remote/' + sid, {method: 'DELETE', keepalive: true}).catch(() => {}); } };
+    $('#rm-end').onclick = async () => { stop(); show({state: 'cerrada', why: 'La has terminado tú.'}); };
+    addEventListener('pagehide', stop);
+    cleanup = () => { stop(); alive = false; clearInterval(pump); clearInterval(clock); removeEventListener('pagehide', stop); if (document.fullscreenElement) document.exitFullscreen(); };
+  },
+  async tablero() {
+    crumbs([['Incidencias']]);
+    const [all, tasks, n] = await Promise.all([api('incidents'), api('tasks'), names()]);
+    const week = Date.now() - 7 * 864e5, ro = ME.readonly;
+    const incs = all.filter(x => incMine(x) && (incOpen(x) || date(x.updated) > week)); // lo resuelto o cerrado, solo la última semana
+    const col = (k, title, cards, extra = '') => `<section class="kb-col" data-col="${k}"><header>${title} <span class="count">${cards.length}</span>${extra}</header>
+      <div class="kb-list" role="list">${cards.join('')}</div>${k in TASK_COLS ? `<form class="kb-add" data-col="${k}"><input name="t" maxlength="2000" placeholder="+ Añadir ${k === 'notas' ? 'nota' : 'tarea'}" aria-label="Añadir en ${TASK_COLS[k]}"></form>` : ''}</section>`;
+    const more = t => `<button class="btn icon ghost sm kc-more" aria-label="Opciones de ${esc(t)}" aria-haspopup="menu">${ui('more', 15)}</button>`;
+    const incCard = (x, i) => `<div class="kc" role="listitem"${ro ? '' : ' data-drag'} data-id="${x.id}" data-col="${esc(x.status)}" style="--i:${Math.min(i, 12)}">
+        <a class="kc-t" href="#/inc/${x.id}" draggable="false"><span class="dim mono">${incId(x.id)}</span> ${esc(x.title)}</a>
+        <div class="kc-m">${prioPill(x.priority)}${x.item_name ? `<span class="dim small">${esc(x.item_name)}</span>` : ''}${x.assignee !== ME.id && x.grp_name ? `<span class="dim small">${ui('users', 13)} ${esc(x.grp_name)}</span>` : ''}</div>${ro ? '' : more(incId(x.id))}</div>`;
+    const taskCard = (t, i) => `<div class="kc" role="listitem" data-drag data-id="${t.id}" data-col="${t.col}" data-pos="${t.pos}" title="Doble clic para editar" style="--i:${Math.min(i, 12)}"><div class="prose">${md(t.text, n)}</div>${more(t.text.slice(0, 40))}</div>`;
+    const byCol = k => tasks.filter(t => t.col === k).map(taskCard);
+    app.innerHTML = head('Incidencias', `${incs.filter(incOpen).length} abiertas para ti o tus grupos · ${tasks.filter(t => t.col === 'pendiente' || t.col === 'hoy').length} tareas pendientes`,
+        `${incViews('board')}<button class="btn pri" id="add">${ui('plus', 16)}Nueva incidencia</button>`)
+      + `<h2 class="kb-h">${ui('ticket', 17)}Mis incidencias</h2>
+        <div class="kb" id="kb-inc">${INC_STATUS.map(st => col(st, statusPill(st), incs.filter(x => x.status === st).map(incCard))).join('')}</div>
+        <p class="dim small" style="margin:8px 0 0">Asignadas a ti o a tus grupos. Arrastra una tarjeta para cambiar su estado: queda en el historial de la incidencia. Las resueltas y cerradas salen una semana.</p>
+        <h2 class="kb-h">${ui('check', 17)}Mis tareas y notas <span class="dim small" style="font-weight:400">· solo las ves tú</span></h2>
+        <div class="kb" id="kb-task">${Object.entries(TASK_COLS).map(([k, t]) => col(k, esc(t), byCol(k), k === 'hecho' && byCol(k).length ? '<button class="btn ghost sm" id="kb-clear">Vaciar</button>' : '')).join('')}</div>`;
+    const setStatus = async (id, st, card) => {
+      kbMark('inc', id, card);
+      try { const r = await api('incidents/' + id, 'PUT', {status: st}); toast(`${incId(id)} pasa a «${st}»` + (r.closed_children ? ` con ${r.closed_children} ${r.closed_children === 1 ? 'hija' : 'hijas'}` : '')); } catch {}
+      await route(false); kbLanded(); pollMonitor(); // también el contador de Incidencias del menú
+    };
+    const endPos = k => Math.max(-1, ...tasks.filter(t => t.col === k).map(t => t.pos)) + 1;
+    const moveTask = async (id, k, pos, card) => { kbMark('task', id, card); try { await api('tasks/' + id, 'PUT', {col: k, pos}); } catch {} await route(false); kbLanded(); };
+    const editTask = async t => {
+      const f = await dialog(`<h3>Editar</h3><div class="field"><label for="tk-t">Texto <span class="dim">· Markdown; enlaza equipos con [[#id]]</span></label><textarea id="tk-t" name="t" rows="6" maxlength="2000" required>${esc(t.text)}</textarea></div>`, {ok: 'Guardar'});
+      if (f) { try { await api('tasks/' + t.id, 'PUT', {text: f.get('t')}); } catch {} route(false); }
+    };
+    incViewsBind(); $('#add').onclick = () => incidentDialog();
+    kanban($('#kb-inc'), (c, list) => c.dataset.col !== list.parentNode.dataset.col ? setStatus(c.dataset.id, list.parentNode.dataset.col, c) : route(false)); // dentro de la columna manda la prioridad
+    kanban($('#kb-task'), (c, list) => { // la posición queda entre sus vecinas
+      const p = c.previousElementSibling?.dataset.pos, q = c.nextElementSibling?.dataset.pos;
+      moveTask(c.dataset.id, list.parentNode.dataset.col, p != null && q != null ? (+p + +q) / 2 : p != null ? +p + 1 : q != null ? +q - 1 : 0, c); // shortcut: tras ~50 cambios en el mismo hueco se acaban los decimales; renumerar si pasa
+    });
+    app.querySelectorAll('.kc-more').forEach(b => b.onclick = () => {
+      const c = b.closest('.kc'), id = +c.dataset.id, k = c.dataset.col;
+      if (c.closest('#kb-inc')) return menu(b, [['Abrir', () => { location.hash = '#/inc/' + id; }, {icon: 'ticket'}], '-',
+        ...INC_STATUS.filter(st => st !== k).map(st => [`Pasar a «${st}»`, () => setStatus(id, st, c), {icon: 'chev'}])]);
+      const t = tasks.find(x => x.id === id);
+      menu(b, [['Editar', () => editTask(t), {icon: 'edit'}], ['Crear incidencia con esto', () => incidentDialog({title: t.text.split('\n')[0].slice(0, 200)}), {icon: 'ticket'}], '-',
+        ...Object.entries(TASK_COLS).filter(([to]) => to !== k).map(([to, name]) => [`Mover a «${name}»`, () => moveTask(id, to, endPos(to), c), {icon: 'chev'}]), '-',
+        ['Borrar', async () => { await kbGone(c); await api('tasks/' + id, 'DELETE').catch(() => {}); route(false); }, {icon: 'trash', danger: true}]]);
+    });
+    $('#kb-task').ondblclick = e => { const c = e.target.closest('.kc'); if (c && !e.target.closest('a,button')) editTask(tasks.find(x => x.id === +c.dataset.id)); };
+    app.querySelectorAll('.kb-add').forEach(f => f.onsubmit = async e => {
+      e.preventDefault(); const k = f.dataset.col, text = f.t.value.trim(); if (!text) return;
+      try { kbMark('task', (await api('tasks', 'POST', {text, col: k})).id); } catch { return; }
+      await route(false); kbLanded(); app.querySelector(`.kb-add[data-col="${k}"] input`)?.focus(); // seguir añadiendo en la misma columna
+    });
+    $('#kb-clear') && ($('#kb-clear').onclick = async () => {
+      const hechas = tasks.filter(t => t.col === 'hecho');
+      if (!await ask('¿Vaciar «Hecho»?', `Se borrarán ${hechas.length} ${hechas.length === 1 ? 'tarea hecha' : 'tareas hechas'}. No se puede deshacer.`, 'Vaciar')) return;
+      const cards = [...app.querySelectorAll('#kb-task [data-col="hecho"] .kc')];
+      await Promise.all(cards.map((c, i) => new Promise(ok => setTimeout(ok, i * 50)).then(() => kbGone(c))));
+      await Promise.all(hechas.map(t => api('tasks/' + t.id, 'DELETE').catch(() => {}))); route(false);
+    });
+  },
   async inc(id) {
+    if (!id && S.incView === 'board') return views.tablero();
     if (!id) {
-      const all = await api('incidents'), q = qv(), sets = {open: all.filter(incOpen), mine: all.filter(n => incOpen(n) && incMine(n)), all};
-      const shown = sets[incFilter].filter(n => [n.title, n.assignee_name, n.grp_name, n.item_name, '#' + n.id].join(' ').toLowerCase().includes(q));
+      const all = await api('incidents'), q = qv(), sets = {open: all.filter(incOpen), mine: all.filter(n => incOpen(n) && incMine(n)), all, closed: all.filter(n => !incOpen(n))};
+      const shown = sets[incFilter].filter(n => [n.title, n.assignee_name, n.grp_name, n.item_name, incId(n.id)].join(' ').toLowerCase().includes(q));
       const ids = new Set(shown.map(n => n.id)), kidsOf = {};
       shown.forEach(n => n.parent && ids.has(n.parent) && (kidsOf[n.parent] ||= []).push(n));
       const roots = shown.filter(n => !(n.parent && ids.has(n.parent)));
@@ -1969,18 +2222,18 @@ const views = {
         return `<div class="inc-node" style="--i:${Math.min(i, 14)}"><div class="inc-row">
             ${ks.length ? `<button class="inc-tg" data-tg="${n.id}" aria-expanded="${open}" aria-label="${open ? 'Ocultar' : 'Ver'} sus ${ks.length} incidencias hijas">${ui('chev', 15)}</button>` : '<span class="inc-tg"></span>'}
             <a class="rowlink" href="#/inc/${n.id}"><span class="badge-ic">${ui('ticket', 18)}</span>
-            <div class="grow"><b><span class="dim">#${n.id}</span> ${esc(n.title)}</b><span class="ex">${n.assignee_name ? esc(n.assignee_name) : 'Sin asignar'}${n.grp_name ? ' · ' + esc(n.grp_name) : ''}${n.item_name ? ' · ' + esc(n.item_name) : ''} · ${n.notes} ${n.notes === 1 ? 'nota' : 'notas'} · ${esc(ago(n.updated))}${n.parent && !ids.has(n.parent) ? ` · cuelga de #${n.parent}` : ''}</span></div>
+            <div class="grow"><b><span class="dim mono">${incId(n.id)}</span> ${esc(n.title)}</b><span class="ex">${n.assignee_name ? esc(n.assignee_name) : 'Sin asignar'}${n.grp_name ? ' · ' + esc(n.grp_name) : ''}${n.item_name ? ' · ' + esc(n.item_name) : ''} · ${n.notes} ${n.notes === 1 ? 'nota' : 'notas'} · ${esc(ago(n.updated))}${n.parent && !ids.has(n.parent) ? ` · cuelga de #${n.parent}` : ''}</span></div>
             ${ks.length ? `<span class="inc-n" title="Incidencias hijas">${ui('ticket', 13)}${ks.length}</span>` : ''}${prioPill(n.priority)}${statusPill(n.status)}</a></div>
           ${ks.length ? `<div class="inc-kids${open ? ' open' : ''}"><div>${ks.map(k => node(k)).join('')}</div></div>` : ''}</div>`;
       };
       crumbs([['Incidencias']]);
-      app.innerHTML = head('Incidencias', `${sets.open.length} abiertas · ${sets.mine.length} para ti o tus grupos`, `<button class="btn pri" id="add">${ui('plus', 16)}Nueva incidencia</button>`)
-        + `<div class="seg" id="if" style="margin-bottom:16px">${[['open', 'Abiertas'], ['mine', 'Mías'], ['all', 'Todas']].map(([k, t]) => `<button data-v="${k}" class="${k === incFilter ? 'on' : ''}">${t} <span class="dim">${sets[k].length}</span></button>`).join('')}</div>`
+      app.innerHTML = head('Incidencias', `${sets.open.length} abiertas · ${sets.mine.length} para ti o tus grupos`, `${incViews('list')}<button class="btn pri" id="add">${ui('plus', 16)}Nueva incidencia</button>`)
+        + `<div class="seg" id="if" style="margin-bottom:16px">${[['open', 'Abiertas'], ['mine', 'Mías'], ['all', 'Todas'], ['closed', 'Cerradas']].map(([k, t]) => `<button data-v="${k}" class="${k === incFilter ? 'on' : ''}">${t} <span class="dim">${sets[k].length}</span></button>`).join('')}</div>`
         + (shown.length ? `<div class="rows stagger inc-tree" id="itree">${roots.map((n, i) => node(n, i)).join('')}</div>`
-          : empty('ticket', incFilter === 'mine' ? 'Nada pendiente para ti' : 'Sin incidencias', all.length ? 'Nada coincide con este filtro.' : 'Abre una cuando algo falle y asígnala a una persona o a un grupo; cada cambio y cada nota quedan en su historial.'));
+          : empty('ticket', incFilter === 'mine' ? 'Nada pendiente para ti' : incFilter === 'closed' ? 'Aún no hay ninguna cerrada' : 'Sin incidencias', all.length ? 'Nada coincide con este filtro.' : 'Abre una cuando algo falle y asígnala a una persona o a un grupo; cada cambio y cada nota quedan en su historial.'));
       seg($('#if'));
       $('#if').onclick = e => { const b = e.target.closest('[data-v]'); if (b) { incFilter = b.dataset.v; route(false); } };
-      $('#add').onclick = () => incidentDialog();
+      $('#add').onclick = () => incidentDialog(); incViewsBind();
       $('#itree')?.addEventListener('click', e => { // desplegar / plegar las hijas sin recargar la lista
         const t = e.target.closest('[data-tg]'); if (!t) return;
         const id = +t.dataset.tg, open = !incOpenTree.has(id);
@@ -1992,12 +2245,15 @@ const views = {
     }
     const [n, users, groups, items, incs] = await Promise.all([api('incidents/' + id), api('users'), api('groups'), api('items'), api('incidents')]);
     const names = Object.fromEntries(items.map(i => [i.id, i.name]));
-    crumbs([['Incidencias', '#/inc'], ['#' + n.id]]);
-    app.innerHTML = head(`<span class="dim">#${n.id}</span> ${esc(n.title)}`, `Abierta por ${esc(n.author_name || '—')} ${esc(ago(n.created))} · ${statusPill(n.status)} ${prioPill(n.priority)}${n.parent ? ` · cuelga de <a href="#/inc/${+n.parent}">#${+n.parent} ${esc(n.parent_title)}</a>` : ''}`, moreBtn)
+    const mention = [...n.mentions.pages.map(p => ['book', `#/wiki/${p.id}`, p.title || 'Sin título', 'Página de la wiki']), ...n.mentions.items.map(i => ['box', `#/inv/${i.id}`, i.name, 'Notas del equipo']),
+      ...n.mentions.incidents.map(x => ['ticket', `#/inc/${x.id}`, `${incId(x.id)} ${x.title}`, 'Incidencia · ' + x.status])];
+    crumbs([['Incidencias', '#/inc'], [incId(n.id)]]);
+    app.innerHTML = head(`<span class="dim">${incId(n.id)}</span> ${esc(n.title)}`, `Abierta por ${esc(n.author_name || '—')} ${esc(ago(n.created))} · ${statusPill(n.status)} ${prioPill(n.priority)}${n.parent ? ` · cuelga de <a href="#/inc/${+n.parent}">${incId(+n.parent)} ${esc(n.parent_title)}</a>` : ''}`,
+      `<button class="chip" id="iref" title="Copiar la referencia para enlazarla desde la wiki">${ui('link', 14)}<span class="mono">[[${incId(n.id)}]]</span></button>${moreBtn}`)
       + `<div class="split stagger"><section class="card pad" style="--i:0">
           <article class="prose">${md(n.body, names) || '<p class="muted">Sin descripción.</p>'}</article>
           <h3 class="card-t mt">Incidencias hijas</h3>${n.kids.length ? '<p class="small muted" style="margin:-4px 0 6px">Al resolver o cerrar esta, se resuelven también las abiertas.</p>' : ''}
-          ${n.kids.length ? `<div class="rows">${n.kids.map(k => `<a class="rowlink" href="#/inc/${k.id}"><div class="grow"><b><span class="dim">#${k.id}</span> ${esc(k.title)}</b><span class="ex">${k.assignee_name ? esc(k.assignee_name) : 'Sin asignar'}${k.children ? ` · ${k.children} ${k.children === 1 ? 'hija' : 'hijas'}` : ''}</span></div>${statusPill(k.status)}</a>`).join('')}</div>` : ''}
+          ${n.kids.length ? `<div class="rows">${n.kids.map(k => `<a class="rowlink" href="#/inc/${k.id}"><div class="grow"><b><span class="dim mono">${incId(k.id)}</span> ${esc(k.title)}</b><span class="ex">${k.assignee_name ? esc(k.assignee_name) : 'Sin asignar'}${k.children ? ` · ${k.children} ${k.children === 1 ? 'hija' : 'hijas'}` : ''}</span></div>${statusPill(k.status)}</a>`).join('')}</div>` : ''}
           <button class="btn ghost sm" id="kid" type="button">${ui('plus', 15)}Crear incidencia hija</button>
           <h3 class="card-t mt">Seguimiento</h3>
           <form id="nf"><div class="field"><label for="nt">Actualización</label><textarea id="nt" rows="3" required maxlength="5000" placeholder="Qué se ha hecho, qué falta…"></textarea></div>
@@ -2011,8 +2267,12 @@ const views = {
           <div class="field"><label for="f-as">Asignada a</label><select id="f-as" data-k="assignee">${optList(users, n.assignee, 'Nadie')}</select></div>
           <div class="field"><label for="f-gr">Grupo</label><select id="f-gr" data-k="grp">${optList(groups, n.grp, 'Ninguno')}</select></div>
           <div class="field"><label for="f-it">Equipo</label><select id="f-it" data-k="item">${optList(items, n.item, 'Ninguno')}</select></div>
-          <div class="field"><label for="f-pa">Cuelga de</label><select id="f-pa" data-k="parent">${optList(incs.filter(x => x.id !== n.id).map(x => ({id: x.id, name: `#${x.id} ${x.title}`})), n.parent, 'Ninguna (es principal)')}</select></div>
-          ${n.item ? `<a class="linkrow" href="#/inv/${+n.item}">${ui('box', 16)}Abrir ficha del equipo</a>` : ''}</div></section></aside></div>`;
+          <div class="field"><label for="f-pa">Cuelga de</label><select id="f-pa" data-k="parent">${optList(incs.filter(x => x.id !== n.id).map(x => ({id: x.id, name: `${incId(x.id)} ${x.title}`})), n.parent, 'Ninguna (es principal)')}</select></div>
+          ${n.item ? `<a class="linkrow" href="#/inv/${+n.item}">${ui('box', 16)}Abrir ficha del equipo</a>` : ''}</div></section>
+        <section class="card pad" style="--i:2"><h3 class="card-t">${ui('link', 15)}Enlazada desde <span class="count">${mention.length}</span></h3>
+          ${mention.length ? `<ul class="rel">${mention.map(([ic, h, t, s]) => `<li><a href="${h}"><span class="badge-ic">${ui(ic, 16)}</span><span><b>${esc(t)}</b><small>${s}</small></span></a></li>`).join('')}</ul>`
+            : `<p class="muted small" style="margin:0">Pega <code class="mono">[[${incId(n.id)}]]</code> en una página de la wiki, en las notas de un equipo o en otra incidencia y saldrá aquí.</p>`}</section></aside></div>`;
+    $('#iref').onclick = () => copy(`[[${incId(n.id)}]]`);
     if (ME.readonly) app.querySelectorAll('#inc-f select').forEach(x => x.disabled = true);
     $('#inc-f').onchange = async e => { // cada cambio queda en el seguimiento
       const k = e.target.dataset.k, v = e.target.value;
@@ -2025,9 +2285,10 @@ const views = {
     $('#nf').onsubmit = async e => { e.preventDefault(); if (!$('#nt').value.trim()) return toast('Escribe algo antes de añadirlo', 'bad'); await api(`incidents/${n.id}/notes`, 'POST', {text: $('#nt').value}); route(false); };
     $('#more').onclick = e => menu(e.currentTarget, [
       ['Editar título y descripción', async () => {
-        const f = await dialog(`<h3>Editar incidencia</h3><div class="fields"><div class="field"><label for="e-t">Título</label><input id="e-t" name="title" required maxlength="200" value="${esc(n.title)}"></div>
+        const p = dialog(`<h3>Editar incidencia</h3><div class="fields"><div class="field"><label for="e-t">Título</label><input id="e-t" name="title" required maxlength="200" value="${esc(n.title)}"></div>
           <div class="field"><label for="e-b">Descripción</label><textarea id="e-b" name="body" rows="6">${esc(n.body)}</textarea></div></div>`, {ok: 'Guardar'});
         richEditor(document.querySelector('dialog[open] #e-b'), names);
+        const f = await p;
         if (f) { try { await putFresh('incidents/' + n.id, {title: f.get('title').trim(), body: f.get('body')}, n.version); } catch { return; } route(false); }
       }, {icon: 'edit'}],
       ...(ME.admin ? ['-', ['Borrar incidencia', async () => { if (await ask('¿Borrar esta incidencia?', `«${esc(n.title)}» y su seguimiento se borrarán. Quedará una copia en Actividad.`)) { await api('incidents/' + n.id, 'DELETE'); toast('Incidencia borrada'); location.hash = '#/inc'; } }, {icon: 'trash', danger: true}]] : [])]);
@@ -2101,11 +2362,11 @@ const views = {
           <a class="rowlink" href="#/users" style="--i:0"><span class="badge-ic">${ui('users', 18)}</span><div class="grow"><b>Usuarios y grupos</b>
             <span class="ex">${us.length} ${us.length === 1 ? 'usuario' : 'usuarios'} · ${gs.length} ${gs.length === 1 ? 'grupo' : 'grupos'} · quién entra y quién puede editar</span></div><span style="display:flex;transform:rotate(-90deg)" class="dim">${ui('chev', 16)}</span></a>
           <a class="rowlink" href="#/inv" style="--i:1"><span class="badge-ic">${ui('signal', 18)}</span><div class="grow"><b>Kitty en los PCs</b>
-            <span class="ex">En Inventario: «Añadir PC» y aceptar los que piden entrar</span></div><span style="display:flex;transform:rotate(-90deg)" class="dim">${ui('chev', 16)}</span></a>
+            <span class="ex">En Inventario: «Añadir con Kitty» y aceptar los que piden entrar</span></div><span style="display:flex;transform:rotate(-90deg)" class="dim">${ui('chev', 16)}</span></a>
           <a class="rowlink" href="#/sistema" style="--i:2"><span class="badge-ic">${ui('pulse', 18)}</span><div class="grow"><b>Salud de catlan</b>
             <span class="ex">Tamaño de la base de datos, copias diarias, estado del monitor y comprobaciones atrasadas</span></div><span style="display:flex;transform:rotate(-90deg)" class="dim">${ui('chev', 16)}</span></a>
           <a class="rowlink" href="/api/backup" id="bk" style="--i:3"><span class="badge-ic">${ui('layers', 18)}</span><div class="grow"><b>Descargar copia de seguridad</b>
-            <span class="ex">Toda la base de datos, cifrada con una contraseña (lleva las credenciales de SNMP y avisos). Para restaurarla: <code>python catlan.py descifrar copia.catlan data/catlan.db</code> con catlan parado.</span></div>${ui('redo', 16)}</a></div>
+            <span class="ex">Toda la base de datos, cifrada con una contraseña (lleva las credenciales de SNMP y avisos). Para restaurarla: <code>catlan descifrar copia.catlan data/catlan.db</code> con catlan parado.</span></div>${ui('redo', 16)}</a></div>
         <section class="card pad mt" aria-labelledby="al-t"><h3 class="card-t" id="al-t">${ui('bell', 16)}Avisos fuera de catlan <span class="dim small" id="al-ch" style="font-weight:400"></span></h3>
           <p class="small muted" style="margin:0 0 12px">Cuando algo cae y cuando vuelve, avisos de Salud, incidencias críticas y garantías. Las contraseñas y tokens guardados no se vuelven a mostrar: déjalos en blanco para conservarlos.</p>
           <form id="al-f" class="fields two" autocomplete="off">
@@ -2155,12 +2416,7 @@ const views = {
       const body = Object.fromEntries(new FormData(e.target));
       try { paintAlerts(await api('alerts', 'PUT', body)); toast('Avisos guardados'); } catch {}
     };
-    $('#al-test').onclick = async () => {
-      try {
-        const r = await api('monitor/test', 'POST'), bad = Object.entries(r).filter(([, err]) => err);
-        toast(bad.length ? `Falló: ${bad.map(([ch, err]) => `${ch} (${err})`).join(' · ')}` : `Aviso de prueba enviado por ${Object.keys(r).join(', ')}`, bad.length ? 'bad' : undefined);
-      } catch {}
-    };
+    $('#al-test').onclick = testAlerts;
     $('#wipe').onclick = async () => {
       const f = await dialog(`<h3 style="display:flex;align-items:center;gap:8px;color:var(--bad)">${ui('alert', 20)}¿Borrar la base de datos?</h3>
         <p><b>Se borrará todo el contenido de catlan para todos los usuarios</b>: wiki, inventario, esquemas, racks, monitor, salud, incidencias, Kittys, dashboard, sonidos y actividad.</p>
@@ -2290,9 +2546,7 @@ const views = {
     }
     const placeGhost = w => { const g = pos.get(w); Object.assign(ghost.style, {transform: `translate(${g.x}px,${g.y}px)`, width: g.w + 'px', height: g.h + 'px'}); };
     // Rebote al soltar o agrandar: aplastar y estirar, anclado donde tiene sentido
-    const jelly = (el, origin = '50% 50%', k = 1) => { el.firstChild.style.transformOrigin = origin; anim(el.firstChild, [{transform: 'none'},
-      {transform: `scale(${1 + .045 * k},${1 - .04 * k})`}, {transform: `scale(${1 - .03 * k},${1 + .03 * k})`}, {transform: `scale(${1 + .012 * k},${1 - .01 * k})`}, {transform: 'none'}],
-      {duration: 680, easing: 'cubic-bezier(.3,.7,.4,1)'}); };
+    const jelly = (el, origin, k) => squish(el.firstChild, origin, k);
     function draw(w, force) {
       const el = els[w.id], d = el?._d, g = pos.get(w); if (!d || !g) return;
       const bw = Math.round(g.w - 28), bh = Math.round(g.h - 62), view = w.view || DW[w.kind].view, key = [bw, bh, view, d.v].join();
@@ -2491,7 +2745,6 @@ const views = {
         <article class="prose">${md(p.body, n) || `<p class="muted">Página vacía. <a href="#/wiki/${p.id}/edit">Empieza a escribir</a>.</p>`}</article>
         <div class="read-foot">${collapsible(`${ui('clock', 16)}Historial <span class="count">${log.length}</span>`, timeline(log))}</div></div>`;
       $('#more').onclick = e => menu(e.currentTarget, [
-        ['Editar', () => location.hash = `#/wiki/${p.id}/edit`, {icon: 'edit'}],
         ['Copiar enlace', () => copy(`[[${p.title}]]`), {icon: 'link'}], '-',
         ['Borrar página', async () => { if (await delUndo([['page', 'pages/' + p.id]], 'Página borrada')) location.hash = '#/wiki'; }, {icon: 'trash', danger: true}]]);
       return;
@@ -2595,7 +2848,8 @@ const views = {
       $('#addpc') && ($('#addpc').onclick = () => {
         const cmd = `irm ${location.origin}/kitty.ps1 | iex`, sh = `curl -fsSL ${location.origin}/kitty.sh | sudo sh`;
         const line = (c, id) => `<div style="display:flex;gap:8px;align-items:center"><code class="mono" style="flex:1;padding:10px 12px;border:1px solid var(--line);border-radius:8px;word-break:break-all">${esc(c)}</code><button type="button" class="btn" id="${id}">${ui('copy', 15)}Copiar</button></div>`;
-        dialog(`<h3>Añadir un equipo con Kitty</h3><p><b>Windows</b>: abre PowerShell como administrador y pega esta línea. Instala Kitty, un programa pequeño: envía el estado del PC cada 5 minutos y deja en la bandeja un gato para que el usuario avise a IT, sin tener que llamar.</p>${line(cmd, 'pc-copy')}
+        dialog(`<h3>Añadir un equipo con Kitty</h3><p><b>Windows</b>: en el PC, <a href="/kitty.exe" download>descarga Kitty</a>, ábrelo y pulsa «Conectar este PC». Busca este catlan en la red, se instala (Windows pide permiso de administrador) y aparece aquí para que lo aceptes. Envía el estado del PC cada minuto y deja en la bandeja un gato para que el usuario avise a IT, sin tener que llamar.</p>
+          <p class="muted small">Para muchos equipos a la vez, lo mismo en PowerShell como administrador:</p>${line(cmd, 'pc-copy')}
           <p class="muted small">Para quitarlo, en PowerShell como administrador: <span class="mono">Unregister-ScheduledTask Kitty -Confirm:$false; Stop-Process -Name kitty -Force; Remove-ItemProperty HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run Kitty; Remove-Item -Recurse "$env:ProgramFiles\\Kitty", "$env:ProgramData\\Kitty", HKLM:\\SOFTWARE\\Kitty</span></p>
           <p><b>Linux</b> (con curl): pega esta línea en una terminal. Deja un temporizador de systemd (o cron) que envía lo mismo cada 5 minutos.</p>${line(sh, 'sh-copy')}
           <p class="muted small">Para quitarlo: <span class="mono">sudo sh /usr/local/lib/kitty-agent.sh quitar</span>. Después aparecerá aquí, en «Kitty pide entrar», para que lo aceptes.</p>`, {ok: 'Listo'});
@@ -2612,7 +2866,7 @@ const views = {
     }
     const [i, n, refs, log, sys] = await Promise.all([api('items/' + id), names(), api(`items/${id}/refs`), api(`log?kind=item&ref=${id}`), api(`items/${id}/syslog`)]);
     const ref = `[[#${i.id}]]`;
-    const rel = [...refs.pages.map(p => ['book', `#/wiki/${p.id}`, p.title, 'Página de la wiki']), ...refs.incidents.map(x => ['ticket', `#/inc/${x.id}`, `#${x.id} ${x.title}`, 'Incidencia · ' + x.status]),
+    const rel = [...refs.pages.map(p => ['book', `#/wiki/${p.id}`, p.title, 'Página de la wiki']), ...refs.incidents.map(x => ['ticket', `#/inc/${x.id}`, `${incId(x.id)} ${x.title}`, 'Incidencia · ' + x.status]),
       ...refs.items.map(x => ['box', `#/inv/${x.id}`, x.name, 'Notas de otro equipo']),
       ...refs.expiries.map(x => ['clock', '#/cad', x.name, `${esc(x.kind)} · ${warrantyTxt(x.date)}`]),
       ...refs.maps.map(m => m.type === 'rack' ? ['rack', `#/racks/${m.id}`, m.name, 'Montado en rack'] : ['nodes', `#/maps/${m.id}`, m.name, 'Aparece en esquema'])];
@@ -2627,6 +2881,7 @@ const views = {
            <button class="btn ghost" id="ip-ping" title="Hacer ping a ${esc(i.ip)} ahora">${ui('signal', 15)}Ping</button>
            <a class="btn ghost" href="http://${esc(i.ip)}" target="_blank" rel="noopener" title="Abrir http://${esc(i.ip)} en otra pestaña">${ui('link', 15)}Abrir web</a>` : '')
         + `<button class="chip" id="ref" title="Copiar la referencia para enlazarlo desde la wiki">${ui('link', 14)}<span class="mono">${ref}</span></button>
+         ${refs.agent ? `<button class="btn" id="rmt" title="Ver y usar este PC con Kitty, con permiso de quien lo usa">${ui('screen', 16)}Control remoto</button>` : ''}
          <button class="btn pri" id="save" disabled>${ui('check', 16)}Guardar</button>${moreBtn}`)
       + `<div class="split stagger"><section class="card pad" style="--i:0"><div class="fields two">
           ${ITEM_FIELDS.map(([k, l]) => `<div class="field"><label for="f-${k}">${l}</label><input id="f-${k}" value="${esc(i[k])}"${k === 'ip' || k === 'serial' ? ' class="mono" spellcheck="false"' : ''}${k === 'status' ? ' list="dl-status"' : k === 'kind' ? ' list="dl-kind"' : k === 'warranty' ? ' type="date"' : ''}></div>`).join('')}
@@ -2650,14 +2905,15 @@ const views = {
     };
     save.onclick = doSave;
     $('#ref').onclick = () => copy(ref);
-    $('#ip-copy') && ($('#ip-copy').onclick = async () => { await copy(i.ip); toast(`${i.ip} copiada`); });
+    $('#rmt') && ($('#rmt').onclick = () => remoteStart(refs.agent));
+    $('#ip-copy') && ($('#ip-copy').onclick = () => copy(i.ip)); // copy() ya avisa
     $('#ip-ping') && ($('#ip-ping').onclick = async e => {
       const b = e.currentTarget; b.disabled = true;
       try { const r = await api('ping', 'POST', {host: i.ip}); toast(r.up ? `${i.ip} responde${r.rtt != null ? ` en ${r.rtt} ms` : ''}` : `${i.ip} no responde`, r.up ? undefined : 'bad'); }
       catch {} finally { b.disabled = false; }
     });
     $('#more').onclick = e => menu(e.currentTarget, [
-      ['Copiar referencia', () => copy(ref), {icon: 'copy'}], '-',
+      ['Crear incidencia', () => incidentDialog({item: i.id}), {icon: 'ticket'}],
       ['Programar mantenimiento…', () => maintDialog({items: [i.id]}, i.name), {icon: 'bell'}], '-',
       ['Borrar equipo', async () => { if (await delUndo([['item', 'items/' + id]], 'Equipo borrado')) location.hash = '#/inv'; }, {icon: 'trash', danger: true}]]);
   },
@@ -3078,10 +3334,7 @@ const views = {
       S.sound = 'u:' + x.id; applySettings(); toast(`«${x.name}» es ahora el sonido de alerta`); route(false);
     };
     app.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { await api('sounds/' + b.dataset.del, 'DELETE'); if (S.sound === 'u:' + b.dataset.del) S.sound = 'bell'; applySettings(); route(false); });
-    $('#mail-test') && ($('#mail-test').onclick = async () => {
-      const r = await api('monitor/test', 'POST'), bad = Object.entries(r).filter(([, e]) => e);
-      toast(bad.length ? 'Falló ' + bad.map(([ch, e]) => `${ch}: ${e}`).join(' · ') : `Aviso de prueba enviado por ${Object.keys(r).join(', ')}`, bad.length ? 'bad' : '');
-    });
+    $('#mail-test') && ($('#mail-test').onclick = testAlerts);
     // Mantenimiento: silencia (o reactiva) todo lo vigilado y todo lo que se lee en Salud
     const muteAll = async m => {
       await Promise.all([...monData.checks.map(c => api(`checks/${c.id}/mute`, 'POST', {minutes: m})), ...(monData.sources || []).map(x => api(`sources/${x.id}/mute`, 'POST', {minutes: m}))]);
@@ -3116,7 +3369,7 @@ const views = {
         : empty('thermo', 'Aún no lees ningún equipo', 'Activa SNMP en tu NAS o switch (o usa la API de tu grabador Hikvision) y catlan guardará sus temperaturas, discos y estado para dibujarlos y avisarte.'));
       $('#add').onclick = () => sourceDialog({}, items);
       if ($('#stab')) { seg($('#stab')); $('#stab').onclick = e => { const b = e.target.closest('[data-v]'); if (b) { saludTab = b.dataset.v; route(false); } }; }
-      const t = setInterval(() => route(false), 60000); cleanup = () => clearInterval(t);
+      const t = setInterval(() => route(false), 15000); cleanup = () => clearInterval(t);
       return;
     }
     let h, hours = healthRange, selPort = null, showAll = false;
@@ -3188,7 +3441,7 @@ const views = {
         : '<p class="muted small">Sin lecturas todavía.</p>';
     };
     app.innerHTML = head(`<span id="h-name"></span>`, '<span id="h-sub"></span>', `<div class="seg" id="rng">${[[6, '6 h'], [24, '24 h'], [168, '7 días'], [720, '30 días'], [2160, '90 días']].map(([v, t]) =>
-        `<button data-v="${v}" class="${v === hours ? 'on' : ''}">${t}</button>`).join('')}</div><button class="btn" id="edit">${ui('edit', 16)}Editar</button>${moreBtn}`)
+        `<button data-v="${v}" class="${v === hours ? 'on' : ''}">${t}</button>`).join('')}</div><button class="btn pri" id="rmt" hidden>${ui('screen', 16)}Control remoto</button><button class="btn" id="edit">${ui('edit', 16)}Editar</button>${moreBtn}`)
       + `<div id="h-state"></div><div class="kpi-row" id="kpis"></div>
       <section class="card pad" id="kit-card" hidden style="margin-bottom:16px"><h3 class="card-t">Equipo</h3><div id="kit-info"></div>
         <p class="dim small" style="margin:8px 0 0">Lo envía Kitty. Solo lo justo para ver fallos: nada de usuarios, programas ni archivos.</p></section>
@@ -3207,6 +3460,8 @@ const views = {
       $('#rng').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); seg($('#rng')); paint(); };
     $('#edit').hidden = h.kind === 'kitty'; // shortcut: los umbrales de un Kitty no se editan desde la web; añadir un diálogo propio si hace falta
     $('#edit').onclick = () => sourceDialog(h, items);
+    $('#rmt').hidden = !(h.kind === 'kitty' && h.agent); // h llega con paint(): antes no se sabe si es un Kitty
+    $('#rmt').onclick = () => remoteStart(h.agent);
     $('#more').onclick = e => menu(e.currentTarget, h.kind === 'kitty' ? [
       [isMuted(h) ? 'Quitar silencio' : 'Silenciar…', async () => { await mute('sources', h, srcName(h)); paint(); }, {icon: 'bell'}],
       ...(ME.admin && h.agent ? ['-', ['Expulsar Kitty', async () => { if (await ask('¿Expulsar este Kitty?', `«${esc(srcName(h))}» saldrá de Salud con su historial y dejará de enviar datos. Su ficha del inventario se queda. Podrás volver a aceptarlo en Inventario.`, 'Expulsar')) { await api('agents/' + h.agent, 'PUT', {state: 'rechazado'}); toast('Kitty expulsado'); location.hash = '#/salud'; } }, {icon: 'trash', danger: true}]] : [])] : [
@@ -3214,7 +3469,7 @@ const views = {
       ['Leer ahora', async () => { await api('sources/' + h.id, 'PUT', {every: h.every}); toast('Leyendo…'); setTimeout(paint, 4000); }, {icon: 'signal'}],
       [isMuted(h) ? 'Quitar silencio' : 'Silenciar…', async () => { await mute('sources', h, srcName(h)); paint(); }, {icon: 'bell'}], '-',
       ['Dejar de leer', async () => { if (await ask('¿Dejar de leer este equipo?', `Se borrarán la configuración de «${esc(srcName(h))}» y sus avisos. El historial se limpia solo en 7 días.`, 'Dejar de leer')) { await api('sources/' + h.id, 'DELETE'); toast('Ya no se lee'); location.hash = '#/salud'; } }, {icon: 'trash', danger: true}]]);
-    const t = setInterval(paint, 60000); cleanup = () => clearInterval(t);
+    const t = setInterval(paint, 15000); cleanup = () => clearInterval(t);
   },
   async log() {
     const rows = await api('log');
@@ -3396,7 +3651,7 @@ async function route(animate = true) {
   document.body.classList.remove('nav-open');
   const [, view = 'home', ...rest] = location.hash.split('/');
   const v = views[view] ? view : 'home';
-  document.querySelectorAll('#nav a').forEach(a => { a.classList.toggle('on', a.dataset.v === ({p: 'wiki', discover: 'inv', cad: 'inv', sla: 'monitor', users: 'opts', sistema: 'opts'}[v] || v)); a.toggleAttribute('aria-current', a.classList.contains('on')); });
+  document.querySelectorAll('#nav a').forEach(a => { a.classList.toggle('on', a.dataset.v === ({p: 'wiki', discover: 'inv', cad: 'inv', sla: 'monitor', users: 'opts', sistema: 'opts', tablero: 'inc', remoto: 'salud'}[v] || v)); a.toggleAttribute('aria-current', a.classList.contains('on')); });
   moveInd();
   delete app.dataset.w;
   try { await views[v](rest.join('/') || null); }
@@ -3406,7 +3661,7 @@ async function route(animate = true) {
 }
 addEventListener('hashchange', () => route());
 $('#spot-btn').onclick = spotlight;
-$('#new').onclick = e => menu(e.currentTarget, [['Página de wiki', create.page, {icon: 'book'}], ['Equipo', create.item, {icon: 'box'}], ['Equipos en serie…', itemSeries, {icon: 'layers'}], ['Esquema', create.map, {icon: 'nodes'}], ['Rack', create.rack, {icon: 'rack'}]]);
+$('#new').onclick = e => menu(e.currentTarget, [['Página de wiki', create.page, {icon: 'book'}], ['Equipo', create.item, {icon: 'box'}], ['Equipos en serie…', itemSeries, {icon: 'layers'}], ['Esquema', create.map, {icon: 'nodes'}], ['Rack', create.rack, {icon: 'rack'}], ['Incidencia', () => incidentDialog(), {icon: 'ticket'}]]);
 // Rueda del ratón sobre la barra lateral: sección anterior / siguiente
 let wheelAcc = 0, wheelLock = 0;
 $('#side').addEventListener('wheel', e => {
@@ -3469,18 +3724,18 @@ addEventListener('scroll', () => $('#top').classList.toggle('scrolled', scrollY 
 const TOUR = [
   [null, '¡Bienvenido a catlan!', 'En un minuto te enseño dónde está cada cosa. Puedes saltarlo y volver a verlo cuando quieras desde Ajustes.'],
   ['[data-v="dash"]', 'Dashboard', 'Tu tablero: elige las tarjetas en «Personalizar», arrástralas y agrándalas. Es lo primero que ve todo el equipo.'],
-  ['[data-v="wiki"]', 'Wiki', 'Procedimientos y documentación. Enlaza un equipo con [[#id]] y otra página con [[Nombre]]. Aquí tienes también la «Guía de catlan».'],
-  ['[data-v="inv"]', 'Inventario', 'Todos tus equipos con IP, nº de serie, ubicación y garantía. Altas a mano, en serie o descubriendo la red; y «Añadir PC» para Kitty.'],
+  ['[data-v="wiki"]', 'Wiki', 'Procedimientos y documentación. Enlaza un equipo con [[#id]], una incidencia con [[INC-n]] y otra página con [[Nombre]]. Aquí tienes también la «Guía de catlan».'],
+  ['[data-v="inv"]', 'Inventario', 'Todos tus equipos con IP, nº de serie, ubicación y garantía. Altas a mano, en serie o descubriendo la red; y «Añadir con Kitty» para los PCs.'],
   ['[data-v="maps"]', 'Esquemas', 'Diagramas de red con iconos. «Topología automática» lo dibuja solo leyendo LLDP, CDP y la tabla MAC de un switch.'],
   ['[data-v="racks"]', 'Racks', 'Tus armarios montados U a U, con bocas de switch, patch panel y PDU.'],
   ['[data-v="monitor"]', 'Monitor', 'Ping, puertos, webs, certificados y DNS cada pocos segundos. Si algo cae, avisa en pantalla, con su sonido y por tus canales.'],
   ['[data-v="salud"]', 'Salud', 'Temperaturas, discos, ventiladores y puertos de NAS y switches por SNMP, y los PCs con Kitty en «Kittens».'],
-  ['[data-v="inc"]', 'Incidencias', 'Tickets con prioridad, estado y persona o grupo asignado. Los críticos avisan por tus canales.'],
+  ['[data-v="inc"]', 'Incidencias', 'Tickets con prioridad, estado y persona o grupo asignado. Los críticos avisan por tus canales. En la vista «Tablero» los cambias de estado arrastrándolos y llevas tus tareas y notas.'],
   ['[data-v="log"]', 'Actividad', 'Quién cambió qué y cuándo, con una foto de cada versión.'],
   ['#nav-opts', 'Opciones', 'Usuarios y grupos, avisos por correo, Telegram o webhook, copia de seguridad y la zona de peligro. Solo la ven los administradores.', 'admin'],
   ['#spot-btn', 'Buscar en todo', 'Alt+C o / desde cualquier sitio. Empieza por W: para la wiki, U: para equipos o T: para incidencias.'],
-  ['#new', 'Nuevo', 'Crea cualquier cosa desde aquí: página, equipo, esquema, rack, vigilancia o incidencia.'],
-  ['#open-settings', 'Ajustes', 'Tema, color, densidad y sonidos. Y si se te olvida algo, aquí puedes volver a ver este tutorial.'],
+  ['#new', 'Nuevo', 'Crea cualquier cosa desde aquí: página, equipo, esquema, rack o incidencia. Lo que vigila el monitor se añade en Monitor → Vigilar.'],
+  ['#open-settings', 'Ajustes', 'Tema, color y densidad (los sonidos de alerta están en Monitor). Y si se te olvida algo, aquí puedes volver a ver este tutorial.'],
   [null, 'Listo', 'Todo es local: catlan no envía tus datos a nadie que no configures tú. En la Wiki tienes la «Guía de catlan» con todos los detalles.', 'end'],
 ];
 const tourKey = () => 'catlan-tour-' + (ME?.id || 0);
@@ -3563,12 +3818,12 @@ function showLogin() {
   if ($('#login')) return;
   const el = document.createElement('div');
   el.className = 'login'; el.id = 'login';
-  el.innerHTML = `<form class="login-card"><span class="login-logo">${ui('cat', 30)}</span><h1>catlan</h1><p>El gato amigo de los IT</p>
+  el.innerHTML = `<form class="login-card"><span class="login-logo">${ui('cat', 30)}</span><h1><svg class="wm" viewBox="0 0 541 137.5" width="94" height="24" role="img" aria-label="catlan"><use href="#wm-catlan"/></svg></h1><p>El gato amigo de los IT</p>
     <label>Usuario<input name="name" autocomplete="username" required autofocus></label>
     <label>Contraseña<input name="pass" type="password" autocomplete="current-password" required></label>
     <label hidden>Código de tu app de autenticación<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7"></label>
     <p class="login-err" role="alert"></p><button class="btn pri">Entrar</button>
-    <details class="small muted" style="margin-top:12px"><summary style="cursor:pointer">¿Has olvidado la contraseña?</summary><p style="margin:8px 0 0">Pide a un administrador una nueva (Opciones → Usuarios). Si eres el único administrador, en el servidor de catlan ejecuta <code>python catlan.py restablecer tu-usuario</code> (con Docker: <code>docker compose exec catlan python catlan.py restablecer tu-usuario</code>).</p></details></form>`;
+    <details class="small muted" style="margin-top:12px"><summary style="cursor:pointer">¿Has olvidado la contraseña?</summary><p style="margin:8px 0 0">Pide a un administrador una nueva (Opciones → Usuarios). Si eres el único administrador, en el servidor de catlan ejecuta <code>catlan restablecer tu-usuario</code> con su misma carpeta de datos (si lo arrancas con <code>CATLAN_DATA</code>, ponla igual). Con Docker: <code>docker compose exec catlan catlan restablecer tu-usuario</code>.</p></details></form>`;
   document.body.append(el);
   const off = [...document.querySelectorAll('body > :not(#login):not([inert])')]; // detrás no se llega con el teclado
   off.forEach(x => x.inert = true);
@@ -3634,7 +3889,7 @@ async function totpDialog() {
 }
 $('#user-btn').onclick = e => menu(e.currentTarget, [['Cambiar contraseña', () => passDialog(false), {icon: 'edit'}],
   [ME?.totp ? 'Quitar verificación en dos pasos' : 'Verificación en dos pasos', totpDialog, {icon: 'key'}],
-  ...(ME?.admin ? [['Opciones', () => { location.hash = '#/opts'; }, {icon: 'cog'}]] : []), '-',
+  '-',
   ['Cerrar sesión', async () => { await api('logout', 'POST'); location.reload(); }, {icon: 'x'}]]);
 applySettings();
 boot();

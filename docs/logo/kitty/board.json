@@ -1,0 +1,31 @@
+{
+  "brand": "Kitty",
+  "tagline": "El gato de catlan en cada PC",
+  "brief": "Kitty es el agente de catlan: vive en la bandeja de cada PC, envía su estado cada minuto, busca su servidor catlan y deja que el usuario avise a IT. Es otra app, pero de la misma familia.",
+  "adjectives": ["ligero", "cercano", "atento", "de la familia"],
+  "criteria": "Que se vea de la familia de catlan, que se distinga de él a 16 px en la bandeja de Windows y que funcione a una tinta.",
+  "industry": "software",
+  "nav": ["Avisar", "Mis avisos", "Este PC"],
+  "brand_color": "#e8772e",
+  "greyscale": false,
+  "symbol_on_tile": "kit/kitty-symbol-mono-e8772e.svg",
+  "tile_color": "#1c1b19",
+  "lockup_on_dark": "kit/kitty-horizontal-reversed.svg",
+  "designer": "catlan",
+  "round": 2,
+  "concepts": [
+    {
+      "name": "Contorno",
+      "symbol": "kit/kitty-symbol.svg",
+      "lockup": "kit/kitty-horizontal.svg",
+      "idea": "El gato de catlan en hueco: la versión ligera que vive en cada PC.",
+      "rationale": [
+        "Misma cabeza que catlan: orejas a 45° y mandíbula de radio 56",
+        "catlan es sólido y Kitty es contorno: la relación servidor-agente sin explicarla",
+        "Nombre dibujado con las mismas letras que catlan; las dos t comparten barra"
+      ]
+    }
+  ],
+  "recommendation": "Contorno en naranja #e8772e; icono de app en tinta para diferenciarlo del icono naranja de catlan.",
+  "next_steps": ["Poner el icono en la bandeja y la ventana de Kitty", "Búsqueda de marcas registradas"]
+}

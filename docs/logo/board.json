@@ -1,0 +1,31 @@
+{
+  "brand": "catlan",
+  "tagline": "El gato amigo de los IT",
+  "brief": "Web autoalojada para equipos de sistemas: inventario, wiki, esquemas, racks, monitor e incidencias, todo enlazado por el ID de cada equipo. Un solo ejecutable, 100 % local. Kitty, el gato de la bandeja, deja que cada usuario avise a IT.",
+  "adjectives": ["cercano", "fiable", "directo", "local"],
+  "criteria": "Que se reconozca a 16 px en la pestaña y en la bandeja, que funcione a una tinta, que mantenga el gato naranja que ya tiene catlan y que no parezca otro icono de red más.",
+  "industry": "software",
+  "nav": ["Inventario", "Redes", "Monitor"],
+  "brand_color": "#e8772e",
+  "greyscale": false,
+  "symbol_on_tile": "kit/catlan-symbol-white.svg",
+  "tile_color": "#e8772e",
+  "lockup_on_dark": "kit/catlan-horizontal-reversed.svg",
+  "designer": "catlan",
+  "round": 2,
+  "concepts": [
+    {
+      "name": "Guiño",
+      "symbol": "kit/catlan-symbol.svg",
+      "lockup": "kit/catlan-horizontal.svg",
+      "idea": "El gato amigo de los IT: un ojo encendido y otro que te guiña.",
+      "rationale": [
+        "Orejas a 45°, mandíbula de dos arcos y ojos huecos: geometría mínima",
+        "El guiño da carácter de compañero, no de herramienta fría",
+        "Letras del nombre construidas con el mismo grosor que el anillo de la a"
+      ]
+    }
+  ],
+  "recommendation": "Guiño en naranja #e8772e sobre tinta #1c1b19: sustituye al gato de líneas actual en la web, el README y la bandeja de Kitty.",
+  "next_steps": ["Cambiar favicon y logo de la web", "Usar el icono en la bandeja de Kitty", "Búsqueda de marcas registradas"]
+}

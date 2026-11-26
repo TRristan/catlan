@@ -29,6 +29,7 @@ into_sql! {
     Vec<u8> => |v| SqlV::Blob(v),
     &[u8] => |v| SqlV::Blob(v.to_vec()),
     Option<i64> => |v| v.map_or(SqlV::Null, SqlV::Integer),
+    Option<f64> => |v| v.map_or(SqlV::Null, SqlV::Real),
     Option<String> => |v| v.map_or(SqlV::Null, SqlV::Text),
     Option<&str> => |v| v.map_or(SqlV::Null, |s| SqlV::Text(s.into())),
     &Value => |v| jv(v),
@@ -265,6 +266,7 @@ pub const MIGRATIONS: &[&str] = &[
     "ALTER TABLE checks ADD COLUMN mute_from TEXT",
     "ALTER TABLE sources ADD COLUMN mute_from TEXT",
     "ALTER TABLE agents ADD COLUMN ukey TEXT /*sha256 de la clave de incidencias de Kitty, que pueden leer los usuarios del PC*/",
+    "CREATE TABLE tasks(id INTEGER PRIMARY KEY AUTOINCREMENT, user INTEGER NOT NULL, text TEXT NOT NULL, col TEXT NOT NULL DEFAULT 'pendiente',      pos REAL NOT NULL DEFAULT 0, updated TEXT DEFAULT CURRENT_TIMESTAMP)",
 ];
 /// Las de antes de numerarlas: una BD vieja (user_version 0) puede tener ya cualquiera de ellas.
 const LEGACY: usize = 19;
