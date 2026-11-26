@@ -2,9 +2,11 @@
 //! está el equipo; sin argumentos, vive en la bandeja y abre una ventana para avisar a IT y ver el estado del PC.
 #![cfg_attr(windows, windows_subsystem = "windows")] // la ventana, sin consola detrás
 
+mod apps;
 mod conf;
 mod facts;
 mod net;
+mod update;
 #[cfg(windows)]
 mod app;
 #[cfg(windows)]
@@ -33,6 +35,7 @@ fn main() {
         "servicio" => {
             use std::time::{Duration, Instant};
             let mut slow: Option<(Instant, serde_json::Value)> = None;
+            apps::start();
             loop {
                 let t0 = Instant::now();
                 let fresh = slow.as_ref().is_none_or(|(at, _)| at.elapsed() >= net::SLOW_EVERY);
@@ -43,11 +46,16 @@ fn main() {
                 if fresh && !ok {
                     slow = None; // los eventos no llegaron: el próximo envío los vuelve a sacar
                 }
+                // cada 5 minutos, ¿hay un Kitty nuevo en catlan? Si se instala, sale: la tarea programada lanza el nuevo
+                if fresh && conf::Conf::load().is_ok_and(|c| update::check(&c.url).unwrap_or(false)) {
+                    std::process::exit(0);
+                }
                 std::thread::sleep(net::EVERY.saturating_sub(t0.elapsed()).max(Duration::from_secs(5)));
             }
         }
         #[cfg(windows)]
-        "" | "--oculto" => app::run(arg == "--oculto"),
+        // --actualizada: la reabre la Kitty anterior tras actualizarse (oculta, esperando a que la otra suelte la bandeja)
+        "" | "--oculto" | "--actualizada" => app::run(!arg.is_empty(), arg == "--actualizada"),
         _ => {
             eprintln!("Uso: kitty [servicio | enviar | --oculto]");
             std::process::exit(2);

@@ -24,11 +24,19 @@
 > son **las mismas**: una instalación en Python se actualiza sin perder nada ([cómo](#vienes-de-la-versión-en-python)).
 
 > [!WARNING]
-> **Proyecto en desarrollo (WIP).** Funciona y tiene tests, pero aún cambia a menudo y puede haber fallos. No tiene
-> actualizaciones automáticas: para actualizar, para catlan, haz una copia de `data/` y sustituye el ejecutable.
+> **Proyecto en desarrollo (WIP).** Funciona y tiene tests, pero aún cambia a menudo y puede haber fallos. Antes de
+> actualizar, haz una copia de `data/` ([cómo se actualiza](#actualizar-catlan)).
 
 ## Novedades
 
+- **Programas en los PCs.** En **Opciones → Programas en los PCs** eliges programas por su id de winget (Chrome,
+  7-Zip, Firefox…). Kitty los **instala** en todos los PCs y los **mantiene actualizados** cada hora. En cada programa
+  ves en cuántos PCs está bien o ha fallado, y en la ficha de Salud de cada PC, cómo le fue.
+- **Kitty se actualiza solo.** Cuando pones un `kitty.exe` nuevo junto a catlan, cada PC lo detecta en unos minutos, lo
+  descarga, comprueba que llega entero (sha256) y se reemplaza. Ya no hace falta volver a pegar la línea de instalación.
+- **catlan se actualiza solo** (opcional). En **Opciones → Salud de catlan → Actualizaciones**: buscar la versión nueva
+  en GitHub, «Actualizar ahora» o activar «Actualizar solo» (una vez al día). Descarga, comprueba el sha256, se reemplaza
+  y se reinicia. Si reparte `kitty.exe`, también lo actualiza, y con él a todos los PCs.
 - **Control remoto con Kitty.** Desde la ficha del equipo o desde Salud, un técnico pide conectarse a un PC, y la
   persona que lo usa lo **acepta o lo rechaza** en su pantalla. El técnico ve la pantalla en el navegador y usa el ratón y el
   teclado. El PC no abre ningún puerto, porque todo pasa por catlan. El usuario puede cortar cuando quiera, y en el historial
@@ -188,6 +196,11 @@ ventana: conserva la ficha del equipo.
 - **Control remoto** cuando IT lo pide: la ventana pregunta «¿Permitir?» (si nadie responde en 60 s, se rechaza sola).
   Si el usuario acepta, Kitty envía la pantalla (JPEG, solo cuando cambia, hasta unos 10 por segundo) y aplica el ratón
   y el teclado del técnico. Una barra avisa mientras dura y tiene un botón para **cortar**.
+- **Se actualiza solo**: cada 5 minutos el servicio compara su `kitty.exe` con el que reparte catlan y, si cambia, lo
+  descarga, comprueba su sha256 y se reemplaza; la ventana de cada usuario se reabre con el nuevo.
+- **Instala y actualiza programas** que IT elige en **Opciones → Programas en los PCs**, con winget (incluido en
+  Windows 10 y 11). Los instala para todo el equipo y busca actualizaciones cada hora. Quitar uno de la lista no lo
+  desinstala.
 - **Arranca solo** al iniciar sesión (clave `Run` de Windows) y **solo un administrador de catlan puede cerrarlo**
   desde «Salir de Kitty». Sin conexión con catlan, no se puede cerrar desde el menú. La X de la ventana solo la esconde.
 
@@ -217,6 +230,22 @@ que envía lo mismo **cada 5 minutos**, con los errores y críticos del journal 
   baja la web **va cifrada con una contraseña** (PBKDF2 + SHAKE-256 + HMAC-SHA256).
 - **HTTPS propio** opcional con `CATLAN_CERT` y `CATLAN_KEY`; o, si catlan sale de tu red local, detrás de un proxy con
   HTTPS (Caddy, nginx, Traefik). Con un certificado autofirmado, Kitty no conecta hasta que el PC confíe en él.
+
+## Actualizar catlan
+
+catlan solo se conecta a GitHub si un administrador lo pide. En **Opciones → Salud de catlan → Actualizaciones**:
+
+- **Buscar actualizaciones** mira la última versión publicada en
+  [Releases](https://github.com/TRristan/catlan/releases).
+- **Actualizar ahora** la descarga, comprueba su sha256 con el `SHA256SUMS` de la versión, reemplaza el ejecutable y
+  reinicia catlan. Antes de tocar la base de datos, catlan guarda una copia, como siempre.
+- **Actualizar solo** lo hace una vez al día.
+
+Funciona con el ejecutable en Linux y Windows de 64 bits. En **Docker**, actualiza la imagen. Si catlan corre como
+servicio de systemd, ponle `Restart=on-failure`: al actualizarse, sale para que systemd lo arranque con la versión nueva.
+
+Para publicar una versión: sube la versión en `Cargo.toml`, haz commit y crea la etiqueta (`git tag v1.1.0 && git push
+--tags`). GitHub Actions compila catlan para Linux y Windows y Kitty, y publica la versión con su `SHA256SUMS`.
 
 ## Configuración
 
@@ -257,6 +286,7 @@ escritura en curso y lo deja todo dentro de `catlan.db`. Si el monitor deja de l
 src/          el servidor (Rust)
   web.rs        la API, las sesiones y los permisos
   remote.rs     control remoto: el relevo entre la web del técnico y la Kitty del PC
+  update.rs     actualizar catlan desde GitHub (Releases)
   db.rs         SQLite: esquema y migraciones numeradas
   monitor.rs    comprobaciones, avisos, resúmenes, SLA, syslog e IPAM
   snmp.rs       SNMP v2c y v3 (BER a mano, firma y cifrado USM)
@@ -267,6 +297,8 @@ kitty/        Kitty: el programa de los PCs (kitty.exe) y sus instaladores (kitt
   src/app.rs    la bandeja y la ventana (WebView2)
   src/remote.rs el control remoto: captura de pantalla, ratón y teclado
   src/net.rs    hablar con catlan y enviar el estado del PC
+  src/update.rs actualizarse solo con el kitty.exe de catlan
+  src/apps.rs   instalar y actualizar los programas que elige IT (winget)
 tests/        tests de la API contra el ejecutable (Python, sin dependencias)
 docs/         capturas, y en docs/logo/ el logo de catlan y de Kitty con su guía
 ```
@@ -297,7 +329,10 @@ pasa todo en cada cambio (el servidor en Linux, Kitty en Windows).
   el servicio de SYSTEM) y Kitty vuelve a abrirse en el siguiente inicio de sesión.
 - Con envíos cada 15 s, el historial de métricas ocupa más. Se borra solo a los 7 días; se guardan medias por hora
   durante más tiempo.
-- Sin actualizaciones automáticas.
+- Las actualizaciones automáticas de catlan necesitan versiones publicadas en GitHub (Releases); hasta la primera,
+  «Buscar actualizaciones» dice que no hay ninguna.
+- Programas en los PCs: el mismo conjunto para todos los PCs con Kitty en Windows (no por grupos), y solo programas
+  que estén en winget. Probado sin PCs reales todavía.
 
 ## Licencia
 

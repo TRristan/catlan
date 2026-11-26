@@ -25,7 +25,7 @@ const AGENT_FACTS: [&str; 5] = ["name", "ip", "serial", "os", "kind"];
 /// de la instalación (los Kitty instalados vuelven a pedir entrar aquí).
 const WIPE: &[&str] = &[
     "pages", "items", "maps", "log", "checks", "pings", "pings_h", "sounds", "sources", "metrics", "metrics_h", "dash", "incidents", "notes", "agents",
-    "expiries", "syslog", "subnets", "tasks",
+    "expiries", "syslog", "subnets", "tasks", "apps",
 ];
 /// Columnas del tablero personal.
 const TASK_COLS: [&str; 4] = ["notas", "pendiente", "hoy", "hecho"];
@@ -48,6 +48,7 @@ fn table_cols(t: &str) -> Option<&'static [&'static str]> {
         ],
         "expiries" => &["name", "kind", "date", "item", "notes"],
         "subnets" => &["name", "cidr", "vlan", "notes"],
+        "apps" => &["name", "winget", "notes"],
         _ => return None,
     })
 }
@@ -59,6 +60,7 @@ fn kind_of(t: &str) -> &'static str {
         "checks" => "check",
         "sources" => "source",
         "expiries" => "expiry",
+        "apps" => "app",
         _ => "subnet",
     }
 }
@@ -70,6 +72,7 @@ fn undo_table(kind: &str) -> Option<&'static str> {
         "check" => "checks",
         "expiry" => "expiries",
         "subnet" => "subnets",
+        "app" => "apps",
         "map" | "rack" => "maps",
         _ => return None,
     })
@@ -100,6 +103,25 @@ fn err(code: u16, msg: &str) -> Resp {
 
 fn no_content() -> Resp {
     Resp::new(204, vec![], "application/json")
+}
+
+/// El programa de Kitty para Windows: junto al ejecutable de catlan o en la carpeta de datos (Docker).
+fn kitty_exe() -> Option<std::path::PathBuf> {
+    [crate::config::HERE.join("kitty.exe"), DATA.join("kitty.exe")].into_iter().find(|p| p.is_file())
+}
+
+/// sha256 de kitty.exe, recalculado solo si cambia el archivo (cientos de Kitty lo preguntan). "" si no hay.
+fn kitty_hash() -> String {
+    static CACHE: LazyLock<Mutex<(Option<(std::path::PathBuf, std::time::SystemTime, u64)>, String)>> = LazyLock::new(Default::default);
+    let Some(p) = kitty_exe() else { return String::new() };
+    let Ok(md) = std::fs::metadata(&p) else { return String::new() };
+    let id = Some((p.clone(), md.modified().unwrap_or(std::time::UNIX_EPOCH), md.len()));
+    let mut c = lock(&CACHE);
+    if c.0 != id {
+        let h = std::fs::read(&p).map(|b| crate::crypto::hex(&<sha2::Sha256 as sha2::Digest>::digest(&b))).unwrap_or_default();
+        *c = (id, h);
+    }
+    c.1.clone()
 }
 
 /// Fallos de login recientes por IP: 10 en 15 minutos y esa IP espera.
@@ -310,16 +332,15 @@ impl Ctx<'_> {
     fn dispatch(&mut self, m: &str, parts: &[String], query: &str) -> Result<Resp> {
         let at = |i: usize| parts.get(i).map(String::as_str);
         if parts == ["kitty.exe"] && m == "GET" {
-            // el programa de Kitty para Windows: junto al ejecutable de catlan o en la carpeta de datos (Docker)
-            let exe = [crate::config::HERE.join("kitty.exe"), DATA.join("kitty.exe")].into_iter().find(|p| p.is_file());
-            return Ok(match exe.map(std::fs::read) {
+            return Ok(match kitty_exe().map(std::fs::read) {
                 Some(Ok(b)) => Resp::new(200, b, "application/vnd.microsoft.portable-executable").header("Content-Disposition", "attachment; filename=\"kitty.exe\""),
                 _ => Resp::new(404, "catlan no tiene kitty.exe: ponlo junto al ejecutable de catlan o en su carpeta de datos".as_bytes().to_vec(), "text/plain; charset=utf-8"),
             });
         }
         if parts == ["kitty.json"] && m == "GET" {
-            // Kitty sin instalar busca catlan en la red: así sabe que aquí hay uno (sin sesión, solo el id público)
-            return Ok(js(200, json!({"catlan": db::INSTANCE.get().map_or("", |s| s.as_str())})));
+            // Kitty sin instalar busca catlan en la red: así sabe que aquí hay uno (sin sesión, solo el id público).
+            // «kitty»: el sha256 del kitty.exe que reparte; las Kitty instaladas con otro se actualizan solas
+            return Ok(js(200, json!({"catlan": db::INSTANCE.get().map_or("", |s| s.as_str()), "kitty": kitty_hash()})));
         }
         if (parts == ["kitty.ps1"] || parts == ["kitty.sh"]) && m == "GET" {
             // instalador de Kitty (Windows o Linux) con esta dirección y este id, sin sesión
@@ -436,6 +457,38 @@ impl Ctx<'_> {
             ("log", "POST") if rid.is_some() && parts.len() == 4 && sub == Some("undo") => {
                 return self.undo(rid.unwrap_or("").parse().map_err(|_| Bad("id no válido".into()))?);
             }
+            ("update", _) => {
+                // actualizar catlan desde GitHub: solo administradores
+                if !self.admin {
+                    return Ok(err(403, "solo para administradores"));
+                }
+                return Ok(match (m, rid) {
+                    ("GET", None) => js(200, crate::update::status()),
+                    ("PUT", None) => {
+                        let on = self.body()?.get("auto").and_then(Value::as_bool).ok_or(Bad("auto: true o false".into()))?;
+                        crate::update::set_auto(on)?;
+                        self.log(if on { "activar" } else { "desactivar" }, "update", 0, "Actualizar solo", &json!({}))?;
+                        js(200, crate::update::status())
+                    }
+                    ("POST", Some("check")) => match crate::update::check() {
+                        Ok(v) => js(200, v["info"].clone()),
+                        Err(e) => err(502, &format!("no he podido preguntar a GitHub: {e}")),
+                    },
+                    ("POST", Some("apply")) => match crate::update::apply() {
+                        Ok(v) => {
+                            self.log("actualizar", "update", 0, format!("catlan {v}"), &json!({"antes": crate::update::CURRENT}))?;
+                            // la respuesta sale antes de reiniciar
+                            std::thread::spawn(|| {
+                                std::thread::sleep(std::time::Duration::from_secs(1));
+                                crate::update::restart();
+                            });
+                            js(200, json!({"version": v}))
+                        }
+                        Err(e) => err(400, &e.to_string()),
+                    },
+                    _ => err(404, "no existe"),
+                });
+            }
             ("system", "GET") => {
                 // la salud del propio catlan
                 if !self.admin {
@@ -544,12 +597,16 @@ impl Ctx<'_> {
 
     fn crud(&mut self, m: &str, res: &str, rid: Option<&str>, rid_i: i64) -> Result<Resp> {
         let Some(cols) = table_cols(res) else { return Ok(err(404, "no existe")) };
+        if res == "apps" && m != "GET" && !self.admin {
+            return Ok(err(403, "solo los administradores eligen qué se instala en los PCs"));
+        }
         if m == "GET" && rid.is_none() {
             let order = match res {
                 "pages" => "title",
                 "items" => "name",
                 "expiries" => "date",
                 "subnets" => "cidr",
+                "apps" => "name",
                 _ => "id",
             };
             return Ok(js(200, q(&format!("SELECT * FROM {res} ORDER BY {order} COLLATE NOCASE"), p![])?.into_iter().map(public).collect::<Vec<_>>()));
@@ -570,6 +627,7 @@ impl Ctx<'_> {
                     "items" => check_item(b)?,
                     "expiries" => check_expiry(b, true)?,
                     "subnets" => check_subnet(b, true)?,
+                    "apps" => check_app(&only, true)?,
                     "checks" => check_host(&only, true)?,
                     "sources" => check_source(&only, true)?,
                     _ => {}
@@ -604,6 +662,7 @@ impl Ctx<'_> {
                 "items" => check_item(&d)?,
                 "expiries" => check_expiry(&d, false)?,
                 "subnets" => check_subnet(&mut d, false)?,
+                "apps" => check_app(&d, false)?,
                 "checks" => {
                     check_host(&d, false)?;
                     if d.contains_key("host") {
@@ -899,9 +958,13 @@ impl Ctx<'_> {
         let prev: Value = serde_json::from_str::<Value>(src.s("info")).ok().and_then(|i| i.get("events").cloned()).unwrap_or(Value::Null);
         let (events, mut probs) = health::kitty_events(b.get("events").unwrap_or(&Value::Null), &prev);
         info.insert("events".into(), events.into());
+        if let Some(a) = b.get("apps").filter(|a| a.is_object() && a.to_string().len() <= 64 * 1024) {
+            info.insert("apps".into(), a.clone()); // cómo le fue a winget con cada programa
+        }
         let out = health::limits(&src, out, &mut probs);
         monitor::save_health(&src, &out, &probs, Some(&info), None)?;
-        Ok(js(200, json!({"state": "adoptado", "item": item, "catlan": instance})))
+        let apps: Vec<Value> = q("SELECT winget FROM apps ORDER BY id", p![])?.into_iter().map(|r| r["winget"].clone()).collect();
+        Ok(js(200, json!({"state": "adoptado", "item": item, "catlan": instance, "apps": apps})))
     }
 
     /// El Kitty de la clave de incidencias, si ya lo aceptaron. Si no, la respuesta que toca.

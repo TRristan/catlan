@@ -120,8 +120,16 @@ fn install(url: &str) -> Result<(), String> {
     Err(if why.is_empty() { format!("La instalación ha fallado (código {code}).") } else { why.to_string() })
 }
 
-pub fn run(start_hidden: bool) {
-    let Some(_lock) = single_instance() else { return };
+pub fn run(start_hidden: bool, updated: bool) {
+    // recién actualizada: la anterior tarda un momento en cerrarse y soltar el candado
+    let tries = if updated { 50 } else { 1 };
+    let lock = (0..tries).find_map(|i| {
+        if i > 0 {
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        single_instance()
+    });
+    let Some(_lock) = lock else { return };
     let conf = conf::Conf::load();
     let el = EventLoopBuilder::<Ev>::with_user_event().build();
     let proxy = el.create_proxy();
@@ -193,6 +201,22 @@ pub fn run(start_hidden: bool) {
                 break;
             }
             std::thread::sleep(Duration::from_secs(if code == 200 { 3 } else { 5 }));
+        });
+    }
+
+    // ¿el servicio ha instalado un Kitty nuevo? Esta ventana se reabre con él
+    if let Some(me) = crate::update::installed() {
+        let p = proxy.clone();
+        std::thread::spawn(move || {
+            let mine = crate::update::sha256(&me);
+            loop {
+                std::thread::sleep(Duration::from_secs(60));
+                let now = crate::update::sha256(&me);
+                if now.is_some() && now != mine && std::process::Command::new(&me).arg("--actualizada").spawn().is_ok() {
+                    let _ = p.send_event(Ev::Quit);
+                    break;
+                }
+            }
         });
     }
 

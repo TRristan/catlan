@@ -1460,6 +1460,7 @@ version = "1.0.0"
 dependencies = [
  "jpeg-encoder",
  "serde_json",
+ "sha2 0.11.1",
  "sysinfo",
  "tao",
  "tray-icon",

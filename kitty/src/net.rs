@@ -67,7 +67,7 @@ pub fn send(ps: &Value, fresh: bool) -> Result<String, String> {
     let arch = std::env::var("PROCESSOR_ARCHITECTURE").map(|a| a.to_lowercase()).unwrap_or_else(|_| std::env::consts::ARCH.into());
     // ip vacía: catlan pone la dirección desde la que llega
     let body = json!({"key": key, "ukey": c.ukey, "name": facts::name(), "ip": "", "serial": serial, "os": format!("{}/{arch}", std::env::consts::OS),
-                      "kind": "pc", "every": EVERY.as_secs().div_ceil(60), "secs": EVERY.as_secs(), "facts": facts, "events": events});
+                      "kind": "pc", "every": EVERY.as_secs().div_ceil(60), "secs": EVERY.as_secs(), "facts": facts, "events": events, "apps": crate::apps::report()});
     let (code, res) = post(&format!("{}/api/agent", c.url), &body);
     if code != 200 {
         return Err(res.get("error").and_then(Value::as_str).map(String::from).unwrap_or_else(|| format!("catlan respondió {code}")));
@@ -76,6 +76,7 @@ pub fn send(ps: &Value, fresh: bool) -> Result<String, String> {
         return Err(format!("{} no es el catlan que lo instaló", c.url)); // atado: no habla con ningún otro
     }
     let state = res.get("state").and_then(Value::as_str).unwrap_or("").to_string();
+    crate::apps::want(res.get("apps"));
     if state == "adoptado" {
         if let Some(n) = now {
             conf::set("since", &n); // pendiente: los eventos esperan a que lo acepten

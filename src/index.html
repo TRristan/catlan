@@ -2363,6 +2363,8 @@ const views = {
             <span class="ex">${us.length} ${us.length === 1 ? 'usuario' : 'usuarios'} · ${gs.length} ${gs.length === 1 ? 'grupo' : 'grupos'} · quién entra y quién puede editar</span></div><span style="display:flex;transform:rotate(-90deg)" class="dim">${ui('chev', 16)}</span></a>
           <a class="rowlink" href="#/inv" style="--i:1"><span class="badge-ic">${ui('signal', 18)}</span><div class="grow"><b>Kitty en los PCs</b>
             <span class="ex">En Inventario: «Añadir con Kitty» y aceptar los que piden entrar</span></div><span style="display:flex;transform:rotate(-90deg)" class="dim">${ui('chev', 16)}</span></a>
+          <a class="rowlink" href="#/apps" style="--i:2"><span class="badge-ic">${ui('box', 18)}</span><div class="grow"><b>Programas en los PCs</b>
+            <span class="ex">Lo que Kitty instala y mantiene actualizado en todos los PCs con winget</span></div><span style="display:flex;transform:rotate(-90deg)" class="dim">${ui('chev', 16)}</span></a>
           <a class="rowlink" href="#/sistema" style="--i:2"><span class="badge-ic">${ui('pulse', 18)}</span><div class="grow"><b>Salud de catlan</b>
             <span class="ex">Tamaño de la base de datos, copias diarias, estado del monitor y comprobaciones atrasadas</span></div><span style="display:flex;transform:rotate(-90deg)" class="dim">${ui('chev', 16)}</span></a>
           <a class="rowlink" href="/api/backup" id="bk" style="--i:3"><span class="badge-ic">${ui('layers', 18)}</span><div class="grow"><b>Descargar copia de seguridad</b>
@@ -2933,6 +2935,58 @@ const views = {
           ${h.backups.length ? `<ul class="rel">${h.backups.map(b => `<li><span style="display:flex;justify-content:space-between;gap:8px;padding:6px 0"><span class="mono small">${esc(b.name)}</span><span class="dim small">${mb(b.bytes)} · ${esc(ago(b.at))}</span></span></li>`).join('')}</ul>`
             : '<p class="muted small">Aún ninguna: la primera se hace en los primeros minutos.</p>'}
           <p class="muted small">En <span class="mono">data/backups/</span> del servidor, una al día; se guardan las 7 últimas. Para restaurar, con catlan parado, copia una sobre <span class="mono">data/catlan.db</span>.</p></section></aside></div>`;
+    // Actualizaciones de catlan desde GitHub: solo si un admin lo pide o activa «Actualizar solo»
+    const u = await api('update');
+    app.insertAdjacentHTML('beforeend', `<section class="card pad mt" aria-labelledby="up-t"><h3 class="card-t" id="up-t">${ui('redo', 15)}Actualizaciones</h3>
+      <p class="small muted" style="margin:0 0 12px">Tienes catlan <b>${esc(u.current)}</b>. Las versiones nuevas salen de GitHub (Releases) y se comprueban con su sha256 antes de instalarse; si catlan reparte <span class="mono">kitty.exe</span>, también se actualiza, y después los PCs con Kitty. catlan solo se conecta a GitHub si pulsas «Buscar» o activas «Actualizar solo».</p>
+      ${u.can ? `<div class="set"><span>Actualizar solo<small>Una vez al día busca e instala la versión nueva, y se reinicia</small></span><button class="switch" role="switch" id="up-auto" aria-checked="${!!u.auto}" aria-label="Actualizar solo"></button></div>`
+        : `<p class="small"><span class="pill warn"><i></i>${u.docker ? 'En Docker, catlan se actualiza con su imagen: vuelve a construirla con la versión nueva' : 'Aquí catlan no se puede actualizar solo (solo Linux y Windows de 64 bits)'}</span></p>`}
+      <div id="up-res" class="mt"></div>
+      <div class="acts" style="display:flex;gap:8px;margin-top:12px"><button class="btn" id="up-chk">${ui('search', 16)}Buscar actualizaciones</button><button class="btn pri" id="up-go" hidden>${ui('redo', 16)}Actualizar ahora</button></div></section>`);
+    const show = l => {
+      if (!l) return;
+      $('#up-res').innerHTML = l.newer ? `<p><span class="pill ok"><i></i>Hay una versión nueva: ${esc(l.latest)}</span> <a href="${esc(l.url)}" target="_blank" rel="noopener">Qué cambia</a> <span class="dim small">· mirado ${esc(l.at)}</span></p>`
+        : `<p><span class="pill"><i></i>Tienes la última versión (${esc(l.latest)})</span> <span class="dim small">· mirado ${esc(l.at)}</span></p>`;
+      $('#up-go').hidden = !(l.newer && u.can);
+    };
+    show(u.last);
+    if ($('#up-auto')) $('#up-auto').onclick = async e => { const on = e.currentTarget.getAttribute('aria-checked') !== 'true'; try { await api('update', 'PUT', {auto: on}); } catch { return; } e.currentTarget.setAttribute('aria-checked', on); toast(on ? 'catlan se actualizará solo' : 'Ya no se actualiza solo'); };
+    $('#up-chk').onclick = async () => { $('#up-chk').disabled = true; try { show(await api('update/check', 'POST')); } catch {} $('#up-chk').disabled = false; };
+    $('#up-go').onclick = async () => {
+      if (!await dialog('<h3>¿Actualizar catlan ahora?</h3><p>Se descarga la versión nueva, se comprueba y catlan se reinicia: la web dejará de responder unos segundos. Antes de aplicar cambios en la base de datos, catlan guarda una copia.</p>', {ok: 'Actualizar'})) return;
+      $('#up-go').disabled = true; $('#up-go').innerHTML = '<span class="spin"></span><span>Actualizando…</span>';
+      try { const r = await api('update/apply', 'POST'); toast(`Instalada la ${r.version}: reiniciando…`); } catch { $('#up-go').disabled = false; $('#up-go').innerHTML = `${ui('redo', 16)}Actualizar ahora`; return; }
+      for (let i = 0; i < 60; i++) { await new Promise(ok => setTimeout(ok, 2000)); try { if ((await fetch('/api/update')).ok) return location.reload(); } catch {} }
+    };
+  },
+  async apps() {
+    crumbs([['Opciones', '#/opts'], ['Programas en los PCs']]);
+    if (!ME.admin) { app.innerHTML = empty('cog', 'Solo para administradores', 'Aquí se elige qué se instala en todos los PCs.'); return; }
+    const [list, hs] = await Promise.all([api('apps'), api('health')]), kits = hs.filter(h => h.kind === 'kitty');
+    const st = id => { const r = kits.map(h => [h, h.info?.apps?.[id]]).filter(([, x]) => x); return {ok: r.filter(([, x]) => x.ok).length, bad: r.filter(([, x]) => !x.ok), wait: kits.length - r.length}; };
+    app.innerHTML = head('Programas en los PCs', `Kitty los instala si faltan y los actualiza cada hora con winget, en los ${kits.length} PCs con Kitty. Quitar uno de la lista no lo desinstala.`, `<button class="btn" id="add">${ui('plus', 16)}Añadir programa</button>`)
+      + (list.length ? `<div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Programa</th><th>Id de winget</th><th>En los PCs</th><th class="hide-m">Notas</th></tr></thead>
+        <tbody class="stagger">${list.map((a, k) => { const s = st(a.winget); return `<tr data-id="${a.id}" tabindex="0" style="--i:${Math.min(k, 14)}"><td><b>${esc(a.name)}</b></td><td class="mono">${esc(a.winget)}</td>
+          <td>${s.ok ? `<span class="pill ok"><i></i>${s.ok} bien</span> ` : ''}${s.bad.length ? `<span class="pill bad" title="${esc(s.bad.map(([h, x]) => `${srcName(h)}: ${x.msg}`).join(' · '))}"><i></i>${s.bad.length} con error</span> ` : ''}${s.wait ? `<span class="dim small">${s.wait} pendientes</span>` : ''}</td>
+          <td class="muted hide-m">${esc(a.notes)}</td></tr>`; }).join('')}</tbody></table></div>`
+        : empty('box', 'Ningún programa todavía', 'Añade programas con su id de winget (por ejemplo Google.Chrome o 7zip.7zip) y Kitty los instalará en todos los PCs y los mantendrá al día. Búscalos en winget.run o con «winget search» en un PC.', `<button class="btn" id="add2">${ui('plus', 16)}Añadir programa</button>`));
+    const edit = async (a = {}) => {
+      const f = await dialog(`<h3>${a.id ? 'Editar programa' : 'Añadir programa'}</h3><div class="fields">
+        <div class="field"><label for="a-w">Id de winget</label><input id="a-w" name="winget" class="mono" required maxlength="128" value="${esc(a.winget || '')}" placeholder="Google.Chrome" spellcheck="false" autofocus></div>
+        <div class="field"><label for="a-n">Nombre</label><input id="a-n" name="name" required maxlength="100" value="${esc(a.name || '')}" placeholder="Google Chrome"></div>
+        <div class="field"><label for="a-o">Notas</label><textarea id="a-o" name="notes" rows="2" maxlength="2000">${esc(a.notes || '')}</textarea></div></div>`, {ok: 'Guardar'});
+      if (!f) return;
+      const d = {winget: f.get('winget').trim(), name: f.get('name').trim(), notes: f.get('notes')};
+      try { await (a.id ? api('apps/' + a.id, 'PUT', d) : api('apps', 'POST', d)); } catch { return; }
+      toast(a.id ? 'Guardado' : 'Los PCs lo instalarán en los próximos minutos'); route(false);
+    };
+    [$('#add'), $('#add2')].forEach(b => b && (b.onclick = () => edit()));
+    app.querySelectorAll('tr[data-id]').forEach(tr => {
+      const a = list.find(x => x.id === +tr.dataset.id);
+      tr.onclick = () => menu(tr, [['Editar', () => edit(a), {icon: 'edit'}], '-',
+        ['Quitar de la lista', async () => { if (await delUndo([['app', 'apps/' + a.id]], 'Quitado: los PCs dejan de actualizarlo')) route(false); }, {icon: 'trash', danger: true}]]);
+      tr.onkeydown = ev => ev.key === 'Enter' && tr.onclick(ev);
+    });
   },
   async cad() {
     const [exps, items] = await Promise.all([api('expiries'), api('items')]), ro = ME.readonly, byId = Object.fromEntries(items.map(i => [i.id, i]));
@@ -3397,6 +3451,9 @@ const views = {
       if (kit) $('#kit-info').innerHTML = `<table class="data-t"><tbody>${[['Sistema', inf.descr], ['Modelo', inf.model], ['Procesador', inf.cpu && `${inf.cpu}${inf.cores ? ` · ${inf.cores} hilos` : ''}`],
           ['Memoria', inf.mem_total && gb(inf.mem_total)], ['Discos', (inf.disks || []).map(x => `${x.name} ${gb(x.free)} libres de ${gb(x.total)}`).join(' · ')],
           ['IPs', (inf.ips || []).join(' · ')], ['Nº de serie', inf.serial]].filter(r => r[1]).map(([k, v]) => `<tr><td class="dim">${k}</td><td>${esc(v)}</td></tr>`).join('')}</tbody></table>`;
+      const aps = Object.entries(kit && inf.apps || {});
+      $('#app-card').hidden = !aps.length;
+      if (aps.length) $('#app-list').innerHTML = `<table class="data-t"><tbody>${aps.map(([id, r]) => `<tr><td class="mono">${esc(id)}</td><td style="text-align:left"><span class="pill ${r.ok ? 'ok' : 'bad'}"><i></i>${esc(r.msg)}</span></td></tr>`).join('')}</tbody></table>`;
       const evs = kit ? inf.events || [] : [];
       $('#ev-card').hidden = !evs.length;
       if (evs.length) $('#ev-list').innerHTML = `<div class="tbl-wrap"><table class="data-t"><thead><tr><th>Cuándo</th><th>Nivel</th><th class="hide-m">Registro</th><th>Origen</th><th>Mensaje</th></tr></thead><tbody>${evs.map(e =>
@@ -3444,7 +3501,8 @@ const views = {
         `<button data-v="${v}" class="${v === hours ? 'on' : ''}">${t}</button>`).join('')}</div><button class="btn pri" id="rmt" hidden>${ui('screen', 16)}Control remoto</button><button class="btn" id="edit">${ui('edit', 16)}Editar</button>${moreBtn}`)
       + `<div id="h-state"></div><div class="kpi-row" id="kpis"></div>
       <section class="card pad" id="kit-card" hidden style="margin-bottom:16px"><h3 class="card-t">Equipo</h3><div id="kit-info"></div>
-        <p class="dim small" style="margin:8px 0 0">Lo envía Kitty. Solo lo justo para ver fallos: nada de usuarios, programas ni archivos.</p></section>
+        <p class="dim small" style="margin:8px 0 0">Lo envía Kitty. Solo lo justo para ver fallos: nada de usuarios, archivos ni más programas que los que IT pide instalar.</p></section>
+      <section class="card pad" id="app-card" hidden style="margin-bottom:16px"><h3 class="card-t">Programas <span class="dim small" style="font-weight:400">· los que IT instala y mantiene al día en los PCs (<a href="#/apps">Opciones → Programas</a>)</span></h3><div id="app-list"></div></section>
       <section class="card pad" id="ev-card" hidden style="margin-bottom:16px"><h3 class="card-t">Visor de eventos <span class="dim small" style="font-weight:400">· críticos y errores de los últimos 7 días</span></h3><div id="ev-list"></div></section>
       <div class="charts stagger"><section class="card pad" style="--i:0" id="temp-card"><h3 class="card-t">Temperatura</h3><div id="c-temp"></div></section>
         <section class="card pad" style="--i:1"><h3 class="card-t">Ocupación de discos</h3><div id="c-disk"></div><div id="c-disk-h" class="mt"></div></section>
@@ -3651,7 +3709,7 @@ async function route(animate = true) {
   document.body.classList.remove('nav-open');
   const [, view = 'home', ...rest] = location.hash.split('/');
   const v = views[view] ? view : 'home';
-  document.querySelectorAll('#nav a').forEach(a => { a.classList.toggle('on', a.dataset.v === ({p: 'wiki', discover: 'inv', cad: 'inv', sla: 'monitor', users: 'opts', sistema: 'opts', tablero: 'inc', remoto: 'salud'}[v] || v)); a.toggleAttribute('aria-current', a.classList.contains('on')); });
+  document.querySelectorAll('#nav a').forEach(a => { a.classList.toggle('on', a.dataset.v === ({p: 'wiki', discover: 'inv', cad: 'inv', sla: 'monitor', users: 'opts', sistema: 'opts', apps: 'opts', tablero: 'inc', remoto: 'salud'}[v] || v)); a.toggleAttribute('aria-current', a.classList.contains('on')); });
   moveInd();
   delete app.dataset.w;
   try { await views[v](rest.join('/') || null); }
