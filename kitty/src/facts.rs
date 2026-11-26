@@ -109,20 +109,25 @@ try {
 @{ now = $now; osver = "$($os.Caption) $($os.Version)".Trim(); model = "$($cs.Manufacturer) $($cs.Model)".Trim(); serial = $serial; events = $events } | ConvertTo-Json -Depth 4 -Compress
 "#;
 
-/// Todo lo que va a catlan: (facts, nº de serie, eventos desde `since`, la hora local de ahora para el próximo `since`).
-pub fn collect(since: Option<&str>) -> (Value, String, Value, Option<String>) {
-    let mut sys = System::new();
-    sys.refresh_cpu_usage();
-    std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL.max(Duration::from_millis(500)));
-    sys.refresh_cpu_usage();
-    sys.refresh_memory();
-    let ps = if cfg!(windows) {
+/// Lo lento (PowerShell, un par de segundos): sistema, modelo, nº de serie y eventos desde `since`. {} si falla.
+pub fn slow(since: Option<&str>) -> Value {
+    if cfg!(windows) {
         let since = since.filter(|s| s.bytes().all(|b| b.is_ascii_alphanumeric() || b"-:T. ".contains(&b))).unwrap_or("");
         powershell(&format!("$since = '{since}'\n{PS}"), Duration::from_secs(60)).ok().and_then(|o| serde_json::from_str::<Value>(o.trim()).ok())
     } else {
         None
     }
-    .unwrap_or(json!({}));
+    .unwrap_or(json!({}))
+}
+
+/// Todo lo que va a catlan: (facts, nº de serie, eventos, la hora local de `ps` para el próximo `since`).
+/// `ps` es lo de `slow`; si no es `fresh` (reaprovechado de un envío anterior), sin eventos ni hora.
+pub fn collect(ps: &Value, fresh: bool) -> (Value, String, Value, Option<String>) {
+    let mut sys = System::new();
+    sys.refresh_cpu_usage();
+    std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL.max(Duration::from_millis(500)));
+    sys.refresh_cpu_usage();
+    sys.refresh_memory();
     let s = |k: &str| ps.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     let osver = Some(s("osver")).filter(|o| !o.is_empty()).or_else(System::long_os_version).unwrap_or_default();
     let cpus = sys.cpus();
@@ -131,6 +136,9 @@ pub fn collect(since: Option<&str>) -> (Value, String, Value, Option<String>) {
         "load": (sys.global_cpu_usage() as f64 * 10.0).round() / 10.0, "mem_total": sys.total_memory(), "mem_free": sys.available_memory(),
         "uptime": System::uptime(), "serial": s("serial"), "disks": disks(), "ips": ips(),
     });
+    if !fresh {
+        return (facts, s("serial"), json!([]), None); // catlan guarda los eventos que ya tenía
+    }
     let events = match ps.get("events") {
         Some(Value::Array(a)) => Value::Array(a.clone()),
         Some(Value::Object(o)) => json!([o]), // ConvertTo-Json deja un solo evento sin lista

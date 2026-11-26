@@ -8,7 +8,7 @@ HERE = Path(__file__).parent.parent  # la raíz del repositorio
 BIN = os.environ.get("CATLAN_BIN") or str(HERE / "target" / "release" / ("catlan.exe" if os.name == "nt" else "catlan"))
 if not Path(BIN).exists():
     sys.exit(f"No encuentro {BIN}: compila con «cargo build --release» o indica la ruta en CATLAN_BIN")
-MIGRATIONS = 29  # migraciones numeradas de src/db.rs
+MIGRATIONS = 30  # migraciones numeradas de src/db.rs
 SECRET = ("community", "pass", "priv_pass")
 SEAL = b"CATLAN-CIFRADO-1"
 sha = lambda t: hashlib.sha256(t.encode()).hexdigest()
@@ -307,7 +307,7 @@ try:
     call(f"/api/pages/{p['id']}", "PUT", {"body": "el switch [[#%d]] va al CPD" % i["id"]})
     r = call(f"/api/items/{i['id']}/refs")[1]
     assert [x["id"] for x in r["pages"]] == [p["id"]] and [x["id"] for x in r["maps"]] == [m["id"]]
-    assert call(f"/api/items/{i['id'] + 100}/refs")[1] == {"pages": [], "items": [], "maps": [], "incidents": [], "expiries": []}
+    assert call(f"/api/items/{i['id'] + 100}/refs")[1] == {"pages": [], "items": [], "maps": [], "incidents": [], "expiries": [], "agent": None}
     hist = call(f"/api/log?kind=page&ref={p['id']}")[1]
     assert [h["action"] for h in hist] == ["editar", "editar", "crear"] and hist[0]["who"] == "admin"
     assert "[[#" in json.loads(hist[0]["data"])["body"]
@@ -495,7 +495,7 @@ try:
         assert call("/api/incidents", "POST", bad)[0] == 400, bad
     st, inc = call("/api/incidents", "POST", {"title": "No llega el correo", "body": "Afecta a [[#%d]]" % srv_item, "priority": "crítica", "grp": n1["id"], "item": srv_item})
     assert st == 201 and inc["status"] == "abierta" and inc["grp_name"] == "Técnicos N1" and inc["author_name"] == "admin"
-    assert any("incidencia crítica #%d" % inc["id"] in h["text"] for h in hooks)  # lo crítico avisa por los canales
+    assert any("incidencia crítica INC-%d" % inc["id"] in h["text"] for h in hooks)  # lo crítico avisa por los canales
     upd = call(f"/api/incidents/{inc['id']}", "PUT", {"status": "en curso", "assignee": lid, "priority": "crítica"}, auth=LEC)[1]
     assert upd["status"] == "en curso" and upd["assignee_name"] == "lector"
     assert call(f"/api/incidents/{inc['id']}/notes", "POST", {"text": "Reiniciado el servicio SMTP"}, auth=LEC)[0] == 201
@@ -516,11 +516,32 @@ try:
     assert [k["id"] for k in p["kids"]] == [hija, hecha] and p["children"] == 2 and call(f"/api/incidents/{hija}")[1]["parent_title"] == "Caída de la planta 2"
     assert call(f"/api/incidents/{padre}", "PUT", {"status": "resuelta"})[1]["closed_children"] == 3  # hija, nieta y bisnieta (la hecha ya lo estaba)
     assert all(call(f"/api/incidents/{i}")[1]["status"] == "resuelta" for i in (hija, nieta, bisnieta, hecha))
-    assert call(f"/api/incidents/{nieta}")[1]["history"][-1]["text"] == f"pasó a «resuelta» con su incidencia padre #{hija}"
+    assert call(f"/api/incidents/{nieta}")[1]["history"][-1]["text"] == f"pasó a «resuelta» con su incidencia padre INC-{hija}"
+    # Trazabilidad: [[INC-n]] en la wiki, en las notas de un equipo y en el seguimiento de otra incidencia
+    pg = call("/api/pages", "POST", {"title": "Caída planta 2", "body": f"Ver [[INC-{padre}]] y [[inc-{hija}]]"})[1]
+    call(f"/api/items/{srv_item}", "PUT", {"notes": f"Tocado en [[INC-{padre}]]"})
+    call(f"/api/incidents/{hecha}/notes", "POST", {"text": f"Relacionada con [[INC-{padre}]]"})
+    m = call(f"/api/incidents/{padre}")[1]["mentions"]
+    assert [x["id"] for x in m["pages"]] == [pg["id"]] and [x["id"] for x in m["items"]] == [srv_item] and [x["id"] for x in m["incidents"]] == [hecha], m
+    assert call(f"/api/incidents/{hija}")[1]["mentions"]["pages"][0]["id"] == pg["id"] and call(f"/api/incidents/{nieta}")[1]["mentions"]["pages"] == []  # [[INC-1]] no es [[INC-12]]
+    call(f"/api/pages/{pg['id']}", "DELETE")
     assert call(f"/api/incidents/{padre}", "DELETE")[0] == 204 and call(f"/api/incidents/{hija}")[1]["parent"] is None  # las hijas quedan sueltas
     assert call(f"/api/groups/{n1['id']}", "DELETE")[0] == 204 and call(f"/api/incidents/{inc['id']}")[1]["grp"] is None
     assert call(f"/api/incidents/{inc['id']}", "DELETE", auth=LEC)[0] == 403 and call(f"/api/incidents/{inc['id']}", "DELETE")[0] == 204
     assert {("incident", "crear"), ("incident", "borrar"), ("group", "crear")} <= {(h["kind"], h["action"]) for h in call("/api/log")[1]}
+    # Tablero personal: cada uno ve y toca solo lo suyo, también quien es de solo vista
+    assert call("/api/me", auth=LEC)[1]["readonly"] is True
+    st, t1 = call("/api/tasks", "POST", {"text": "Revisar copias", "col": "hoy"}, auth=LEC)
+    assert st == 201 and t1["col"] == "hoy" and t1["pos"] == 0, t1
+    t2 = call("/api/tasks", "POST", {"text": "  Llamar al proveedor  "}, auth=LEC)[1]
+    t3 = call("/api/tasks", "POST", {"text": "otra", "col": "pendiente"}, auth=LEC)[1]
+    assert t2["text"] == "Llamar al proveedor" and t2["col"] == "pendiente" and t3["pos"] == t2["pos"] + 1  # al final de su columna
+    for bad in [{"text": ""}, {"text": "x" * 2001}, {"text": "x", "col": "luego"}, {"text": "x", "pos": "a"}, ["x"]]:
+        assert call("/api/tasks", "POST", bad, auth=LEC)[0] == 400, bad
+    assert call(f"/api/tasks/{t2['id']}", "PUT", {"col": "hoy", "pos": -1}, auth=LEC)[0] == 200
+    assert [t["text"] for t in call("/api/tasks", auth=LEC)[1] if t["col"] == "hoy"] == ["Llamar al proveedor", "Revisar copias"]
+    assert call("/api/tasks")[1] == [] and call(f"/api/tasks/{t1['id']}", "PUT", {"text": "mío"})[0] == 404 and call(f"/api/tasks/{t1['id']}", "DELETE")[0] == 404
+    assert call(f"/api/tasks/{t1['id']}", "DELETE", auth=LEC)[0] == 204 and len(call("/api/tasks", auth=LEC)[1]) == 2
     call(f"/api/groups/{vista['id']}", "DELETE")
     # Kitty: el instalador de PowerShell lleva esta dirección y el id de esta instalación (al que queda atado);
     # se presenta sin sesión, queda pendiente y, aceptado, catlan mantiene su ficha
@@ -607,12 +628,46 @@ try:
     assert st == 201 and ki["status"] == "abierta", ki
     full = call(f"/api/incidents/{ki['id']}")[1]
     assert full["item"] == hk["item"] and full["author"] is None and full["history"][0]["who"] == "Kitty · pc-kitty", full
-    assert any(f"incidencia crítica #{ki['id']}" in h["text"] for h in hooks)  # lo urgente avisa a IT como cualquier incidencia
+    assert any(f"incidencia crítica INC-{ki['id']}" in h["text"] for h in hooks)  # lo urgente avisa a IT como cualquier incidencia
     call("/api/incidents", "POST", {"title": "abierta por IT", "item": hk["item"]})
     st, mine = agent("mine", {"ukey": UK})
     assert st == 200 and [i["title"] for i in mine["incidents"]] == ["No imprime"], mine  # solo lo que avisó el PC
     assert [agent("incident", {"ukey": UK, "title": f"n{i}"})[0] for i in range(10)][-1] == 429  # 10 por hora
     assert agent("nada", {"ukey": UK})[0] == 404
+    # Cerrar Kitty: solo con un administrador de catlan
+    assert agent("quit", {"ukey": UK2, "name": "admin", "pass": "miau"})[0] == 403  # equipo pendiente
+    assert agent("quit", {"ukey": UK, "name": "lector", "pass": "lectura-segura"})[0] == 403  # no es admin
+    assert agent("quit", {"ukey": UK, "name": "admin", "pass": "miau"}) == (200, {"ok": True})
+    # Control remoto: Kitty pregunta; el técnico lo pide; el usuario del PC acepta; pantalla de ida y ratón de vuelta
+    assert call("/api/remote", "POST", {"agent": ag["id"]})[0] == 409  # Kitty no ha preguntado nunca: no está abierto
+    assert agent("remote", {"ukey": UK2})[0] == 403 and agent("remote", {"ukey": UK}) == (200, {})
+    st, rs = call("/api/remote", "POST", {"agent": ag["id"]})
+    assert st == 201 and rs["status"]["state"] == "pedida", rs
+    sid = rs["id"]
+    assert call("/api/remote", "POST", {"agent": ag["id"]})[0] == 409 and call("/api/remote", "POST", {"agent": 99999})[0] == 404  # una a la vez
+    assert agent("remote", {"ukey": UK})[1] == {"id": sid, "who": "admin"}
+    assert call(f"/api/items/{hk['item']}/refs")[1]["agent"] == ag["id"]  # la ficha del equipo enseña el botón
+
+    def frame(body, key=UK):
+        req = urllib.request.Request(f"http://127.0.0.1:{PORT}/api/agent/remote/frame", body, method="POST", headers={"X-Kitty": key, "X-Sesion": sid, "Content-Type": "image/jpeg"})
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, None
+    assert frame(b"\xff\xd8x")[1] == {"state": "pedida", "why": ""}  # sin permiso: ni pantalla ni ratón
+    assert agent("remote/answer", {"ukey": UK, "id": sid, "ok": True})[1]["state"] == "aceptada"
+    assert call(f"/api/remote/{sid}/input", "POST", [{"t": "m", "x": .5, "y": .5}, {"t": "k", "c": "KeyA", "k": "a", "d": True}])[0] == 200
+    assert call(f"/api/remote/{sid}/input", "POST", [{"x": 1}])[0] == 400 and call(f"/api/remote/{sid}/input", "POST", {"t": "m"})[0] == 400
+    assert frame(b"no es jpeg")[0] == 400 and frame(b"\xff\xd8x", key="z" * 64)[0] == 404
+    st, r = frame(b"\xff\xd8\xff\xe0pantalla")
+    assert st == 200 and [e["t"] for e in r["input"]] == ["m", "k"], r
+    assert frame(b"")[1]["input"] == []  # pantalla sin cambios: va vacío, solo a por el ratón
+    assert call(f"/api/remote/{sid}/frame?after=0") == (200, b"\xff\xd8\xff\xe0pantalla")
+    assert agent("remote/answer", {"ukey": UK, "id": sid, "ok": False})[1]["state"] == "cerrada"  # lo corta el usuario del PC
+    assert call(f"/api/remote/{sid}/frame?after=1")[1]["why"] == "la cortó el usuario del PC" and frame(b"\xff\xd8x")[1]["state"] == "cerrada"
+    hist = [h["action"] for h in call(f"/api/log?kind=item&ref={hk['item']}")[1]]
+    assert hist[:3] == ["control remoto terminado", "control remoto aceptado", "pedir control remoto"], hist
     assert urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{PORT}/kitty.exe")).status == 200 if (Path(BIN).parent / "kitty.exe").exists() else call("/kitty.exe", auth="")[0] == 404
     # expulsado: fuera de Salud con su historial; la ficha del inventario se queda
     assert call(f"/api/agents/{ag['id']}", "PUT", {"state": "rechazado"})[0] == 200 and not [h for h in call("/api/health")[1] if h["kind"] == "kitty"]
@@ -751,6 +806,9 @@ try:
     assert any(l["action"] == "restablecer contraseña" for l in call("/api/log")[1])
     out = cli("nadie")
     assert out.returncode == 1 and "olvidadizo" in out.stdout and "admin (admin)" in out.stdout
+    with tempfile.TemporaryDirectory() as otra:  # otra carpeta de datos: avisa y no se inventa una BD con su admin
+        out = subprocess.run([BIN, "restablecer", "admin"], capture_output=True, text=True, env={**env, "CATLAN_DATA": otra})
+        assert out.returncode == 1 and "CATLAN_DATA" in out.stderr and not os.listdir(otra), (out.stdout, out.stderr)
     call(f"/api/users/{next(u['id'] for u in call('/api/users')[1] if u['name'] == 'olvidadizo')}", "DELETE")
     # Ediciones a la vez: con _seen, si otro lo cambió desde entonces, 409 con quién; sin _seen, como siempre
     pg = call("/api/pages", "POST", {"title": "Conflicto", "body": "v1"})[1]

@@ -1,8 +1,9 @@
 <div align="center">
 
-<img src="docs/logo.svg" width="88" alt="">
-
-# catlan
+<h1><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/logo/kit/catlan-horizontal-dark.svg">
+  <img src="docs/logo/kit/catlan-horizontal.svg" width="300" alt="catlan">
+</picture></h1>
 
 **El gato amigo de los IT.** Inventario, wiki, esquemas de red, racks, monitor, salud de equipos e incidencias en una sola web, autoalojada y 100 % local.
 
@@ -54,7 +55,7 @@ van sus discos y qué incidencias tiene abiertas. Con historial de cada cambio.
 | <img src="docs/screenshots/monitor.png" alt="Monitor"> | **Monitor** · ping, puertos TCP, webs, certificados SSL y DNS cada pocos segundos. Avisa en pantalla, con el **sonido de cada dispositivo** y por correo, Telegram o webhook. Si cae un switch, avisa de él y no de todo lo que cuelga de él. Informe mensual de disponibilidad. |
 | <img src="docs/screenshots/salud-kittens.png" alt="Salud"> | **Salud** · temperaturas, discos, ventiladores, RAID y puertos por **SNMP v2c y v3** (Synology, QNAP, Cisco, HP/Aruba, Ubiquiti, MikroTik…), grabadores Hikvision y **PCs con Kitty**, con gráficos de hasta 90 días. |
 | <img src="docs/screenshots/incidencias.png" alt="Incidencias"> | **Incidencias** · prioridad, estado, persona o grupo asignado, seguimiento e incidencias hijas. Los usuarios las abren **desde Kitty**, en su PC; las críticas avisan por tus canales. |
-| <img src="docs/screenshots/wiki-guia.png" alt="Wiki"> | **Wiki** · procedimientos en Markdown con editor visual. `[[#id]]` enlaza un equipo y `[[Página]]` otra página. Una instalación nueva trae la **Guía de catlan**. |
+| <img src="docs/screenshots/wiki-guia.png" alt="Wiki"> | **Wiki** · procedimientos en Markdown con editor visual. `[[#id]]` enlaza un equipo, `[[INC-n]]` una incidencia y `[[Página]]` otra página. Una instalación nueva trae la **Guía de catlan**. |
 | <img src="docs/screenshots/buscador.png" alt="Buscador"> | **Buscador global** (`Alt+C` o `/`) · busca en todo; `W:` wiki, `U:` equipos, `T:` incidencias. |
 | <img src="docs/screenshots/opciones.png" alt="Opciones"> | **Opciones** (administradores) · usuarios y grupos con permisos de edición o solo vista, **avisos** configurables con prueba, **copia de seguridad** descargable y zona de peligro. |
 
@@ -137,9 +138,9 @@ ventana: conserva la ficha del equipo.
 `irm http://tu-catlan:8080/kitty.ps1 | iex` (PowerShell como administrador) instala **Kitty**, un programa pequeño
 (`kitty.exe`, unos 3,5 MB, en `Archivos de programa\Kitty`) que reparte el propio catlan:
 
-- **Cada 5 minutos y al arrancar**, una tarea programada (`kitty enviar`, como SYSTEM) envía **solo** nombre, sistema,
-  modelo, CPU, memoria, discos, IPs, tiempo encendido, nº de serie y los **errores y críticos del Visor de eventos**
-  (Sistema y Aplicación, con las rutas de usuario tapadas), que se ven en su ficha de Salud; un crítico, como un apagado
+- **Cada minuto**, `kitty servicio` (una tarea programada que arranca con el PC, como SYSTEM) envía **solo** nombre, sistema,
+  modelo, CPU, memoria, discos, IPs, tiempo encendido, nº de serie y, cada 5 minutos, los **errores y críticos del Visor de
+  eventos** (Sistema y Aplicación, con las rutas de usuario tapadas), que se ven en su ficha de Salud; un crítico, como un apagado
   inesperado, avisa. Nada de usuarios, programas, procesos ni archivos.
 - **Un gato en la bandeja** de cada usuario: una ventana con el diseño de catlan para **avisar a IT** («¿Qué está
   fallando?»), seguir **sus avisos** (recibido, en curso, resuelto) y ver **cómo va el PC** en vivo. Cada aviso llega

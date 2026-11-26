@@ -4,6 +4,7 @@ mod crypto;
 mod db;
 mod health;
 mod monitor;
+mod remote;
 mod server;
 mod snmp;
 mod util;
@@ -51,6 +52,19 @@ fn decrypt(src: &str, dst: &str) -> i32 {
 }
 
 fn start(args: &[String]) -> anyhow::Result<()> {
+    if args.get(1).map(String::as_str) == Some("restablecer") {
+        // nunca crea una BD: en otra carpeta saldría una nueva con su admin y la contraseña no valdría en el servidor de verdad
+        if !DATA.join("catlan.db").is_file() {
+            eprintln!(
+                "No hay base de datos de catlan en {}.\nEjecútalo con la misma carpeta de datos que el servidor: la de junto a su ejecutable, o la de CATLAN_DATA.\n\
+                 En PowerShell: $env:CATLAN_DATA=\"C:\\ruta\\a\\data\"; catlan restablecer usuario",
+                DATA.display()
+            );
+            std::process::exit(1);
+        }
+        db::init()?; // no hace falta parar catlan: la BD admite a los dos (WAL)
+        std::process::exit(web::reset_password(args.get(2).map_or("", String::as_str))?);
+    }
     db::init()?;
     monitor::apply_alerts()?;
     if db::q("SELECT 1 FROM users", p![])?.is_empty() {
@@ -59,10 +73,6 @@ fn start(args: &[String]) -> anyhow::Result<()> {
         db::q("INSERT INTO users(name, hash, admin, must_change) VALUES('admin', ?, 1, ?)", p![crypto::pw_hash(pw, None), PASSWORD.is_empty()])?;
         println!("Usuario inicial: admin / {}", if PASSWORD.is_empty() { "admin (se pide cambiarla al entrar)" } else { "CATLAN_PASSWORD" });
         db::q("INSERT INTO pages(title, body) VALUES(?, ?)", p!["Guía de catlan", GUIDE])?; // guía de uso y de datos en la wiki
-    }
-    if args.get(1).map(String::as_str) == Some("restablecer") {
-        // no hace falta parar catlan: la BD admite a los dos (WAL)
-        std::process::exit(web::reset_password(args.get(2).map_or("", String::as_str))?);
     }
     std::sync::LazyLock::force(&monitor::STARTED);
     // la IP de este equipo en la red (sin enviar nada): 0.0.0.0 no se puede abrir en el navegador

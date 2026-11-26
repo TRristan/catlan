@@ -1,7 +1,7 @@
 # Kitty para catlan: instalador. catlan lo sirve en /kitty.ps1 con su dirección y su id ya puestos.
 # En el PC, PowerShell como administrador:   irm http://catlan:8080/kitty.ps1 | iex
 # Instala Kitty (kitty.exe, un programa pequeño que sirve el propio catlan) en Archivos de programa y deja:
-#  - una tarea programada (SYSTEM, cada 5 min y al arrancar) que envía el estado del PC: «kitty enviar»;
+#  - una tarea programada (SYSTEM, al arrancar) que envía el estado del PC cada minuto: «kitty servicio»;
 #  - el gato en la bandeja de cada usuario al iniciar sesión, para avisar a IT y ver cómo va el equipo.
 # La clave del equipo va al registro, en HKLM\SOFTWARE\Kitty, solo para SYSTEM y administradores (la misma que el Kitty
 # de antes: un PC ya instalado conserva su ficha). La ventana usa otra, que solo sirve para abrir incidencias de este PC.
@@ -13,12 +13,10 @@ $r = 'HKLM:\SOFTWARE\Kitty'
 $dir = Join-Path $env:ProgramFiles 'Kitty'
 $pub = Join-Path $env:ProgramData 'Kitty'
 $exe = Join-Path $dir 'kitty.exe'
-try {
-    if (-not (Test-Path $r)) { New-Item $r | Out-Null }
-} catch {
-    Write-Host "Kitty: no puedo escribir en $r. Abre PowerShell como administrador y vuelve a pegar el comando." -ForegroundColor Red
-    return
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole('Administrators')) {
+    throw "Kitty: abre PowerShell como administrador y vuelve a pegar el comando."
 }
+if (-not (Test-Path $r)) { New-Item $r | Out-Null }
 $key = (Get-ItemProperty $r).key
 if (-not $key) { # la clave que identifica a este PC ante catlan (dos GUID: 244 bits aleatorios)
     $key = [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')
@@ -34,15 +32,16 @@ try { # quien tenga la clave se hace pasar por este PC: fuera los usuarios norma
 
 # El programa, desde catlan (si ya estaba, se para y se sustituye: así también se actualiza)
 New-Item -ItemType Directory -Force $dir, $pub | Out-Null
-Get-Process kitty -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe } | Stop-Process -Force
 try {
     Invoke-WebRequest "$Url/kitty.exe" -OutFile "$exe.nuevo" -UseBasicParsing -TimeoutSec 120
-    Move-Item -Force "$exe.nuevo" $exe
 } catch {
     Remove-Item "$exe.nuevo" -ErrorAction SilentlyContinue
-    Write-Host "Kitty: no he podido descargar $Url/kitty.exe ($($_.Exception.Message)). ¿Tiene catlan kitty.exe junto a su ejecutable?" -ForegroundColor Red
-    return
+    throw "Kitty: no he podido descargar $Url/kitty.exe ($($_.Exception.Message)). ¿Tiene catlan kitty.exe junto a su ejecutable?"
 }
+# Todas las Kitty abiertas, también una copia descargada o de pruebas: si no, se queda con la bandeja y la instalada no arranca
+Get-Process kitty -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Sleep -Milliseconds 300
+Move-Item -Force "$exe.nuevo" $exe
 
 # Lo que necesita la ventana (la leen los usuarios del PC): dónde está catlan y la clave de incidencias
 $cfg = Join-Path $pub 'kitty.json'
@@ -50,12 +49,13 @@ $ukey = try { (Get-Content $cfg -Raw | ConvertFrom-Json).ukey } catch { '' }
 if (-not $ukey) { $ukey = [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N') }
 [IO.File]::WriteAllText($cfg, (@{ url = $Url; catlan = $Catlan; ukey = $ukey } | ConvertTo-Json -Compress)) # UTF-8 sin BOM
 
-# Cada 5 minutos y al arrancar, como SYSTEM: el estado del PC
-$action = New-ScheduledTaskAction $exe 'enviar'
+# Como SYSTEM, al arrancar: «kitty servicio» se queda en marcha y envía el estado del PC cada minuto.
+# La repetición de cada 5 minutos solo lo vuelve a lanzar si se ha cerrado (IgnoreNew: nunca dos a la vez).
+$action = New-ScheduledTaskAction $exe 'servicio'
 $triggers = @((New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)), (New-ScheduledTaskTrigger -AtStartup))
 $who = New-ScheduledTaskPrincipal -UserId SYSTEM -LogonType ServiceAccount -RunLevel Highest
-$set = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 2) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew
-Register-ScheduledTask Kitty -Action $action -Trigger $triggers -Principal $who -Settings $set -Description "Kitty: envía a catlan ($Url) el estado de este PC cada 5 minutos" -Force | Out-Null
+$set = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew
+Register-ScheduledTask Kitty -Action $action -Trigger $triggers -Principal $who -Settings $set -Description "Kitty: envía a catlan ($Url) el estado de este PC cada minuto" -Force | Out-Null
 # El gato en la bandeja de cada usuario, al iniciar sesión
 Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' Kitty "`"$exe`" --oculto"
 Remove-ItemProperty $r when -ErrorAction SilentlyContinue # para esperar al primer envío de esta instalación

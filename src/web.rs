@@ -4,6 +4,7 @@ use crate::crypto::{pw_hash, pw_ok, seal, sha256_hex, token_hex, token_urlsafe, 
 use crate::db::{self, SqlV, is_constraint, q, val};
 use crate::health;
 use crate::monitor::{self, SECRET, SOURCES};
+use crate::remote;
 use crate::server::{Req, Resp};
 use crate::util::{Bad, J, Row, Shape, bad, is_int, lock, now, obj, parse_qs, py_str, trunc, truthy};
 use crate::validate::*;
@@ -24,8 +25,10 @@ const AGENT_FACTS: [&str; 5] = ["name", "ip", "serial", "os", "kind"];
 /// de la instalación (los Kitty instalados vuelven a pedir entrar aquí).
 const WIPE: &[&str] = &[
     "pages", "items", "maps", "log", "checks", "pings", "pings_h", "sounds", "sources", "metrics", "metrics_h", "dash", "incidents", "notes", "agents",
-    "expiries", "syslog", "subnets",
+    "expiries", "syslog", "subnets", "tasks",
 ];
+/// Columnas del tablero personal.
+const TASK_COLS: [&str; 4] = ["notas", "pendiente", "hoy", "hecho"];
 const INC_COLS: [&str; 8] = ["title", "body", "status", "priority", "assignee", "grp", "item", "parent"];
 const DONE: [&str; 2] = ["resuelta", "cerrada"];
 const INC: &str = "SELECT n.*, u.name AS assignee_name, g.name AS grp_name, i.name AS item_name, a.name AS author_name, \
@@ -277,13 +280,14 @@ impl Ctx<'_> {
         let parts: Vec<String> = path.split('/').filter(|p| !p.is_empty()).map(String::from).collect();
         let api = parts.first().is_some_and(|p| p == "api");
         let rest: Vec<&str> = parts.iter().skip(1).map(String::as_str).collect();
-        let free = !api || m == "POST" && (rest == ["login"] || rest.first() == Some(&"agent") && rest.len() <= 2); // la página, el login y Kitty, sin sesión
+        let free = !api || m == "POST" && (rest == ["login"] || rest.first() == Some(&"agent") && (rest.len() <= 2 || rest.get(1) == Some(&"remote"))); // la página, el login y Kitty, sin sesión
+        let own = api && rest.first() == Some(&"tasks"); // el tablero personal no toca nada común: también para los de solo vista
         let pending = api && (rest.first() == Some(&"logout") || [&["me"][..], &["me", "password"]].contains(&&rest[..rest.len().min(2)])); // con contraseña provisional
         let r = (|| -> Result<Resp> {
             if let Some(r) = self.authed(free, pending)? {
                 return Ok(r);
             }
-            if m != "GET" && !free && !pending && self.uid.is_some() && readonly(self.uid())? {
+            if m != "GET" && !free && !pending && !own && self.uid.is_some() && readonly(self.uid())? {
                 return Ok(err(403, "tu usuario es de solo vista"));
             }
             self.dispatch(&m, &parts, query)
@@ -312,6 +316,10 @@ impl Ctx<'_> {
                 Some(Ok(b)) => Resp::new(200, b, "application/vnd.microsoft.portable-executable").header("Content-Disposition", "attachment; filename=\"kitty.exe\""),
                 _ => Resp::new(404, "catlan no tiene kitty.exe: ponlo junto al ejecutable de catlan o en su carpeta de datos".as_bytes().to_vec(), "text/plain; charset=utf-8"),
             });
+        }
+        if parts == ["kitty.json"] && m == "GET" {
+            // Kitty sin instalar busca catlan en la red: así sabe que aquí hay uno (sin sesión, solo el id público)
+            return Ok(js(200, json!({"catlan": db::INSTANCE.get().map_or("", |s| s.as_str())})));
         }
         if (parts == ["kitty.ps1"] || parts == ["kitty.sh"]) && m == "GET" {
             // instalador de Kitty (Windows o Linux) con esta dirección y este id, sin sesión
@@ -354,12 +362,16 @@ impl Ctx<'_> {
                     None => self.agent_hello(),
                     Some("incident") => self.agent_incident(),
                     Some("mine") => self.agent_mine(),
+                    Some("quit") => self.agent_quit(),
+                    Some("remote") => self.agent_remote(sub),
                     Some(_) => Ok(err(404, "no existe")),
                 };
             }
             ("agents", _) => return self.agents(m, rid_i, rid.is_none()),
+            ("remote", _) => return self.remote(m, rid, sub, &qs),
             ("groups", _) => return self.groups(m, rid, rid_i),
             ("incidents", _) => return self.incidents(m, rid, rid_i, parts),
+            ("tasks", _) => return self.tasks(m, rid, rid_i),
             ("maps", _) => return self.maps(m, rid, rid_i, sub, &qs),
             ("log", "GET") => {
                 let (w, a) = match (qs.get("kind"), qs.get("ref")) {
@@ -865,7 +877,9 @@ impl Ctx<'_> {
         }
         self.user = format!("Kitty · {}", f.s("name"));
         let item = self.agent_item(&a, &f)?;
-        let every = b.get("every").filter(|e| is_int(e)).and_then(Value::as_i64).filter(|e| (1..=1440).contains(e)).map(|e| e * 60).unwrap_or(300);
+        // «secs», el Kitty en Rust (cada minuto); «every», en minutos, el de PowerShell y el de Linux
+        let secs = b.get("secs").filter(|e| is_int(e)).and_then(Value::as_i64).filter(|e| (10..=86400).contains(e));
+        let every = secs.or_else(|| b.get("every").filter(|e| is_int(e)).and_then(Value::as_i64).filter(|e| (1..=1440).contains(e)).map(|e| e * 60)).unwrap_or(300);
         let host = if f.s("ip").is_empty() { f.s("name") } else { f.s("ip") }.to_string();
         let src = match a.i("source") {
             Some(s) => q(&format!("{SOURCES} WHERE s.id=? AND s.kind='kitty'"), p![s])?.one(),
@@ -902,6 +916,80 @@ impl Ctx<'_> {
         })
     }
 
+    /// Control remoto, lado de Kitty: preguntar si IT quiere conectarse, responder y enviar la pantalla.
+    /// Con la clave de incidencias (la ventana de Kitty corre como el usuario del PC y no puede leer la del equipo).
+    fn agent_remote(&mut self, sub: Option<&str>) -> Result<Resp> {
+        if sub == Some("frame") {
+            // el cuerpo es el JPEG: la clave y la sesión van en cabeceras
+            let a = match self.agent_by_ukey(&json!({"ukey": self.req.header("x-kitty")}))? {
+                Ok(a) => a,
+                Err(r) => return Ok(r),
+            };
+            let jpg = self.req.body.clone();
+            if !jpg.is_empty() && !(jpg.starts_with(&[0xFF, 0xD8]) && jpg.len() <= 8 << 20) {
+                return bad("fotograma no válido");
+            }
+            return Ok(remote::push(a.i("id").unwrap_or(0), self.req.header("x-sesion"), jpg).map_or_else(|| err(404, "no existe"), |v| js(200, v)));
+        }
+        let b = self.body()?;
+        let a = match self.agent_by_ukey(&b)? {
+            Ok(a) => a,
+            Err(r) => return Ok(r),
+        };
+        let aid = a.i("id").unwrap_or(0);
+        Ok(match sub {
+            None => js(200, remote::pending(aid)),
+            Some("answer") => {
+                let id = b.get("id").and_then(Value::as_str).unwrap_or("");
+                let ok = b.get("ok").and_then(Value::as_bool).unwrap_or(false);
+                remote::answer(aid, id, ok).map_or_else(|| err(404, "no existe"), |v| js(200, v))
+            }
+            Some(_) => err(404, "no existe"),
+        })
+    }
+
+    /// Control remoto, lado del técnico: pedirlo, ver la pantalla, mandar ratón y teclado, y terminar.
+    /// Cada sesión es solo de quien la pidió; el usuario del PC tiene que aceptarla.
+    fn remote(&mut self, m: &str, rid: Option<&str>, sub: Option<&str>, qs: &HashMap<String, Vec<String>>) -> Result<Resp> {
+        let uid = self.uid();
+        let gone = || err(404, "esta sesión ya no existe");
+        Ok(match (m, rid, sub) {
+            ("POST", None, None) => {
+                let b = self.body()?;
+                let Some(aid) = b.get("agent").and_then(Value::as_i64) else { return bad("¿a qué equipo?") };
+                let Some(a) = q("SELECT * FROM agents WHERE id=?", p![aid])?.one() else { return Ok(err(404, "ese Kitty no existe")) };
+                if a.s("state") != "adoptado" {
+                    return bad("este Kitty aún no está aceptado en catlan");
+                }
+                match remote::ask(&a, uid, &self.user) {
+                    Ok((id, st)) => js(201, json!({"id": id, "status": st})),
+                    Err(e) => err(409, &e),
+                }
+            }
+            ("GET", Some(id), None) => remote::get(id, uid).map_or_else(gone, |v| js(200, v)),
+            ("GET", Some(id), Some("frame")) => {
+                let after = qs.get("after").and_then(|v| v.first()).and_then(|s| s.parse().ok()).unwrap_or(0);
+                match remote::frame(id, uid, after) {
+                    Some((Some((seq, jpg)), _)) => Resp::new(200, jpg, "image/jpeg").header("X-Seq", seq.to_string()).header("Cache-Control", "no-store"),
+                    Some((None, st)) => js(200, st), // sin fotograma nuevo: el estado
+                    None => gone(),
+                }
+            }
+            ("POST", Some(id), Some("input")) => {
+                if self.req.body.len() > 64 * 1024 {
+                    return bad("demasiados eventos de golpe");
+                }
+                let b = self.body()?;
+                let Some(evs) = b.as_array().filter(|a| a.len() <= 500 && a.iter().all(|e| e.get("t").is_some_and(Value::is_string))) else {
+                    return bad("eventos no válidos");
+                };
+                remote::input(id, uid, evs.clone()).map_or_else(gone, |v| js(200, v))
+            }
+            ("DELETE", Some(id), None) => remote::stop(id, uid, &self.user).map_or_else(gone, |v| js(200, v)),
+            _ => err(405, "método no permitido"),
+        })
+    }
+
     /// Las incidencias que se abrieron desde la ventana de Kitty de este equipo, con su estado.
     fn agent_mine(&self) -> Result<Resp> {
         let b = self.body()?;
@@ -914,6 +1002,37 @@ impl Ctx<'_> {
             p![&a["item"], &a["name"]],
         )?;
         Ok(js(200, json!({"state": a["state"], "name": a["name"], "item": a["item"], "incidents": rows.rows})))
+    }
+
+    /// Cerrar la Kitty de un PC: solo con un administrador de catlan (el usuario del PC no puede quitarla).
+    /// Mismo límite de intentos que el login; no abre sesión.
+    fn agent_quit(&mut self) -> Result<Resp> {
+        let b = self.body()?;
+        let a = match self.agent_by_ukey(&b)? {
+            Ok(a) => a,
+            Err(r) => return Ok(r),
+        };
+        let ip = self.req.ip.clone();
+        if throttled(&ip) {
+            return Ok(err(429, "demasiados intentos: espera 15 minutos"));
+        }
+        let bs = |k: &str| b.get(k).map(py_str).unwrap_or_default();
+        let uid = match login_ok(&trunc(&bs("name"), 100), &trunc(&bs("pass"), 200), &trunc(&bs("code"), 10))? {
+            Login::Ok(id) => id,
+            other => {
+                failed(&ip);
+                return Ok(match other {
+                    Login::NeedCode => js(401, json!({"error": "escribe el código de la app de autenticación", "totp": true})),
+                    _ => err(401, "usuario o contraseña incorrectos"),
+                });
+            }
+        };
+        let Some(u) = q("SELECT name, admin FROM users WHERE id=?", p![uid])?.one().filter(|u| u.t("admin")) else {
+            return Ok(err(403, "solo un administrador de catlan puede cerrar Kitty"));
+        };
+        self.user = u.s("name").to_string();
+        self.log("cerrar Kitty", "agent", &a["id"], &a["name"], &json!({}))?;
+        Ok(js(200, json!({"ok": true})))
     }
 
     /// Una incidencia que abre el usuario del PC desde Kitty: va al equipo de su ficha y avisa si es urgente.
@@ -943,7 +1062,7 @@ impl Ctx<'_> {
         self.note(id, "abrió la incidencia", true)?;
         self.log("crear", "incident", id, title, &json!({"title": title, "body": body, "priority": prio, "item": a["item"], "desde": "Kitty"}))?;
         if prio == "crítica" {
-            monitor::notify(&format!("catlan: incidencia crítica #{id}: {title}"), &format!("Abierta desde Kitty en {}.
+            monitor::notify(&format!("catlan: incidencia crítica INC-{id}: {title}"), &format!("Abierta desde Kitty en {}.
 
 -- catlan", a.s("name")));
         }
@@ -1174,13 +1293,68 @@ impl Ctx<'_> {
             if !DONE.contains(&kid.s("status")) {
                 // las ya resueltas se quedan como están, pero se baja igual: sus hijas pueden seguir abiertas
                 q("UPDATE incidents SET status=? WHERE id=?", p![status, id])?;
-                self.note(id, &format!("pasó a «{status}» con su incidencia padre #{inc}"), true)?;
+                self.note(id, &format!("pasó a «{status}» con su incidencia padre INC-{inc}"), true)?;
                 self.log("editar", "incident", id, &kid["title"], &json!({"status": status, "por la padre": inc}))?;
                 n += 1;
             }
             n += self.close_children(id, status)?;
         }
         Ok(n)
+    }
+
+    /// Tablero personal: tareas y notas de cada usuario, que solo ve y toca él. Sin Actividad: no son de nadie más.
+    fn tasks(&mut self, m: &str, rid: Option<&str>, rid_i: i64) -> Result<Resp> {
+        let uid = self.uid();
+        const ROW: &str = "SELECT id, text, col, pos, updated FROM tasks";
+        if m == "GET" && rid.is_none() {
+            return Ok(js(200, q(&format!("{ROW} WHERE user=? ORDER BY pos, id"), p![uid])?.rows));
+        }
+        if m == "DELETE" && rid.is_some() {
+            let n = q("DELETE FROM tasks WHERE id=? AND user=?", p![rid_i, uid])?.rowcount;
+            return Ok(if n == 0 { err(404, "no existe") } else { no_content() });
+        }
+        if !(m == "POST" && rid.is_none() || m == "PUT" && rid.is_some()) {
+            return Ok(err(405, "método no permitido"));
+        }
+        let b = self.body()?;
+        let b = obj(&b)?;
+        let text = match b.get("text") {
+            None => None,
+            Some(Value::String(s)) if (1..=2000).contains(&s.trim().chars().count()) => Some(s.trim().to_string()),
+            Some(_) => return bad("la tarea va de 1 a 2000 caracteres"),
+        };
+        let col = match b.get("col") {
+            None => None,
+            Some(Value::String(s)) if TASK_COLS.contains(&s.as_str()) => Some(s.clone()),
+            Some(_) => return bad("columna no válida"),
+        };
+        let pos = match b.get("pos") {
+            None => None,
+            Some(v) => match v.as_f64().filter(|f| f.is_finite()) {
+                Some(f) => Some(f),
+                None => return bad("posición no válida"),
+            },
+        };
+        let id = if m == "POST" {
+            let Some(text) = text else { return bad("escribe la tarea") };
+            if val("SELECT count(*) FROM tasks WHERE user=?", p![uid])?.as_i64().unwrap_or(0) >= 1000 {
+                return bad("como mucho 1000 tareas: borra las hechas");
+            }
+            let col = col.unwrap_or_else(|| "pendiente".into());
+            // sin posición: al final de su columna
+            q("INSERT INTO tasks(user, text, col, pos) VALUES(?, ?, ?, COALESCE(?, (SELECT max(pos) + 1 FROM tasks WHERE user=? AND col=?), 0))",
+                p![uid, text, col.clone(), pos, uid, col])?
+            .lastrowid
+        } else {
+            let n = q("UPDATE tasks SET text=COALESCE(?, text), col=COALESCE(?, col), pos=COALESCE(?, pos), updated=CURRENT_TIMESTAMP WHERE id=? AND user=?",
+                p![text, col, pos, rid_i, uid])?
+            .rowcount;
+            if n == 0 {
+                return Ok(err(404, "no existe"));
+            }
+            rid_i
+        };
+        Ok(js(if m == "POST" { 201 } else { 200 }, q(&format!("{ROW} WHERE id=?"), p![id])?.one()))
     }
 
     fn incidents(&mut self, m: &str, rid: Option<&str>, rid_i: i64, parts: &[String]) -> Result<Resp> {
@@ -1218,7 +1392,7 @@ impl Ctx<'_> {
                 } else {
                     String::new()
                 };
-                monitor::notify(&format!("catlan: incidencia crítica #{id}: {}", row.s("title")), &format!("Abierta por {}{to}.\n\n-- catlan", self.user));
+                monitor::notify(&format!("catlan: incidencia crítica INC-{id}: {}", row.s("title")), &format!("Abierta por {}{to}.\n\n-- catlan", self.user));
             }
             return Ok(js(201, row));
         }
@@ -1228,6 +1402,14 @@ impl Ctx<'_> {
             let mut out = row.clone();
             out.insert("history".into(), q("SELECT * FROM notes WHERE incident=? ORDER BY id", p![id])?.rows.into_iter().map(Value::Object).collect::<Vec<_>>().into());
             out.insert("kids".into(), q(&format!("{INC} WHERE n.parent=? ORDER BY n.id"), p![id])?.rows.into_iter().map(Value::Object).collect::<Vec<_>>().into());
+            // trazabilidad: dónde se enlaza con [[INC-n]] (páginas, notas de equipos, otras incidencias y su seguimiento)
+            let tag = format!("%[[INC-{id}]]%");
+            out.insert("mentions".into(), json!({
+                "pages": q("SELECT id, title FROM pages WHERE body LIKE ? ORDER BY title", p![&tag])?.rows,
+                "items": q("SELECT id, name FROM items WHERE notes LIKE ? ORDER BY name", p![&tag])?.rows,
+                "incidents": q("SELECT id, title, status FROM incidents WHERE id != ? AND (body LIKE ? OR id IN (SELECT incident FROM notes WHERE change = 0 AND text LIKE ?)) ORDER BY id DESC",
+                    p![id, &tag, &tag])?.rows,
+            }));
             return Ok(js(200, out));
         }
         if m == "POST" && parts.get(3).map(String::as_str) == Some("notes") && parts.len() == 4 {
@@ -1273,7 +1455,7 @@ impl Ctx<'_> {
                         "item" => "quitó el equipo".into(),
                         "title" => "cambió el título".into(),
                         "body" => "editó la descripción".into(),
-                        "parent" if now.t("parent") => format!("la colgó de la incidencia #{}", now["parent"]),
+                        "parent" if now.t("parent") => format!("la colgó de la incidencia INC-{}", now["parent"]),
                         _ => "la soltó de su incidencia padre".into(),
                     };
                     self.note(id, &say, true)?;
@@ -1490,6 +1672,7 @@ impl Ctx<'_> {
             q("DELETE FROM sessions WHERE user_id=?", p![id])?;
             q("DELETE FROM users WHERE id=?", p![id])?;
             q("DELETE FROM members WHERE user_id=?", p![id])?;
+            q("DELETE FROM tasks WHERE user=?", p![id])?;
             q("UPDATE incidents SET assignee=NULL WHERE assignee=?", p![id])?;
             lock(&BASIC).clear();
             self.log("borrar", "user", id, &row["name"], &json!({}))?;
@@ -1640,6 +1823,7 @@ fn refs(item: i64) -> Result<Value> {
                   p!["$.nodes", item, "$.devices", item])?.rows,
         "incidents": q("SELECT id, title, status FROM incidents WHERE item=? ORDER BY id DESC", p![item])?.rows,
         "expiries": q("SELECT id, name, kind, date FROM expiries WHERE item=? ORDER BY date", p![item])?.rows,
+        "agent": val("SELECT id FROM agents WHERE item=? AND state='adoptado' ORDER BY id DESC LIMIT 1", p![item])?,
     }))
 }
 
@@ -1653,7 +1837,7 @@ pub fn reset_password(name: &str) -> Result<i32> {
             .map(|r| format!("{}{}", r.s("name"), if r.t("admin") { " (admin)" } else { "" }))
             .collect();
         let pre = if name.is_empty() { String::new() } else { format!("No existe el usuario «{name}». ") };
-        println!("{pre}Usuarios: {}\nUso: catlan restablecer <usuario>", names.join(", "));
+        println!("{pre}Usuarios en {}: {}\nUso: catlan restablecer <usuario>", DATA.join("catlan.db").display(), names.join(", "));
         return Ok(1);
     };
     let pw = token_urlsafe(9);
@@ -1664,8 +1848,9 @@ pub fn reset_password(name: &str) -> Result<i32> {
         p![&u["id"], &u["name"]],
     )?;
     println!(
-        "Contraseña provisional de {}: {pw}\nEntra con ella y catlan te pedirá cambiarla. Su verificación en dos pasos queda quitada.",
-        u.s("name")
+        "Contraseña provisional de {}: {pw}\nEntra con ella y catlan te pedirá cambiarla. Su verificación en dos pasos queda quitada.\n(Base de datos: {})",
+        u.s("name"),
+        DATA.join("catlan.db").display()
     );
     Ok(0)
 }

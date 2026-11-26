@@ -168,12 +168,28 @@ kbd{font:11px var(--mono);color:var(--tx3);border:1px solid var(--line2);border-
 .kv dt{color:var(--tx3)}.kv dd{margin:0;text-align:right;user-select:text}
 .chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
 .chips span{padding:2px 8px;border-radius:7px;background:var(--s2);font:12px var(--mono)}
+
+/* Control remoto: pedir permiso y avisar mientras dura */
+.rmt{position:fixed;inset:0;z-index:20;display:grid;place-items:center;padding:18px;background:color-mix(in oklab,var(--bg) 70%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);animation:pageIn .3s var(--e)}
+.rmt[hidden]{display:none}
+.rmt-card{display:grid;justify-items:center;gap:6px;width:100%;padding:24px 20px 18px;text-align:center;border-radius:18px;border:1px solid var(--line);background:var(--s1);box-shadow:var(--sh3,0 20px 50px rgba(0,0,0,.25));animation:pop .45s var(--spring)}
+.rmt-card .av{display:grid;place-items:center;width:54px;height:54px;border-radius:16px;background:var(--acc-soft);color:var(--acc);margin-bottom:6px;animation:float 2.4s ease-in-out infinite}
+.rmt-card h2{margin:0;font-size:17px;line-height:1.3}
+.rmt-card p{margin:0;font-size:13px;color:var(--tx2)}
+.rmt-b{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;margin:14px 0 4px}
+.rmt-on{position:fixed;left:12px;right:12px;bottom:12px;z-index:15;display:flex;align-items:center;gap:10px;padding:10px 10px 10px 14px;border-radius:14px;
+  background:var(--acc);color:#fff;font-size:13px;font-weight:600;box-shadow:var(--sh2);animation:rise .4s var(--e)}
+.rmt-on[hidden]{display:none}
+.rmt-on i{width:9px;height:9px;flex:none;border-radius:50%;background:#fff;animation:pulse 1.4s ease-in-out infinite}
+.rmt-on span{flex:1}
+.rmt-on .btn{height:32px;padding:0 12px;background:#fff;color:#1c1b19;border:0}
 </style>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
-    <symbol id="u-cat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9.5V4l4 3h6l4-3v5.5A7.5 7.5 0 0 1 12 20a7.5 7.5 0 0 1-7-10.5z"/><path d="M9.5 13h.01M14.5 13h.01M11 16.2l1 .6 1-.6"/></symbol>
+    <symbol id="wm-kitty" viewBox="0 -36 394 172"><path fill="currentColor" fill-rule="evenodd" d="M0 -36H20V100H0Z"/><path fill="currentColor" fill-rule="evenodd" d="M10 51.72L61.72 0H90L10 80Z"/><path fill="currentColor" fill-rule="evenodd" d="M30.93 44.93L45.07 30.79L114.28 100H86Z"/><path fill="currentColor" fill-rule="evenodd" d="M128 0H148V100H128Z"/><path fill="currentColor" fill-rule="evenodd" d="M150 -24A12 12 0 1 0 126 -24A12 12 0 1 0 150 -24Z"/><path fill="currentColor" fill-rule="evenodd" d="M186 -36H206V100H186Z"/><path fill="currentColor" fill-rule="evenodd" d="M164 0H228V18H164Z"/><path fill="currentColor" fill-rule="evenodd" d="M250 -36H270V100H250Z"/><path fill="currentColor" fill-rule="evenodd" d="M228 0H292V18H228Z"/><path fill="currentColor" fill-rule="evenodd" d="M304 0H324V55A25 25 0 0 0 374 55V0H394V55A45 45 0 0 1 304 55Z"/><path fill="currentColor" fill-rule="evenodd" d="M374 0H394V136H374Z"/></symbol>
+    <symbol id="u-cat" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" fill-rule="evenodd" transform="scale(.09375)" d="M40 32L96 88H160L216 32V164A56 56 0 0 1 160 220H96A56 56 0 0 1 40 164Z M70 104.43V164A26 26 0 0 0 96 190H160A26 26 0 0 0 186 164V104.43L172.43 118H83.57Z M120 154A18 18 0 1 0 84 154A18 18 0 1 0 120 154Z M172 154A18 18 0 1 0 136 154A18 18 0 1 0 172 154Z"/></symbol>
     <symbol id="u-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></symbol>
     <symbol id="u-min" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M7 12h10"/></symbol>
     <symbol id="u-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></symbol>
@@ -190,7 +206,7 @@ kbd{font:11px var(--mono);color:var(--tx3);border:1px solid var(--line2);border-
 </svg>
 
 <header class="bar" data-drag>
-  <div class="brand" data-drag><svg class="ic" width="22" height="22"><use href="#u-cat"/></svg><span data-drag>Kitty</span><span class="pc" id="pcname" data-drag></span></div>
+  <div class="brand" data-drag><svg class="ic" width="22" height="22"><use href="#u-cat"/></svg><svg class="wm" viewBox="0 0 394 172" width="37" height="16" role="img" aria-label="Kitty" data-drag style="flex:none"><use href="#wm-kitty"/></svg><span class="pc" id="pcname" data-drag></span></div>
   <span class="pill" id="conn" data-drag><i></i><span>Conectando…</span></span>
   <div class="win">
     <button class="wbtn" id="bmin" title="Minimizar" aria-label="Minimizar"><svg class="ic" width="18" height="18"><use href="#u-min"/></svg></button>
@@ -252,6 +268,24 @@ kbd{font:11px var(--mono);color:var(--tx3);border:1px solid var(--line2);border-
   </section>
 </main>
 
+<div class="rmt" id="rmt" role="alertdialog" aria-modal="true" aria-labelledby="rmt-t" aria-describedby="rmt-x" hidden>
+  <div class="rmt-card"><span class="av"><svg class="ic" width="28" height="28"><use href="#u-pc"/></svg></span>
+    <h2 id="rmt-t"></h2><p id="rmt-x">Verá tu pantalla y podrá usar el ratón y el teclado. Puedes cortar cuando quieras.</p>
+    <div class="rmt-b"><button class="btn" id="rmt-no">No permitir</button><button class="btn pri" id="rmt-ok">Permitir</button></div>
+    <p class="dim" id="rmt-c" style="font-size:12px"></p></div>
+</div>
+<form class="rmt" id="qt" role="dialog" aria-modal="true" aria-labelledby="qt-t" hidden>
+  <div class="rmt-card"><span class="av"><svg class="ic" width="28" height="28"><use href="#u-pc"/></svg></span>
+    <h2 id="qt-t">Cerrar Kitty</h2><p>Solo un administrador de catlan puede cerrarlo.</p>
+    <div class="fields" style="width:100%;margin-top:10px;text-align:left">
+      <div class="field"><label for="qt-n">Usuario de catlan</label><input id="qt-n" autocomplete="off" required></div>
+      <div class="field"><label for="qt-p">Contraseña</label><input id="qt-p" type="password" autocomplete="off" required></div>
+      <div class="field" id="qt-cf" hidden><label for="qt-c">Código de la app de autenticación</label><input id="qt-c" class="mono" inputmode="numeric" autocomplete="one-time-code"></div>
+      <div id="qt-e" role="alert"></div></div>
+    <div class="rmt-b"><button type="button" class="btn" id="qt-no">Cancelar</button><button class="btn pri" id="qt-ok">Cerrar Kitty</button></div></div>
+</form>
+<div class="rmt-on" id="rmt-on" role="status" hidden><i></i><span id="rmt-on-t"></span><button class="btn" id="rmt-stop">Cortar</button></div>
+
 <script>
 'use strict';
 const $ = s => document.querySelector(s);
@@ -259,7 +293,7 @@ const $ = s => document.querySelector(s);
 const toRust = o => window.ipc && window.ipc.postMessage(JSON.stringify(o));
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const ui = (n, s = 18) => `<svg class="ic" width="${s}" height="${s}" aria-hidden="true"><use href="#u-${n}"/></svg>`;
-const S = {state: 'connecting', configured: true, view: 'avisar', prio: 'media', sending: false, mine: null, mineAt: 0};
+const S = {remote: false, state: 'connecting', configured: true, view: 'avisar', prio: 'media', sending: false, mine: null, mineAt: 0};
 
 // ── Ventana: arrastrar desde la barra, minimizar, cerrar (sigue en la bandeja) ──
 document.addEventListener('mousedown', e => {
@@ -304,20 +338,43 @@ function setConn() {
   $('#conn').className = 'pill ' + map[0];
   $('#conn span').textContent = map[1];
   const gate = {
-    unconfigured: ['bad', 'Kitty no está conectado a catlan', 'Pide a IT que lo instale con el comando de catlan.'],
+    unconfigured: ['bad', 'Kitty no está conectado a catlan', 'Conecta este PC: Kitty se instala y pide a IT que lo acepte.'],
     pending: ['', 'IT todavía no ha aceptado este equipo', 'En cuanto lo acepten en catlan podrás avisar desde aquí.'],
     missing: ['', 'Este equipo aún no se ha presentado a catlan', 'Kitty lo hace solo en unos minutos. Vuelve a intentarlo enseguida.'],
     rejected: ['bad', 'catlan no acepta avisos de este equipo', 'Habla con el equipo de IT.'],
   }[S.state];
   $('#gate').innerHTML = gate ? `<div class="note ${gate[0]}"><span class="dot">${ui(gate[0] ? 'alert' : 'clock', 18)}</span><div><b>${gate[1]}</b><span>${gate[2]}</span></div></div>` : '';
+  if (S.state === 'unconfigured') joinBox();
   const blocked = !!gate;
   $('#form').querySelectorAll('input,textarea,button').forEach(el => el.disabled = blocked || S.sending);
 }
+let fails = 0; // un fallo suelto (wifi, catlan reiniciando) no es «sin conexión»: hacen falta dos seguidos
 function stateFrom(r) {
-  if (r.status === 0) return 'offline';
+  const flaky = r.status === 0 || r.status >= 500;
+  fails = flaky ? fails + 1 : 0;
+  if (flaky) return fails < 2 && S.state !== 'connecting' && S.state !== 'unconfigured' ? S.state : 'offline';
   const st = r.body && r.body.state;
   return r.status === 200 ? 'ok' : st === 'pendiente' ? 'pending' : st === 'rechazado' ? 'rejected' : r.status === 404 ? 'missing' : 'offline';
 }
+
+// ── Sin instalar: buscar catlan en la red y conectar este PC (Windows pide permiso de administrador) ──
+const J = {url: '', busy: '', err: ''};
+function joinBox() {
+  const busy = J.busy === 'find' ? 'Buscando catlan en la red…' : J.busy === 'join' ? 'Instalando… acepta el permiso de Windows' : '';
+  $('#gate').insertAdjacentHTML('beforeend', `<div class="fields" style="margin-top:14px">
+    <div class="field"><label for="srv">Dirección de catlan</label>
+      <input id="srv" class="mono" placeholder="http://catlan:8080" value="${esc(J.url)}" ${J.busy ? 'disabled' : ''}></div>
+    ${J.err ? `<div class="err">${ui('alert', 16)}<span>${esc(J.err)}</span></div>` : ''}
+    <button class="btn pri wide" id="join" ${J.busy ? 'disabled' : ''}>${J.busy ? `<span class="spin"></span><span>${busy}</span>` : `${ui('pc', 17)}<span>Conectar este PC</span>`}</button></div>`);
+  $('#srv').oninput = e => { J.url = e.target.value; };
+  $('#join').onclick = () => {
+    J.url = $('#srv').value.trim();
+    if (!J.url) { J.err = 'Escribe la dirección de catlan (pregúntala a IT).'; return setConn(); }
+    J.busy = 'join'; J.err = ''; setConn(); toRust({op: 'join', url: J.url});
+  };
+}
+function found(r) { J.busy = ''; if (r.url && !J.url) J.url = r.url; if (!r.url) J.err = 'No he encontrado catlan en esta red: escribe su dirección.'; setConn(); }
+function joined(r) { J.busy = ''; J.err = r.error; setConn(); }
 
 // ── Avisar ──
 $('#form').onsubmit = e => {
@@ -350,7 +407,7 @@ function sent(r) {
   const i = r.body;
   $('#done-box').innerHTML = `<div class="done">
       <svg class="check" viewBox="0 0 80 80" aria-hidden="true"><circle class="ring" cx="40" cy="40" r="37"/><path class="tick" d="m25 41 10 10 21-22"/></svg>
-      <h2>Aviso enviado</h2><p>IT ya lo tiene en catlan como incidencia <b class="mono">#${esc(i.id)}</b>. Puedes seguirla en «Mis avisos».</p>
+      <h2>Aviso enviado</h2><p>IT ya lo tiene en catlan como incidencia <b class="mono">INC-${esc(i.id)}</b>. Puedes seguirla en «Mis avisos».</p>
       <div class="acts"><button class="btn" id="d-again">Avisar de otra cosa</button><button class="btn pri" id="d-mine">${ui('ticket', 16)}Ver mis avisos</button></div></div>`;
   $('#form-box').hidden = true; $('#done-box').hidden = false;
   $('#d-again').onclick = () => {
@@ -405,7 +462,7 @@ function renderMine(r) {
     const fin = ['resuelta', 'cerrada'].includes(i.status);
     const notes = i.notes ? ` · ${i.notes} ${i.notes === 1 ? 'respuesta' : 'respuestas'}` : '';
     return `<div class="inc${fin ? ' done-st' : ''}" style="--i:${n}"><span class="ico">${ui(fin ? 'check' : 'ticket', 17)}</span>
-      <div><div class="t">${esc(i.title)}</div><div class="m"><span class="mono">#${esc(i.id)}</span> · ${esc(ago(i.updated))}${notes}</div></div>
+      <div><div class="t">${esc(i.title)}</div><div class="m"><span class="mono">INC-${esc(i.id)}</span> · ${esc(ago(i.updated))}${notes}</div></div>
       <span class="pill ${cls}"><i></i>${esc(label)}</span></div>`;
   }).join('')}</div><div class="upd">Actualizado ${esc(ago(new Date().toISOString().slice(0, 19).replace('T', ' ')))}</div>`;
 }
@@ -451,23 +508,70 @@ function stats(s) {
   if ($('#pc-ips').innerHTML !== ips) $('#pc-ips').innerHTML = ips || '<span class="dim">—</span>';
 }
 
+// ── Control remoto: el usuario decide; mientras dura, la barra naranja lo recuerda y deja cortar ──
+let rAsk = null, rT = null;
+function remoteAsk(r) {
+  if (rAsk === r.id || S.remote) return; // Kitty pregunta cada 8 s: la misma petición no se enseña dos veces
+  rAsk = r.id; let left = 60;
+  $('#rmt-t').textContent = `${r.who} (IT) quiere conectarse a este equipo`;
+  const tick = () => { $('#rmt-c').textContent = `Si no respondes, se rechaza sola en ${left} s`; if (left-- <= 0) remoteAnswer(false); };
+  clearInterval(rT); tick(); rT = setInterval(tick, 1000);
+  $('#rmt').hidden = false; setTimeout(() => $('#rmt-ok').focus(), 60);
+}
+function remoteAnswer(ok) {
+  clearInterval(rT); $('#rmt').hidden = true;
+  toRust({op: 'remote-answer', id: rAsk, ok});
+  if (!ok) rAsk = null;
+}
+function remoteOn(r) { S.remote = true; $('#rmt-on-t').textContent = `${r.who} (IT) está viendo y usando este equipo`; $('#rmt-on').hidden = false; }
+function remoteOff(r) {
+  S.remote = false; rAsk = null; $('#rmt').hidden = true;
+  $('#rmt-on-t').textContent = r.why; $('#rmt-stop').hidden = true; $('#rmt-on').hidden = false;
+  setTimeout(() => { if (!S.remote) { $('#rmt-on').hidden = true; $('#rmt-stop').hidden = false; } }, 6000);
+}
+$('#rmt-ok').onclick = () => remoteAnswer(true);
+$('#rmt-no').onclick = () => remoteAnswer(false);
+$('#rmt-stop').onclick = () => toRust({op: 'remote-stop'});
+$('#rmt').onkeydown = e => { if (e.key === 'Escape') remoteAnswer(false); };
+
+// ── Cerrar Kitty: con un administrador de catlan ──
+const quitClose = () => { $('#qt').hidden = true; $('#qt-p').value = ''; $('#qt-c').value = ''; $('#qt-e').innerHTML = ''; };
+$('#qt-no').onclick = quitClose;
+$('#qt').onkeydown = e => { if (e.key === 'Escape') quitClose(); };
+$('#qt').onsubmit = e => {
+  e.preventDefault();
+  $('#qt-ok').disabled = true; $('#qt-e').innerHTML = '';
+  toRust({op: 'quit', name: $('#qt-n').value.trim(), pass: $('#qt-p').value, code: $('#qt-c').value.trim()});
+};
+function quitErr(r) {
+  $('#qt-ok').disabled = false;
+  if (r.body && r.body.totp) { $('#qt-cf').hidden = false; $('#qt-c').focus(); }
+  $('#qt-e').innerHTML = `<div class="err">${ui('alert', 16)}<span>${esc(r.status === 0 ? 'No llego a catlan: sin conexión no se puede cerrar Kitty.' : r.body && r.body.error || 'No se ha podido comprobar.')}</span></div>`;
+}
+
 // ── Lo que llama Kitty desde Rust ──
 window.kitty = {
   init(c) {
     S.configured = c.configured;
     $('#pcname').textContent = c.name;
     $('#pc-srv').textContent = c.server || '—';
-    if (!c.configured) { S.state = 'unconfigured'; setConn(); renderMine(); return; }
+    if (!c.configured) { S.state = 'unconfigured'; J.busy = 'find'; setConn(); renderMine(); toRust({op: 'find'}); return; }
     loadMine();
   },
-  stats, mine, sent,
+  conn(r) {
+    const was = S.state;
+    S.state = stateFrom(r); setConn();
+    if (S.state === 'ok' && was !== 'ok') loadMine(); // vuelve la conexión o lo acaban de aceptar: al día ya
+  },
+  askQuit() { quitClose(); $('#qt-cf').hidden = true; $('#qt-ok').disabled = false; $('#qt').hidden = false; setTimeout(() => $('#qt-n').focus(), 60); },
+  quitErr, stats, mine, sent, remoteAsk, remoteOn, remoteOff, found, joined,
   shown() {
     const v = $('#v-' + S.view); v.classList.remove('in'); void v.offsetWidth; v.classList.add('in');
     if (S.configured) loadMine();
     if (S.view === 'avisar' && !$('#title').disabled) setTimeout(() => $('#title').focus(), 80);
   },
 };
-setInterval(() => { if (S.configured && !document.hidden) loadMine(); }, 60000);
+setInterval(() => { if (S.configured && !document.hidden) loadMine(); }, 10000);
 document.querySelectorAll('.seg').forEach(seg);
 setConn();
 toRust({op: 'ready'});
