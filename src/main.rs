@@ -8,6 +8,7 @@ mod monitor;
 mod remote;
 mod server;
 mod snmp;
+mod sso;
 mod update;
 mod util;
 mod validate;
