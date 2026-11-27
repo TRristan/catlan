@@ -23,13 +23,13 @@ pub fn ping(host: &str) -> (bool, Option<f64>) {
     } else {
         cmd.args(["-c", "1", "-W", "1", host]);
     }
-    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // sin ventana de consola
     }
-    let Ok(mut child) = cmd.spawn() else { return (false, None) };
+    let Ok(mut child) = cmd.spawn() else { return tcp_ping(host) }; // sin comando ping (contenedor mínimo)
     let t0 = Instant::now();
     let ok = loop {
         match child.try_wait() {
@@ -46,11 +46,37 @@ pub fn ping(host: &str) -> (bool, Option<f64>) {
     if let Some(mut s) = child.stdout.take() {
         let _ = s.read_to_end(&mut raw);
     }
+    let mut err = vec![];
+    if let Some(mut s) = child.stderr.take() {
+        let _ = s.read_to_end(&mut err);
+    }
+    if !ok && re!(r"(?i)permi|socket|not found|no se encuentra").is_match(&String::from_utf8_lossy(&err)) {
+        return tcp_ping(host); // ping sin permiso para ICMP: mejor TCP que dar el equipo por caído
+    }
     let out = String::from_utf8_lossy(&raw);
     let m = re!(r"(?i)(?:time|tiempo)\s*[=<]\s*([\d.,]+)").captures(&out); // Windows en español: «tiempo=3ms»
     // Windows da código 0 también con «host inaccesible»: hace falta TTL o un tiempo (IPv6 no muestra TTL)
     let up = ok && (m.is_some() || out.to_lowercase().contains("ttl="));
     (up, if up { m.and_then(|m| m[1].replace(',', ".").parse().ok()) } else { None })
+}
+
+/// Sin ICMP: responde si algún puerto habitual acepta o rechaza la conexión (rechazar también es estar encendido).
+fn tcp_ping(host: &str) -> (bool, Option<f64>) {
+    let t0 = Instant::now();
+    let Some(ip) = (host, 0).to_socket_addrs().ok().and_then(|mut a| a.next()).map(|a| a.ip()) else { return (false, None) };
+    let up = std::thread::scope(|s| {
+        let hs: Vec<_> = [80u16, 443, 22, 445, 3389, 53]
+            .iter()
+            .map(|&p| {
+                s.spawn(move || match TcpStream::connect_timeout(&(ip, p).into(), Duration::from_secs(1)) {
+                    Ok(_) => true,
+                    Err(e) => e.kind() == std::io::ErrorKind::ConnectionRefused,
+                })
+            })
+            .collect();
+        hs.into_iter().any(|h| h.join().unwrap_or(false))
+    });
+    (up, up.then(|| ms(t0)))
 }
 
 pub const CHECK_KINDS: &[&str] = &["ping", "tcp", "http", "ssl", "dns"];
@@ -640,8 +666,16 @@ pub fn monitor_health() -> Value {
     json!({"age": (now() - m.beat) as i64, "error": m.error, "error_ago": m.error_at.map(|t| (now() - t) as i64)})
 }
 
+/// El monitor, vigilado: si su hilo muere (un pánico fuera de `guarded`), se anota y vuelve a arrancar solo.
 pub fn start_monitor() {
-    let t = std::thread::spawn(monitor);
+    let t = std::thread::spawn(|| {
+        loop {
+            if let Err(p) = std::thread::spawn(monitor).join() {
+                mon_error(format!("el monitor se paró ({}); vuelve a arrancar", panic_msg(&*p)));
+            }
+            std::thread::sleep(Duration::from_secs(5));
+        }
+    });
     lock(&MON).thread = Some(t);
 }
 
@@ -708,19 +742,42 @@ fn monitor_round(pool: &Pool, n: u64) -> Result<()> {
         daily_backup()?;
     }
     if n % 1800 == 0 {
-        // en bruto, 7 días; lo de antes ya está resumido por horas
-        q("DELETE FROM pings WHERE ts < datetime('now', '-7 days')", p![])?;
-        q("DELETE FROM metrics WHERE ts < datetime('now', '-7 days')", p![])?;
-        q("DELETE FROM syslog WHERE ts < datetime('now', '-30 days')", p![])?;
-        q(&format!("DELETE FROM pings_h WHERE hour < datetime('now', '-{KEEP_DAYS} days')"), p![])?;
-        q(&format!("DELETE FROM metrics_h WHERE hour < datetime('now', '-{KEEP_DAYS} days')"), p![])?;
+        // en bruto, unos días; lo de antes ya está resumido por horas (días: Opciones → Salud de catlan)
+        let r = retention();
+        let d = |k: &str| r[k].as_i64().unwrap_or(1);
+        q("DELETE FROM pings WHERE ts < datetime('now', ?)", p![format!("-{} days", d("raw"))])?;
+        q("DELETE FROM metrics WHERE ts < datetime('now', ?)", p![format!("-{} days", d("raw"))])?;
+        q("DELETE FROM syslog WHERE ts < datetime('now', ?)", p![format!("-{} days", d("syslog"))])?;
+        q("DELETE FROM pings_h WHERE hour < datetime('now', ?)", p![format!("-{} days", d("hours"))])?;
+        q("DELETE FROM metrics_h WHERE hour < datetime('now', ?)", p![format!("-{} days", d("hours"))])?;
+        lock(writer()).execute_batch("PRAGMA optimize")?; // tras borrar mucho, que SQLite revise sus estadísticas
     }
     Ok(())
 }
 
-/// Resúmenes por hora: más de un año, para comparar con el mismo mes del año anterior.
+/// Días que se guarda cada cosa: (clave, por defecto, mínimo, máximo). Por horas, más de un año por defecto, para
+/// comparar con el mismo mes del año anterior.
+const RETENTION: [(&str, i64, i64, i64); 3] = [("raw", 7, 1, 90), ("syslog", 30, 1, 365), ("hours", KEEP_DAYS, 30, 1000)];
 pub const KEEP_DAYS: i64 = 400;
-pub const MAX_HOURS: i64 = 24 * KEEP_DAYS;
+pub const MAX_HOURS: i64 = 24 * 1000;
+
+pub fn retention() -> Value {
+    let saved = val("SELECT v FROM meta WHERE k='retention'", p![]).ok().and_then(|v| v.as_str().and_then(|s| serde_json::from_str::<Value>(s).ok())).unwrap_or_default();
+    RETENTION.iter().map(|&(k, def, lo, hi)| (k.to_string(), json!(saved[k].as_i64().unwrap_or(def).clamp(lo, hi)))).collect::<Map<_, _>>().into()
+}
+
+pub fn set_retention(b: &Value) -> Result<Value> {
+    let mut v = retention();
+    for &(k, _, lo, hi) in &RETENTION {
+        match b.get(k) {
+            None => {}
+            Some(x) if x.as_i64().is_some_and(|n| (lo..=hi).contains(&n)) => v[k] = x.clone(),
+            Some(_) => return bad(format!("{k}: entre {lo} y {hi} días")),
+        }
+    }
+    q("INSERT OR REPLACE INTO meta(k, v) VALUES('retention', ?)", p![v.to_string()])?;
+    Ok(v)
+}
 
 /// Resume por horas (media, mínimo y máximo) las horas ya cerradas. Empieza en la última hora resumida
 /// y la rehace, así que no importa haber estado apagado ni que una hora se resumiera a medias.
@@ -900,7 +957,7 @@ pub fn system_health() -> Result<Value> {
     }
     Ok(json!({"version": crate::config::VERSION, "schema": crate::db::user_version()?, "db_bytes": size(db_path()),
         "wal_bytes": size(DATA.join("catlan.db-wal")), "integrity": crate::db::INTEGRITY.get(), "started": *STARTED, "backups": bk,
-        "monitor": monitor_health(), "late": late, "syslog": *SYSLOG_PORT, "https": crate::server::TLS.get().map_or("", |t| t.pin.as_str()), "counts": counts}))
+        "monitor": monitor_health(), "late": late, "syslog": *SYSLOG_PORT, "https": crate::server::TLS.get().map_or("", |t| t.pin.as_str()), "rejected": crate::server::REJECTED.load(std::sync::atomic::Ordering::Relaxed), "counts": counts}))
 }
 
 /// Nunca salen por la API ni al historial.

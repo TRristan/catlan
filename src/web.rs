@@ -528,6 +528,19 @@ impl Ctx<'_> {
             ("log", "POST") if rid.is_some() && parts.len() == 4 && sub == Some("undo") => {
                 return self.undo(rid.unwrap_or("").parse().map_err(|_| Bad("id no válido".into()))?);
             }
+            ("retention", _) => {
+                // cuántos días se guarda cada cosa: verlo, todos; cambiarlo, los administradores
+                return Ok(match m {
+                    "GET" => js(200, monitor::retention()),
+                    "PUT" if self.admin => {
+                        let v = monitor::set_retention(&self.body()?)?;
+                        self.log("editar", "retention", 0, "cuánto se guarda", &v)?;
+                        js(200, v)
+                    }
+                    "PUT" => err(403, "solo para administradores"),
+                    _ => err(405, "método no permitido"),
+                });
+            }
             ("update", _) => {
                 // actualizar catlan desde GitHub: solo administradores
                 if !self.admin {

@@ -1,4 +1,5 @@
 //! catlan: el gato amigo de los IT. Wiki + inventario + esquemas + racks + monitor, en un solo ejecutable.
+#![allow(clippy::type_complexity)] // tuplas en cachés y tablas pequeñas: más claras aquí que con alias
 mod config;
 mod crypto;
 mod db;

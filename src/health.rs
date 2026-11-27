@@ -1024,7 +1024,7 @@ mod tests {
         let out = limits(&src, vec![m("temp:Disk 2", "Disk 2", 71.0, "°C"), m("disk:C:", "C:", 95.004, "%")], &mut probs);
         assert_eq!(out[1].2, 95.0);
         assert_eq!(probs, ["Disk 2: 71 °C (límite 65)", "C: 95 % lleno (límite 90 %)"]);
-        assert_eq!(natural("Gi1/0/2") < natural("Gi1/0/10"), true);
+        assert!(natural("Gi1/0/2") < natural("Gi1/0/10"));
         assert_eq!(size_bytes("1.80 TB"), Some(1.8 * 1024f64.powi(4)));
     }
 }

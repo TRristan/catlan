@@ -105,9 +105,7 @@ pub fn find() -> Option<String> {
     if probe("https://catlan:8080").is_some() {
         return Some("https://catlan:8080".into());
     }
-    let mut nets: Vec<[u8; 3]> = sysinfo::Networks::new_with_refreshed_list()
-        .iter()
-        .flat_map(|(_, n)| n.ip_networks().iter().map(|i| i.addr))
+    let mut nets: Vec<[u8; 3]> = sysinfo::Networks::new_with_refreshed_list().values().flat_map(|n| n.ip_networks().iter().map(|i| i.addr))
         .filter_map(|a| match a {
             IpAddr::V4(v) if v.is_private() => Some([v.octets()[0], v.octets()[1], v.octets()[2]]),
             _ => None,

@@ -20,9 +20,7 @@ fn disks() -> Vec<Value> {
 }
 
 fn ips() -> Vec<String> {
-    let mut out: Vec<String> = Networks::new_with_refreshed_list()
-        .iter()
-        .flat_map(|(_, n)| n.ip_networks().iter().map(|i| i.addr))
+    let mut out: Vec<String> = Networks::new_with_refreshed_list().values().flat_map(|n| n.ip_networks().iter().map(|i| i.addr))
         .filter(|a| !a.is_loopback() && !a.is_unspecified() && !matches!(a, std::net::IpAddr::V6(v) if (v.segments()[0] & 0xffc0) == 0xfe80))
         .map(|a| a.to_string())
         .collect();

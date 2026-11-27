@@ -70,7 +70,21 @@ fn reason(code: u16) -> &'static str {
 }
 
 const MAX_CONNS: usize = 512;
+/// Por IP (sin contar los proxies): un solo equipo con conexiones lentas (slowloris) no se queda con todas.
+const MAX_PER_IP: usize = 64;
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
+/// Conexiones rechazadas por estar lleno, para Salud de catlan.
+pub static REJECTED: AtomicUsize = AtomicUsize::new(0);
+static PER_IP: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<IpAddr, usize>>> = std::sync::LazyLock::new(Default::default);
+/// Lo que puede tardar en llegar la petición entera (sin cuerpo): una conexión que habla gota a gota no retiene su hilo.
+const HEAD_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// 503 sin leer nada: se escribe en el búfer del socket recién aceptado, no bloquea.
+fn busy(mut s: TcpStream) {
+    REJECTED.fetch_add(1, Ordering::Relaxed);
+    let _ = s.set_write_timeout(Some(Duration::from_millis(200)));
+    let _ = s.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nRetry-After: 5\r\nConnection: close\r\n\r\n");
+}
 
 /// El certificado que sirve catlan. pin y spki solo si es el autofirmado (con uno del admin, la CA ya lo garantiza):
 /// pin = sha256 del certificado en hexadecimal (PowerShell y Kitty), spki = sha256 de su clave pública en base64 (curl).
@@ -128,14 +142,36 @@ pub fn serve(handler: fn(&Req) -> Resp) -> anyhow::Result<()> {
     let listener = TcpListener::bind(("0.0.0.0", *PORT))?;
     for s in listener.incoming() {
         let Ok(s) = s else { continue };
+        let Ok(peer) = s.peer_addr().map(|a| a.ip().to_canonical()) else { continue };
+        let limited = !PROXIES.contains(&peer);
         if ACTIVE.load(Ordering::Relaxed) >= MAX_CONNS {
-            continue; // inundación: se cierra sin más
+            busy(s);
+            continue;
+        }
+        if limited {
+            let mut m = crate::util::lock(&PER_IP);
+            let n = m.entry(peer).or_insert(0);
+            if *n >= MAX_PER_IP {
+                drop(m);
+                busy(s);
+                continue;
+            }
+            *n += 1;
         }
         ACTIVE.fetch_add(1, Ordering::Relaxed);
         let cfg = tls.cfg.clone();
         std::thread::spawn(move || {
             let _ = conn(s, cfg, handler); // escáneres y navegadores que rechazan el certificado: sin traza en la consola
             ACTIVE.fetch_sub(1, Ordering::Relaxed);
+            if limited {
+                let mut m = crate::util::lock(&PER_IP);
+                if let Some(n) = m.get_mut(&peer) {
+                    *n -= 1;
+                    if *n == 0 {
+                        m.remove(&peer);
+                    }
+                }
+            }
         });
     }
     Ok(())
@@ -143,7 +179,7 @@ pub fn serve(handler: fn(&Req) -> Resp) -> anyhow::Result<()> {
 
 fn conn(s: TcpStream, cfg: Arc<rustls::ServerConfig>, handler: fn(&Req) -> Resp) -> io::Result<()> {
     // una conexión que no habla (ni termina el saludo TLS) suelta su hilo
-    s.set_read_timeout(Some(Duration::from_secs(60)))?;
+    s.set_read_timeout(Some(HEAD_TIMEOUT))?; // cada lectura; el total de las cabeceras, en one()
     s.set_write_timeout(Some(Duration::from_secs(60)))?;
     let peer = s.peer_addr()?.ip().to_canonical();
     let mut first = [0u8; 1];
@@ -208,7 +244,11 @@ fn one(st: &mut (impl Read + Write), peer: IpAddr, enc: bool, handler: fn(&Req) 
     let hsts = enc && TLS.get().is_some_and(|t| t.pin.is_empty());
     let mut buf = Vec::with_capacity(8192);
     let mut tmp = [0u8; 8192];
+    let t0 = std::time::Instant::now();
     let (len, method, path, headers) = loop {
+        if t0.elapsed() > HEAD_TIMEOUT {
+            return Ok(()); // cabeceras gota a gota: fuera
+        }
         let n = st.read(&mut tmp)?;
         if n == 0 {
             return Ok(());

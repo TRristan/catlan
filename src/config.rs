@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
-pub const VERSION: &str = "1.0";
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const MAX_BODY: usize = 20 * 1024 * 1024;
 
 fn env(k: &str) -> String {

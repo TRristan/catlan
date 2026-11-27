@@ -219,7 +219,7 @@ dependencies = [
 
 [[package]]
 name = "catlan"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "aes",
  "anyhow",
@@ -1510,7 +1510,7 @@ dependencies = [
 
 [[package]]
 name = "kitty"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "jpeg-encoder",
  "rustls",
