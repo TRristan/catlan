@@ -182,7 +182,7 @@ ventana: conserva la ficha del equipo.
 </picture>
 </p>
 
-`irm http://tu-catlan:8080/kitty.ps1 | iex` (PowerShell como administrador) instala **Kitty**, un programa pequeño
+El comando de **Inventario → Añadir con Kitty** (Windows PowerShell como administrador) instala **Kitty**, un programa pequeño
 (`kitty.exe`, unos 3,5 MB, en `Archivos de programa\Kitty`) que reparte el propio catlan:
 
 - **Cada 15 segundos**, `kitty servicio` (una tarea programada que arranca con el PC, como SYSTEM) envía **solo** nombre, sistema,
@@ -214,7 +214,7 @@ Unregister-ScheduledTask Kitty -Confirm:$false; Stop-Process -Name kitty -Force;
 
 catlan reparte `kitty.exe` si está **junto a su ejecutable** o en su carpeta de datos (en Docker, en `/data`).
 
-En **Linux** (con curl), `curl -fsSL http://tu-catlan:8080/kitty.sh | sudo sh` deja un temporizador de systemd (o cron)
+En **Linux** (con curl), el comando `curl … /kitty.sh | sudo sh` de la misma ventana deja un temporizador de systemd (o cron)
 que envía lo mismo **cada 5 minutos**, con los errores y críticos del journal (sin ventana ni control remoto). Para quitarlo:
 `sudo sh /usr/local/lib/kitty-agent.sh quitar`.
 
@@ -228,8 +228,13 @@ que envía lo mismo **cada 5 minutos**, con los errores y críticos del journal 
   entra por Basic; si pierde el móvil, un administrador se la quita.
 - Las credenciales de SNMP y de los avisos nunca salen por la web. Van en la copia de seguridad, por eso la copia que
   baja la web **va cifrada con una contraseña** (PBKDF2 + SHAKE-256 + HMAC-SHA256).
-- **HTTPS propio** opcional con `CATLAN_CERT` y `CATLAN_KEY`; o, si catlan sale de tu red local, detrás de un proxy con
-  HTTPS (Caddy, nginx, Traefik). Con un certificado autofirmado, Kitty no conecta hasta que el PC confíe en él.
+- **HTTPS siempre**: sin `CATLAN_CERT`, catlan crea un certificado autofirmado en `data/tls.pem` y escribe su huella
+  SHA-256 al arrancar (y en **Salud de catlan**). El comando de instalación de Kitty lleva esa huella: PowerShell, curl y
+  Kitty solo hablan con ese certificado, y el instalador comprueba el SHA-256 de `kitty.exe` antes de ponerlo. En claro
+  (HTTP) solo responde al propio equipo, a los proxies de `CATLAN_PROXIES` y a la telemetría de las Kitty instaladas
+  antes; la web redirige a https, y sin cifrar no hay login, control remoto ni actualizaciones de Kitty.
+  **Las Kitty de antes siguen enviando el estado, pero hay que reinstalarlas** (mismo comando) para el control remoto,
+  las actualizaciones y el anclaje.
 
 ## Actualizar catlan
 
@@ -257,7 +262,8 @@ Todo se configura desde la web. Opcionalmente, con variables de entorno:
 | `CATLAN_DATA` | `data/` junto al ejecutable | Carpeta de la base de datos |
 | `CATLAN_PASSWORD` | (vacío) | Contraseña inicial de `admin`. Vacía: `admin`, a cambiar al entrar |
 | `CATLAN_SYSLOG_PORT` | `514` | Puerto UDP del receptor de syslog (`0`: sin syslog; en Linux, 514 necesita root o `CAP_NET_BIND_SERVICE`) |
-| `CATLAN_CERT` · `CATLAN_KEY` | (vacío) | Rutas del certificado y su clave (PEM): catlan sirve HTTPS en `CATLAN_PORT` |
+| `CATLAN_CERT` · `CATLAN_KEY` | (vacío) | Certificado y clave propios (PEM). Vacío: autofirmado en `data/tls.pem` |
+| `CATLAN_PROXIES` | `127.0.0.1,::1` | Proxies de confianza: solo de ellos se cree `X-Forwarded-For` y `X-Forwarded-Proto` |
 | `CATLAN_SMTP_HOST` · `_PORT` · `_USER` · `_PASS` | (vacío) · `587` | Correo de avisos (465 = SSL directo). Lo de **Opciones → Avisos** manda sobre esto |
 | `CATLAN_MAIL_FROM` · `CATLAN_MAIL_TO` | (vacío) | Remitente y destinatarios (separados por comas) |
 | `CATLAN_TELEGRAM_TOKEN` · `CATLAN_TELEGRAM_CHAT` | (vacío) | Avisos por Telegram |

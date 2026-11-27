@@ -363,7 +363,7 @@ function joinBox() {
   const busy = J.busy === 'find' ? 'Buscando catlan en la red…' : J.busy === 'join' ? 'Instalando… acepta el permiso de Windows' : '';
   $('#gate').insertAdjacentHTML('beforeend', `<div class="fields" style="margin-top:14px">
     <div class="field"><label for="srv">Dirección de catlan</label>
-      <input id="srv" class="mono" placeholder="http://catlan:8080" value="${esc(J.url)}" ${J.busy ? 'disabled' : ''}></div>
+      <input id="srv" class="mono" placeholder="https://catlan:8080" value="${esc(J.url)}" ${J.busy ? 'disabled' : ''}></div>
     ${J.err ? `<div class="err">${ui('alert', 16)}<span>${esc(J.err)}</span></div>` : ''}
     <button class="btn pri wide" id="join" ${J.busy ? 'disabled' : ''}>${J.busy ? `<span class="spin"></span><span>${busy}</span>` : `${ui('pc', 17)}<span>Conectar este PC</span>`}</button></div>`);
   $('#srv').oninput = e => { J.url = e.target.value; };

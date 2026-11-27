@@ -30,11 +30,15 @@ pub fn installed() -> Option<PathBuf> {
 
 /// ¿Hay un Kitty nuevo en catlan? Lo instala y devuelve true: el servicio sale y la tarea programada lo vuelve a lanzar.
 pub fn check(url: &str) -> Result<bool, String> {
+    if !url.starts_with("https://") {
+        return Ok(false); // en claro, cualquiera en la red podría colar otro kitty.exe: se reinstala desde catlan
+    }
     let Some(me) = installed() else {
         return Ok(false);
     };
     let _ = std::fs::remove_file(me.with_extension("exe.viejo")); // el de la actualización anterior, ya sin usar
-    let v: Value = ureq::get(&format!("{url}/kitty.json"))
+    let v: Value = crate::net::agent()
+        .get(&format!("{url}/kitty.json"))
         .timeout(Duration::from_secs(10))
         .call()
         .map_err(|e| e.to_string())?
@@ -48,7 +52,8 @@ pub fn check(url: &str) -> Result<bool, String> {
     }
     let mut b = Vec::new();
     use std::io::Read;
-    ureq::get(&format!("{url}/kitty.exe"))
+    crate::net::agent()
+        .get(&format!("{url}/kitty.exe"))
         .timeout(Duration::from_secs(120))
         .call()
         .map_err(|e| e.to_string())?

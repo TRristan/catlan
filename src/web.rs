@@ -1,5 +1,5 @@
 //! La API y la página: sesiones, permisos, CRUD con historial y todo lo demás. Misma API que la versión en Python.
-use crate::config::{CERT, COOKIE, DATA, scheme};
+use crate::config::{COOKIE, DATA, scheme};
 use crate::crypto::{pw_hash, pw_ok, seal, sha256_hex, token_hex, token_urlsafe, totp_ok};
 use crate::db::{self, SqlV, is_constraint, q, val};
 use crate::health;
@@ -124,21 +124,39 @@ fn kitty_hash() -> String {
     c.1.clone()
 }
 
-/// Fallos de login recientes por IP: 10 en 15 minutos y esa IP espera.
+/// Fallos de login recientes por IP («u:nombre» por usuario): 10 en 15 minutos y esa IP espera.
 static FAILS: LazyLock<Mutex<HashMap<String, Vec<f64>>>> = LazyLock::new(Default::default);
-/// (nombre, sha256 de la contraseña) -> (id, hash): con Basic no se repite PBKDF2 en cada petición.
-static BASIC: LazyLock<Mutex<HashMap<(String, String), (i64, String)>>> = LazyLock::new(Default::default);
+/// (nombre, HMAC de la contraseña con una clave de este proceso) -> (id, hash, caduca): con Basic no se repite PBKDF2
+/// en cada petición. Sin la clave, lo que hay en memoria no sirve para probar contraseñas.
+type BasicCache = HashMap<(String, String), (i64, String, f64)>; // (nombre, hmac) -> (id, hash, caduca)
+static BASIC: LazyLock<Mutex<BasicCache>> = LazyLock::new(Default::default);
+static BASIC_KEY: LazyLock<Vec<u8>> = LazyLock::new(|| crate::crypto::rand_bytes(32));
+const BASIC_TTL: f64 = 600.0;
+/// Por usuario, más alto que por IP: frena a quien prueba desde muchas IPs sin que un solo atacante bloquee a nadie.
+const USER_FAILS: usize = 30;
 
-fn throttled(ip: &str) -> bool {
+fn recent(key: &str) -> usize {
     let mut f = lock(&FAILS);
-    let v = f.entry(ip.to_string()).or_default();
     let t = now() - 900.0;
+    let Some(v) = f.get_mut(key) else { return 0 };
     v.retain(|x| *x > t);
-    v.len() >= 10
+    v.len()
 }
 
-fn failed(ip: &str) {
-    lock(&FAILS).entry(ip.to_string()).or_default().push(now());
+fn throttled(ip: &str) -> bool {
+    recent(ip) >= 10
+}
+
+fn failed(key: &str) {
+    let mut f = lock(&FAILS);
+    let t = now() - 900.0;
+    if f.len() > 1000 {
+        f.retain(|_, v| {
+            v.retain(|x| *x > t);
+            !v.is_empty()
+        }); // muchas IPs distintas: fuera las que ya no cuentan
+    }
+    f.entry(key.to_string()).or_default().push(now());
 }
 
 enum Login {
@@ -149,21 +167,27 @@ enum Login {
 
 /// Por Basic no hay código: quien tiene 2FA no entra por Basic (para scripts, un usuario sin 2FA).
 fn login_ok(name: &str, pw: &str, code: &str) -> Result<Login> {
-    let key = (name.to_lowercase(), sha256_hex(pw));
+    let who = format!("u:{}", name.to_lowercase());
+    if recent(&who) >= USER_FAILS {
+        return Ok(Login::No);
+    }
+    let key = (name.to_lowercase(), crate::crypto::hex(&crate::crypto::hmac_sha256(&BASIC_KEY, pw.as_bytes())));
     let Some(u) = q("SELECT id, hash, totp FROM users WHERE name=?", p![name])?.one() else { return Ok(Login::No) };
     let (id, hash, totp) = (u.i("id").unwrap_or(0), u.s("hash").to_string(), u.s("totp").to_string());
     let code_ok = || if totp_ok(&totp, code) { Login::Ok(id) } else { Login::NeedCode };
     // La caché solo vale si el hash guardado sigue siendo el mismo: otro proceso (catlan restablecer) puede haberlo cambiado
-    let cached = lock(&BASIC).get(&key) == Some(&(id, hash.clone()));
+    let t = now();
+    let cached = lock(&BASIC).get(&key).is_some_and(|(i, h, exp)| *i == id && *h == hash && *exp > t);
     if !cached {
-        lock(&BASIC).remove(&key);
+        lock(&BASIC).retain(|k, (_, _, exp)| *k != key && *exp > t);
         if !pw_ok(pw, &hash) {
+            failed(&who);
             return Ok(Login::No);
         }
         if !totp.is_empty() {
             return Ok(code_ok()); // sin caché: cada vez, su código
         }
-        lock(&BASIC).insert(key, (id, hash));
+        lock(&BASIC).insert(key, (id, hash, t + BASIC_TTL));
     } else if !totp.is_empty() {
         // activó la 2FA en otro proceso después de entrar por aquí
         lock(&BASIC).remove(&key);
@@ -288,6 +312,31 @@ impl Ctx<'_> {
         Ok(Some(err(401, "inicia sesión")))
     }
 
+    /// La huella del certificado autofirmado para anclarlo, si el cliente habla directamente con catlan.
+    fn pins(&self) -> (&'static str, &'static str) {
+        match crate::server::TLS.get() {
+            Some(t) if !self.req.proxied => (t.pin.as_str(), t.spki.as_str()),
+            _ => ("", ""),
+        }
+    }
+
+    /// HTTP en claro desde la red (no desde este equipo): solo lo que mandan las Kitty instaladas antes del HTTPS.
+    /// Nada de contraseñas, sesiones, pantalla ni teclas en claro. La página redirige a https.
+    fn plain(&self, m: &str, parts: &[String], api: bool, rest: &[&str], full: &str) -> Option<Resp> {
+        let legacy_kitty = api && rest.first() == Some(&"agent") && !matches!(rest.get(1), Some(&"remote" | &"quit"));
+        if legacy_kitty || parts == ["kitty.json"] || parts == ["kitty.exe"] {
+            return None;
+        }
+        let host = self.req.header("host");
+        let again = "Kitty ya no se instala por http: copia el comando nuevo de catlan (Inventario → Añadir con Kitty).";
+        Some(match parts.first().map(String::as_str) {
+            Some("kitty.ps1") => Resp::new(200, format!("throw '{again}'").into_bytes(), "text/plain; charset=utf-8"),
+            Some("kitty.sh") => Resp::new(200, format!("echo '{again}' >&2; exit 1\n").into_bytes(), "text/plain; charset=utf-8"),
+            _ if !api && m == "GET" && host_ok(host) => Resp::new(301, vec![], "text/plain").header("Location", format!("https://{host}{full}")),
+            _ => err(403, &format!("conéctate por https://{}", if host_ok(host) { host } else { "catlan" })),
+        })
+    }
+
     fn route(&mut self) -> Resp {
         let m = self.req.method.clone();
         // Escrituras desde otra web (CSRF): el navegador pone Origin; si no es este servidor, fuera.
@@ -297,11 +346,20 @@ impl Ctx<'_> {
                 return err(403, "origen no permitido");
             }
         }
+        // Sin Origin: un navegador moderno dice igualmente de dónde viene la petición. Scripts y Kitty no mandan ninguna.
+        if m != "GET" && !matches!(self.req.header("sec-fetch-site"), "" | "same-origin" | "none") {
+            return err(403, "origen no permitido");
+        }
         let full = self.req.path.split('#').next().unwrap_or("").to_string();
         let (path, query) = full.split_once('?').unwrap_or((&full, ""));
         let parts: Vec<String> = path.split('/').filter(|p| !p.is_empty()).map(String::from).collect();
         let api = parts.first().is_some_and(|p| p == "api");
         let rest: Vec<&str> = parts.iter().skip(1).map(String::as_str).collect();
+        if !self.req.secure {
+            if let Some(r) = self.plain(&m, &parts, api, &rest, &full) {
+                return r;
+            }
+        }
         let free = !api || m == "POST" && (rest == ["login"] || rest.first() == Some(&"agent") && (rest.len() <= 2 || rest.get(1) == Some(&"remote"))); // la página, el login y Kitty, sin sesión
         let own = api && rest.first() == Some(&"tasks"); // el tablero personal no toca nada común: también para los de solo vista
         let pending = api && (rest.first() == Some(&"logout") || [&["me"][..], &["me", "password"]].contains(&&rest[..rest.len().min(2)])); // con contraseña provisional
@@ -332,6 +390,9 @@ impl Ctx<'_> {
     fn dispatch(&mut self, m: &str, parts: &[String], query: &str) -> Result<Resp> {
         let at = |i: usize| parts.get(i).map(String::as_str);
         if parts == ["kitty.exe"] && m == "GET" {
+            if !self.req.secure {
+                return Ok(err(403, "kitty.exe solo se reparte por https")); // en claro, cualquiera en la red lo cambiaría por otro
+            }
             return Ok(match kitty_exe().map(std::fs::read) {
                 Some(Ok(b)) => Resp::new(200, b, "application/vnd.microsoft.portable-executable").header("Content-Disposition", "attachment; filename=\"kitty.exe\""),
                 _ => Resp::new(404, "catlan no tiene kitty.exe: ponlo junto al ejecutable de catlan o en su carpeta de datos".as_bytes().to_vec(), "text/plain; charset=utf-8"),
@@ -340,7 +401,11 @@ impl Ctx<'_> {
         if parts == ["kitty.json"] && m == "GET" {
             // Kitty sin instalar busca catlan en la red: así sabe que aquí hay uno (sin sesión, solo el id público).
             // «kitty»: el sha256 del kitty.exe que reparte; las Kitty instaladas con otro se actualizan solas
-            return Ok(js(200, json!({"catlan": db::INSTANCE.get().map_or("", |s| s.as_str()), "kitty": kitty_hash()})));
+            // «pin» y «spki»: la huella del certificado autofirmado, para anclarlo (vacías por un proxy o con certificado propio).
+            // En claro no se anuncia ningún kitty.exe: una Kitty antigua no se actualiza por http.
+            let (pin, spki) = self.pins();
+            let hash = if self.req.secure { kitty_hash() } else { String::new() };
+            return Ok(js(200, json!({"catlan": db::INSTANCE.get().map_or("", |s| s.as_str()), "kitty": hash, "pin": pin, "spki": spki})));
         }
         if (parts == ["kitty.ps1"] || parts == ["kitty.sh"]) && m == "GET" {
             // instalador de Kitty (Windows o Linux) con esta dirección y este id, sin sesión
@@ -349,7 +414,13 @@ impl Ctx<'_> {
                 return Ok(Resp::new(400, b"Host no valido".to_vec(), "text/plain; charset=utf-8")); // va dentro de un script que se ejecuta como administrador
             }
             let ps = if parts[0] == "kitty.sh" { KITTY_SH.replace("\r\n", "\n") } else { KITTY_PS1.to_string() }; // un clon de Git en Windows lo deja con CRLF
-            let ps = ps.replace("{{URL}}", &format!("{}://{host}", scheme())).replace("{{ID}}", db::INSTANCE.get().map_or("", |s| s.as_str()));
+            let (pin, spki) = self.pins();
+            let ps = ps
+                .replace("{{URL}}", &format!("{}://{host}", scheme()))
+                .replace("{{ID}}", db::INSTANCE.get().map_or("", |s| s.as_str()))
+                .replace("{{PIN}}", pin)
+                .replace("{{SPKI}}", spki)
+                .replace("{{SHA}}", &kitty_hash().to_uppercase());
             return Ok(Resp::new(200, ps.into_bytes(), "text/plain; charset=utf-8"));
         }
         if at(0) != Some("api") {
@@ -1637,7 +1708,7 @@ impl Ctx<'_> {
             let tok = token_urlsafe(32);
             q("DELETE FROM sessions WHERE expires <= datetime('now')", p![])?;
             q("INSERT INTO sessions(token, user_id, expires) VALUES(?, ?, datetime('now', '+30 days'))", p![sha256_hex(&tok), uid])?;
-            let secure = if CERT.is_empty() { "" } else { "; Secure" };
+            let secure = if self.req.tls { "; Secure" } else { "" };
             return Ok(js(200, me(uid)?).header("Set-Cookie", format!("{}={tok}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000{secure}", *COOKIE)));
         }
         if res == "logout" && m == "POST" {

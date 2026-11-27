@@ -2847,11 +2847,14 @@ const views = {
       }
       $('#add') && ($('#add').onclick = create.item);
       $('#bulk').onclick = itemSeries;
-      $('#addpc') && ($('#addpc').onclick = () => {
-        const cmd = `irm ${location.origin}/kitty.ps1 | iex`, sh = `curl -fsSL ${location.origin}/kitty.sh | sudo sh`;
+      $('#addpc') && ($('#addpc').onclick = async () => {
+        // Por https y, con el certificado autofirmado, anclado a su huella: nadie en la red puede colar otro instalador
+        const k = await fetch('/kitty.json').then(r => r.json()).catch(() => ({})), base = `https://${location.host}`;
+        const tls = `[Net.ServicePointManager]::SecurityProtocol='Tls12';` + (k.pin ? `[Net.ServicePointManager]::ServerCertificateValidationCallback={param($s,$c)[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($c.GetRawCertData())).Replace('-','') -eq '${k.pin}'};` : '');
+        const cmd = `${tls}irm ${base}/kitty.ps1|iex`, sh = k.spki ? `curl -fsSLk --pinnedpubkey 'sha256//${k.spki}' ${base}/kitty.sh | sudo sh` : `curl -fsSL ${base}/kitty.sh | sudo sh`;
         const line = (c, id) => `<div style="display:flex;gap:8px;align-items:center"><code class="mono" style="flex:1;padding:10px 12px;border:1px solid var(--line);border-radius:8px;word-break:break-all">${esc(c)}</code><button type="button" class="btn" id="${id}">${ui('copy', 15)}Copiar</button></div>`;
         dialog(`<h3>Añadir un equipo con Kitty</h3><p><b>Windows</b>: en el PC, <a href="/kitty.exe" download>descarga Kitty</a>, ábrelo y pulsa «Conectar este PC». Busca este catlan en la red, se instala (Windows pide permiso de administrador) y aparece aquí para que lo aceptes. Envía el estado del PC cada minuto y deja en la bandeja un gato para que el usuario avise a IT, sin tener que llamar.</p>
-          <p class="muted small">Para muchos equipos a la vez, lo mismo en PowerShell como administrador:</p>${line(cmd, 'pc-copy')}
+          <p class="muted small">Para muchos equipos a la vez, lo mismo en Windows PowerShell (powershell.exe) como administrador. Va por https${k.pin ? ` y solo acepta este certificado (huella SHA-256 <span class="mono">${esc(k.pin)}</span>: compárala con la del candado del navegador)` : ""}:</p>${line(cmd, 'pc-copy')}
           <p class="muted small">Para quitarlo, en PowerShell como administrador: <span class="mono">Unregister-ScheduledTask Kitty -Confirm:$false; Stop-Process -Name kitty -Force; Remove-ItemProperty HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run Kitty; Remove-Item -Recurse "$env:ProgramFiles\\Kitty", "$env:ProgramData\\Kitty", HKLM:\\SOFTWARE\\Kitty</span></p>
           <p><b>Linux</b> (con curl): pega esta línea en una terminal. Deja un temporizador de systemd (o cron) que envía lo mismo cada 5 minutos.</p>${line(sh, 'sh-copy')}
           <p class="muted small">Para quitarlo: <span class="mono">sudo sh /usr/local/lib/kitty-agent.sh quitar</span>. Después aparecerá aquí, en «Kitty pide entrar», para que lo aceptes.</p>`, {ok: 'Listo'});
@@ -2893,7 +2896,7 @@ const views = {
           ${rel.length ? `<ul class="rel">${rel.map(([ic, h, t, s]) => `<li><a href="${h}"><span class="badge-ic">${ui(ic, 16)}</span><span><b>${esc(t)}</b><small>${s}</small></span></a></li>`).join('')}</ul>`
             : `<p class="muted small">Aún no aparece en ningún sitio. Pega <code class="mono">${ref}</code> en una página o enlázalo desde un esquema o un rack.</p>`}</section>
           <section class="card pad" style="--i:2"><h3 class="card-t">${ui('clock', 15)}Historial <span class="count">${log.length}</span></h3><div class="scroll">${timeline(log)}</div></section></aside></div>
-        ${sys.length ? `<section class="card pad mt"><h3 class="card-t">${ui('pulse', 15)}Syslog <span class="count">${sys.length}</span><span class="dim small" style="font-weight:400;margin-left:auto">últimos 30 días</span></h3>
+        ${sys.length ? `<section class="card pad mt"><h3 class="card-t">${ui('pulse', 15)}Syslog <span class="count">${sys.length}</span><span class="dim small" style="font-weight:400;margin-left:auto" title="Syslog llega por UDP sin firmar: alguien en la red puede mandarlo haciéndose pasar por la IP de este equipo">últimos 30 días · sin verificar</span></h3>
           <div class="scroll" style="max-height:340px"><table class="tbl kv"><tbody>${sys.map(l => `<tr><td class="mono dim small" style="white-space:nowrap">${esc(date(l.ts).toLocaleString('es'))}</td>
             <td>${l.sev <= 3 ? `<span class="pill bad"><i></i>${l.sev <= 2 ? 'crítico' : 'error'}</span>` : l.sev === 4 ? '<span class="pill warn"><i></i>aviso</span>' : ''}</td>
             <td class="mono small" style="word-break:break-word">${esc(l.msg)}</td></tr>`).join('')}</tbody></table></div></section>` : ''}
@@ -2928,7 +2931,7 @@ const views = {
           ${row('Monitor', ok(m.age <= 30, `late (hace ${m.age} s)`, `parado desde hace ${esc(upTxt(m.age))}`) + (m.error ? `<div class="small muted mt">Último error${m.error_ago != null ? ` (hace ${esc(upTxt(m.error_ago))})` : ''}: <span class="mono">${esc(m.error)}</span></div>` : ''))}
           ${row('Comprobaciones atrasadas', h.late ? `<span class="pill warn"><i></i>${h.late}</span> <span class="small muted">llevan más de 3 vueltas sin hacerse</span>` : ok(true, 'ninguna'))}
           ${row('Base de datos', ok(h.integrity === 'ok', 'íntegra', 'con daños: ' + esc(h.integrity)) + ` · ${mb(h.db_bytes)}${h.wal_bytes ? ` + ${mb(h.wal_bytes)} en WAL` : ''}`)}
-          ${row('Syslog', h.syslog ? `UDP ${h.syslog}` : '<span class="dim">apagado</span>')}${row('HTTPS', h.https ? 'propio' : '<span class="dim">no (o detrás de un proxy)</span>')}
+          ${row('Syslog', h.syslog ? `UDP ${h.syslog}` : '<span class="dim">apagado</span>')}${row('HTTPS', h.https ? `autofirmado, huella <span class="mono small" style="word-break:break-all">${esc(h.https)}</span>` : 'con certificado propio')}
           ${Object.entries(h.counts).map(([k, v]) => row({items: 'Equipos', pages: 'Páginas', checks: 'Comprobaciones', sources: 'Fuentes de Salud', incidents: 'Incidencias', log: 'Entradas de Actividad', metrics: 'Lecturas (7 días)', syslog: 'Mensajes de syslog'}[k], v.toLocaleString('es'))).join('')}
         </tbody></table></section>
         <aside class="side-col"><section class="card pad" style="--i:1"><h3 class="card-t">${ui('layers', 15)}Copias diarias <span class="count">${h.backups.length}</span></h3>

@@ -1,5 +1,6 @@
 # Kitty para catlan: instalador. catlan lo sirve en /kitty.ps1 con su dirección y su id ya puestos.
-# En el PC, PowerShell como administrador:   irm http://catlan:8080/kitty.ps1 | iex
+# En el PC, Windows PowerShell como administrador: el comando de catlan (Inventario → Añadir con Kitty). Va por https
+# y, con el certificado autofirmado de catlan, solo acepta ese (su huella va en el comando y aquí, en $Pin).
 # Instala Kitty (kitty.exe, un programa pequeño que sirve el propio catlan) en Archivos de programa y deja:
 #  - una tarea programada (SYSTEM, al arrancar) que envía el estado del PC cada minuto: «kitty servicio»;
 #  - el gato en la bandeja de cada usuario al iniciar sesión, para avisar a IT y ver cómo va el equipo.
@@ -9,12 +10,18 @@ $ErrorActionPreference = 'Stop' # al primer fallo, parar: nada de «instalado» 
 $ProgressPreference = 'SilentlyContinue' # la barra de progreso de PowerShell 5 hace lentísima la descarga
 $Url = '{{URL}}'
 $Catlan = '{{ID}}'
+$Pin = '{{PIN}}' # sha256 del certificado de catlan; vacío si tiene uno propio de una CA
+$Sha = '{{SHA}}' # sha256 del kitty.exe que reparte catlan
 $r = 'HKLM:\SOFTWARE\Kitty'
 $dir = Join-Path $env:ProgramFiles 'Kitty'
 $pub = Join-Path $env:ProgramData 'Kitty'
 $exe = Join-Path $dir 'kitty.exe'
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole('Administrators')) {
     throw "Kitty: abre PowerShell como administrador y vuelve a pegar el comando."
+}
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+if ($Pin) { # el certificado de catlan y ningún otro (es autofirmado: Windows no lo conoce)
+    [Net.ServicePointManager]::ServerCertificateValidationCallback = { param($s, $c) [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($c.GetRawCertData())).Replace('-', '') -eq '{{PIN}}' }
 }
 if (-not (Test-Path $r)) { New-Item $r | Out-Null }
 $key = (Get-ItemProperty $r).key
@@ -38,6 +45,10 @@ try {
     Remove-Item "$exe.nuevo" -ErrorAction SilentlyContinue
     throw "Kitty: no he podido descargar $Url/kitty.exe ($($_.Exception.Message)). ¿Tiene catlan kitty.exe junto a su ejecutable?"
 }
+if ((Get-FileHash "$exe.nuevo" -Algorithm SHA256).Hash -ne $Sha) { # entero y el mismo que anuncia catlan, o nada
+    Remove-Item "$exe.nuevo" -ErrorAction SilentlyContinue
+    throw "Kitty: el kitty.exe descargado no es el que reparte catlan; no lo instalo."
+}
 # Todas las Kitty abiertas, también una copia descargada o de pruebas: si no, se queda con la bandeja y la instalada no arranca
 Get-Process kitty -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 300
@@ -47,7 +58,7 @@ Move-Item -Force "$exe.nuevo" $exe
 $cfg = Join-Path $pub 'kitty.json'
 $ukey = try { (Get-Content $cfg -Raw | ConvertFrom-Json).ukey } catch { '' }
 if (-not $ukey) { $ukey = [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N') }
-[IO.File]::WriteAllText($cfg, (@{ url = $Url; catlan = $Catlan; ukey = $ukey } | ConvertTo-Json -Compress)) # UTF-8 sin BOM
+[IO.File]::WriteAllText($cfg, (@{ url = $Url; catlan = $Catlan; ukey = $ukey; pin = $Pin } | ConvertTo-Json -Compress)) # UTF-8 sin BOM
 
 # Como SYSTEM, al arrancar: «kitty servicio» se queda en marcha y envía el estado del PC cada minuto.
 # La repetición de cada 5 minutos solo lo vuelve a lanzar si se ha cerrado (IgnoreNew: nunca dos a la vez).
