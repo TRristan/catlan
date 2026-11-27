@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="es" data-theme="auto" data-density="comfy" data-motion="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>catlan</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cpath fill='%23e8772e' fill-rule='evenodd' d='M40 32L96 88H160L216 32V164A56 56 0 0 1 160 220H96A56 56 0 0 1 40 164Z M118 146A22 22 0 1 0 74 146A22 22 0 1 0 118 146Z M144 135.0H176A11.0 11.0 0 0 1 176 157.0H144A11.0 11.0 0 0 1 144 135.0Z'/%3E%3C/svg%3E">
+<script>/* ajustes antes del primer pintado: sin parpadeo de tema */try{const s=JSON.parse(localStorage.getItem('catlan')||'{}'),h=document.documentElement;h.dataset.theme=s.theme||'auto';h.dataset.density=s.density||'comfy';h.dataset.motion=s.motion||'auto';if(s.rail)h.setAttribute('data-rail','');if(s.accent)h.style.setProperty('--acc',s.accent)}catch(e){}</script>
+<style>
+/* @css */
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="side" id="side" aria-label="Navegación">
+    <a class="brand" href="#/home" title="Inicio"><svg class="ic" width="24" height="24" aria-hidden="true"><use href="#u-cat"/></svg><span class="lbl"><svg class="wm" viewBox="0 0 541 137.5" width="51" height="13" role="img" aria-label="catlan"><use href="#wm-catlan"/></svg></span></a>
+    <nav class="nav" id="nav"><span class="ind" aria-hidden="true"></span>
+      <a href="#/dash" data-v="dash" title="Dashboard"><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-grid"/></svg><span class="lbl">Dashboard</span></a>
+      <a href="#/wiki" data-v="wiki" title="Wiki"><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-book"/></svg><span class="lbl">Wiki</span></a>
+      <a href="#/inv" data-v="inv" title="Inventario"><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-box"/></svg><span class="lbl">Inventario</span></a>
+      <a href="#/maps" data-v="maps" title="Esquemas"><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-nodes"/></svg><span class="lbl">Esquemas</span></a>
+      <a href="#/racks" data-v="racks" title="Racks"><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-rack"/></svg><span class="lbl">Racks</span></a>
+      <a href="#/redes" data-v="redes" title="Redes"><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-net"/></svg><span class="lbl">Redes</span></a>
+      <a href="#/monitor" data-v="monitor" title="Monitor"><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-signal"/></svg><span class="lbl">Monitor</span><span class="nbadge" id="mon-badge" hidden></span></a>
+      <a href="#/salud" data-v="salud" title="Salud"><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-thermo"/></svg><span class="lbl">Salud</span><span class="nbadge" id="hl-badge" hidden></span></a>
+      <a href="#/inc" data-v="inc" title="Incidencias"><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-ticket"/></svg><span class="lbl">Incidencias</span><span class="nbadge" id="inc-badge" hidden></span></a>
+      <a href="#/log" data-v="log" title="Actividad"><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-pulse"/></svg><span class="lbl">Actividad</span></a>
+      <a href="#/opts" data-v="opts" title="Opciones" id="nav-opts" hidden><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-cog"/></svg><span class="lbl">Opciones</span></a>
+    </nav>
+    <div class="side-foot">
+      <button class="navbtn" id="user-btn" title="Tu cuenta" aria-haspopup="menu"><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-user"/></svg><span class="lbl" id="user-name"></span></button>
+      <button class="navbtn" id="open-settings" title="Ajustes"><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-sliders"/></svg><span class="lbl">Ajustes</span></button>
+      <button class="navbtn" id="toggle-rail" title="Contraer barra lateral"><svg class="ic" width="19" height="19" aria-hidden="true"><use href="#u-sidebar"/></svg><span class="lbl">Contraer</span></button>
+    </div>
+  </aside>
+  <div class="main">
+    <header class="top" id="top">
+      <button class="btn icon ghost only-m" id="open-nav" aria-label="Abrir menú"><svg class="ic" width="20" height="20" aria-hidden="true"><use href="#u-menu"/></svg></button>
+      <nav class="crumbs" id="crumbs" aria-label="Ruta"></nav>
+      <span class="sync" id="sync" role="status"><i></i><span></span></span>
+      <button class="search" id="spot-btn" type="button" aria-keyshortcuts="Alt+C" title="Buscar en todo (Alt+C)"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#u-search"/></svg><span>Buscar…</span><kbd>Alt C</kbd></button>
+      <button class="btn pri" id="new" aria-haspopup="menu" aria-label="Crear nuevo"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#u-plus"/></svg><span class="hide-s">Nuevo</span></button>
+    </header>
+    <main id="app" class="page"></main>
+  </div>
+</div>
+<div id="scrim"></div>
+<aside class="drawer" id="settings" role="dialog" aria-modal="true" aria-labelledby="st-t" inert>
+  <header><h2 id="st-t">Ajustes</h2><button class="btn icon ghost" id="close-settings" aria-label="Cerrar ajustes"><svg class="ic" width="18" height="18" aria-hidden="true"><use href="#u-x"/></svg></button></header>
+  <section><h4>Apariencia</h4>
+    <div class="set"><span>Tema</span><div class="seg" data-k="theme"><button data-v="auto">Sistema</button><button data-v="light">Claro</button><button data-v="dark">Oscuro</button></div></div>
+    <div class="set"><span>Acento</span><div class="swatches" data-k="accent"></div></div>
+    <div class="set"><span>Densidad</span><div class="seg" data-k="density"><button data-v="comfy">Cómoda</button><button data-v="compact">Compacta</button></div></div>
+  </section>
+  <section><h4>Movimiento</h4>
+    <div class="set"><span>Animaciones<small>«Sistema» respeta «reducir movimiento»</small></span><div class="seg" data-k="motion"><button data-v="auto">Sistema</button><button data-v="on">Sí</button><button data-v="off">No</button></div></div>
+  </section>
+  <section><h4>Espacio de trabajo</h4>
+    <div class="set"><span>Barra lateral compacta<small>Solo iconos</small></span><button class="switch" role="switch" data-k="rail" aria-label="Barra lateral compacta"></button></div>
+    <div class="set"><span>Paleta de esquemas abierta</span><button class="switch" role="switch" data-k="dock" aria-label="Paleta de esquemas abierta"></button></div>
+  </section>
+  <section><h4>Ayuda</h4>
+    <div class="set"><span>Tutorial<small>Un paseo de un minuto por catlan</small></span><button class="btn sm" id="tour-again">Ver el tutorial</button></div>
+    <div class="set"><span>Guía de uso<small>Funciones, trucos y qué hace con tus datos</small></span><button class="btn sm" id="guide-open">Abrir la guía</button></div>
+  </section>
+  <div class="drawer-foot"><span>Se guardan en este navegador</span><button class="btn ghost sm" id="reset-settings">Restablecer</button></div>
+</aside>
+<div id="toasts" aria-live="polite"></div>
+<script>
+/* @js */
+</script>
+</body>
+</html>

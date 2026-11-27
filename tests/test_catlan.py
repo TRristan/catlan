@@ -902,14 +902,15 @@ try:
             assert (Path(tmp) / "state").read_text().splitlines()[0] == "adoptado" and (Path(tmp) / "since").exists()
             h = next(s for s in call("/api/health")[1] if s["kind"] == "kitty" and s["info"].get("name") == socket.gethostname())
             assert h["info"]["mem_total"] and h["info"]["disks"] and h["info"]["cores"], h["info"]
-    # El JavaScript de la página, sin errores de sintaxis (si hay Node; en GitHub Actions lo hay)
+    # El JavaScript de la página (src/web/js/, unido como en build.rs), sin errores de sintaxis (si hay Node; en GitHub Actions lo hay)
     import shutil
     if shutil.which("node"):
-        page = (HERE / "src" / "index.html").read_text(encoding="utf-8")
+        js = sorted((HERE / "src" / "web" / "js").glob("*.js"))
         with tempfile.TemporaryDirectory() as tmp:
-            (Path(tmp) / "app.js").write_text(page[page.rindex("<script>") + 8:page.rindex("</script>")], encoding="utf-8")
-            out = subprocess.run(["node", "--check", str(Path(tmp) / "app.js")], capture_output=True, text=True)
-            assert out.returncode == 0, out.stderr
+            (Path(tmp) / "app.js").write_text("".join(f.read_text(encoding="utf-8") for f in js), encoding="utf-8")
+            for f in [Path(tmp) / "app.js", *js]:  # cada archivo también por separado: el error sale con su nombre
+                out = subprocess.run(["node", "--check", str(f)], capture_output=True, text=True)
+                assert out.returncode == 0, out.stderr
     # La página: comprimida, con ETag y 304 si ya la tiene el navegador
     req = urllib.request.Request(f"http://127.0.0.1:{PORT}/", headers={"Accept-Encoding": "gzip"})
     with urllib.request.urlopen(req) as r:

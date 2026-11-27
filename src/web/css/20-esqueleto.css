@@ -1,0 +1,40 @@
+/* ── Esqueleto ──────────────────────────────────────── */
+.shell{display:grid;grid-template-columns:var(--side) minmax(0,1fr);min-height:100vh;transition:grid-template-columns .4s var(--e)}
+.side{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:4px;padding:18px 12px 14px;border-right:1px solid var(--line);overflow:hidden;z-index:40;background:var(--bg)}
+.brand{display:flex;align-items:center;gap:11px;height:40px;padding:0 12px;margin-bottom:14px;font-weight:700;font-size:16.5px;letter-spacing:-.02em;text-decoration:none}
+.brand .wm{display:block}.brand .ic{color:var(--acc);transition:transform .5s var(--spring)}.brand:hover .ic{transform:rotate(-12deg) scale(1.08)}
+.nav{position:relative;display:flex;flex-direction:column;gap:2px}
+.nav a,.navbtn{position:relative;z-index:1;display:flex;align-items:center;gap:12px;height:38px;padding:0 13px;border-radius:10px;border:0;background:none;color:var(--tx2);font:inherit;font-weight:540;text-decoration:none;cursor:pointer;white-space:nowrap;transition:color .2s,background .2s}
+.nav a:hover,.navbtn:hover{color:var(--tx)}
+.navbtn:hover{background:var(--s2)}
+.nav a.on{color:var(--tx)}
+.nav a .ic{transition:color .25s,transform .35s var(--spring)}
+.nav a.on .ic{color:var(--acc)}
+.nav a:active .ic{transform:scale(.88)}
+.ind{position:absolute;left:0;right:0;top:0;height:38px;border-radius:10px;background:var(--s1);box-shadow:var(--sh1);opacity:0;transition:transform .45s var(--spring),opacity .2s}
+.lbl{transition:opacity .25s var(--e)}
+:root[data-rail] .side .lbl{opacity:0;pointer-events:none}
+.side-foot{margin-top:auto;display:flex;flex-direction:column;gap:2px}
+:root[data-rail] #toggle-rail .ic{transform:scaleX(-1)}
+.main{min-width:0;display:flex;flex-direction:column}
+.top{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:12px;height:64px;padding:0 clamp(16px,3vw,36px);background:color-mix(in oklab,var(--bg) 80%,transparent);-webkit-backdrop-filter:saturate(1.5) blur(14px);backdrop-filter:saturate(1.5) blur(14px);border-bottom:1px solid transparent;transition:border-color .3s}
+.top.scrolled{border-color:var(--line)}
+.crumbs{display:flex;align-items:center;gap:8px;min-width:0;font-size:13.5px;color:var(--tx3)}
+.crumbs a{color:var(--tx2);text-decoration:none;transition:color .2s}.crumbs a:hover{color:var(--tx)}
+.crumbs .cur{color:var(--tx);font-weight:560;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crumbs .sep{color:var(--line2)}
+.sync{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--tx3);opacity:0;transform:translateY(2px);transition:opacity .3s,transform .3s var(--e);white-space:nowrap}
+.sync.show{opacity:1;transform:none}
+.sync i{width:7px;height:7px;border-radius:50%;background:var(--tx3)}
+.sync.saving i{background:var(--acc);animation:pulse 1s ease-in-out infinite}
+.sync.saved i{background:var(--ok)}.sync.error{color:var(--bad)}.sync.error i{background:var(--bad)}
+.only-m{display:none!important}
+.page{width:100%;max-width:1120px;margin:0 auto;padding:12px clamp(16px,3vw,36px) 96px}
+.page[data-w=wide]{max-width:1480px}
+/* Editor de esquemas: ocupa la ventana justa, sin scroll de página */
+.page[data-w=fill]{max-width:1480px;height:calc(100dvh - 64px);display:flex;flex-direction:column;padding-bottom:16px}
+.page[data-w=fill] .stage{flex:1;min-height:0}
+.page[data-w=fill].in{animation-name:fade} /* sin desplazamiento: así no asoma scroll al entrar */
+.page.in{animation:pageIn .5s var(--e) both}
+.page.in .stagger>*{animation:rise .55s var(--e) both;animation-delay:calc(60ms + var(--i,0)*28ms)}
+

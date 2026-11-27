@@ -78,14 +78,14 @@ fn undo_table(kind: &str) -> Option<&'static str> {
     })
 }
 
-/// index.html en memoria y comprimido una sola vez.
+/// La página (src/web/ unida por build.rs) en memoria y comprimida una sola vez.
 struct Page {
     raw: &'static [u8],
     gz: Vec<u8>,
     etag: String,
 }
 static PAGE: LazyLock<Page> = LazyLock::new(|| {
-    let raw: &'static [u8] = include_bytes!("index.html");
+    let raw: &'static [u8] = include_bytes!(concat!(env!("OUT_DIR"), "/index.html"));
     let mut e = GzEncoder::new(vec![], Compression::best());
     let _ = e.write_all(raw);
     Page { raw, gz: e.finish().unwrap_or_default(), etag: format!("\"{}\"", &crate::crypto::hex(&<sha2::Sha256 as sha2::Digest>::digest(raw))[..20]) }

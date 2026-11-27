@@ -298,7 +298,8 @@ src/          el servidor (Rust)
   snmp.rs       SNMP v2c y v3 (BER a mano, firma y cifrado USM)
   health.rs     perfiles por fabricante, interfaces, topología y Kitty
   crypto.rs     contraseñas, copias cifradas y TOTP
-  index.html    toda la web (HTML, CSS y JS sin dependencias), dentro del ejecutable
+  web/          la web (HTML, CSS y JS sin dependencias): index.html, css/ y js/; build.rs la une
+                en una sola página dentro del ejecutable, en orden de nombre (10-…, 20-…)
 kitty/        Kitty: el programa de los PCs (kitty.exe) y sus instaladores (kitty.ps1, kitty.sh)
   src/app.rs    la bandeja y la ventana (WebView2)
   src/remote.rs el control remoto: captura de pantalla, ratón y teclado
