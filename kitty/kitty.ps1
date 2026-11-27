@@ -16,7 +16,7 @@ $r = 'HKLM:\SOFTWARE\Kitty'
 $dir = Join-Path $env:ProgramFiles 'Kitty'
 $pub = Join-Path $env:ProgramData 'Kitty'
 $exe = Join-Path $dir 'kitty.exe'
-if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole('Administrators')) {
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { # por SID: el nombre del grupo cambia con el idioma («Administradores»)
     throw "Kitty: abre PowerShell como administrador y vuelve a pegar el comando."
 }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
