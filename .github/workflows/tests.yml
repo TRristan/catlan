@@ -17,6 +17,9 @@ jobs:
         with:
           python-version: "3.12"
       - run: python tests/test_catlan.py
+      # La web en un navegador de verdad: login, alta de equipo, incidencia y «Añadir con Kitty»
+      - run: pip install playwright==1.65.2 && python -m playwright install --with-deps chromium
+      - run: python tests/test_ui.py
   kitty:
     runs-on: windows-latest
     timeout-minutes: 20

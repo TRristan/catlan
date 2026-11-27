@@ -1,0 +1,60 @@
+/* ── Capas: menús, diálogos, cajones, avisos ───────── */
+.menu{position:fixed;z-index:100;min-width:200px;padding:5px;background:var(--s1);border:1px solid var(--line);border-radius:13px;box-shadow:var(--sh3);transform-origin:var(--ox,top right);animation:menuIn .26s var(--spring) both}
+.menu.out{animation:menuOut .14s var(--e) both}
+.menu button{display:flex;align-items:center;gap:10px;width:100%;height:36px;padding:0 10px;border:0;border-radius:8px;background:none;color:var(--tx);font:inherit;font-size:13.5px;cursor:pointer;text-align:left}
+.menu button .ic{color:var(--tx2)}
+.menu button:hover,.menu button:focus-visible{background:var(--s2);outline:none}
+.menu button.danger,.menu button.danger .ic{color:var(--bad)}
+.menu button.danger:hover{background:color-mix(in oklab,var(--bad) 10%,transparent)}
+.menu hr{border:0;border-top:1px solid var(--line);margin:5px 4px}
+dialog{border:1px solid var(--line);padding:0;width:min(440px,calc(100vw - 32px));border-radius:20px;background:var(--s1);color:var(--tx);box-shadow:var(--sh3)}
+dialog[open]{animation:dlgIn .38s var(--spring) backwards} /* sin transform al acabar: la ficha flotante (fixed) se coloca bien dentro */
+dialog::backdrop{background:rgb(15 15 14/.35);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);animation:fade .25s both}
+dialog form{padding:24px}
+dialog h3{margin:0 0 6px;font-size:18px;letter-spacing:-.015em}
+dialog p{margin:0 0 20px;color:var(--tx2);font-size:14px}
+.dlg-a{display:flex;flex-direction:row-reverse;gap:8px;margin-top:24px}
+.file{position:relative;display:flex}
+.file input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.file span{display:flex;align-items:center;gap:8px;width:100%;height:42px;padding:0 14px;border:1px dashed var(--line2);border-radius:var(--r);color:var(--tx2);font-size:13.5px;transition:all .2s}
+.file:hover span,.file input:focus-visible+span{border-color:var(--acc);color:var(--tx);background:var(--acc-soft)}
+.file em{font-style:normal;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#scrim{position:fixed;inset:0;z-index:60;background:rgb(15 15 14/.28);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);opacity:0;pointer-events:none;transition:opacity .35s var(--e)}
+body.drawer-open #scrim,body.nav-open #scrim{opacity:1;pointer-events:auto}
+.drawer{position:fixed;z-index:70;top:10px;right:10px;bottom:10px;width:min(380px,calc(100vw - 20px));display:flex;flex-direction:column;background:var(--s1);border:1px solid var(--line);border-radius:22px;box-shadow:var(--sh3);overflow:auto;
+  transform:translateX(calc(100% + 24px));visibility:hidden;transition:transform .55s var(--e),visibility 0s .55s}
+body.drawer-open .drawer{transform:none;visibility:visible;transition:transform .55s var(--e)}
+.drawer header{display:flex;align-items:center;justify-content:space-between;padding:20px 20px 6px}
+.drawer h2{margin:0;font-size:20px;letter-spacing:-.02em}
+.drawer section{padding:16px 20px;border-bottom:1px solid var(--line)}
+.drawer section:last-of-type{border-bottom:0}
+.drawer h4{margin:0 0 14px;font-size:12px;font-weight:620;color:var(--tx3);letter-spacing:.05em;text-transform:uppercase}
+.set{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:40px}
+.set+.set{margin-top:10px}
+.set>span{font-size:14px;font-weight:540}
+.set small{display:block;color:var(--tx3);font-size:12px;font-weight:400}
+.swatches{display:flex;gap:8px}
+.swatches button{width:26px;height:26px;border-radius:50%;border:0;background:var(--c);cursor:pointer;box-shadow:inset 0 0 0 1px rgb(0 0 0/.12);transition:transform .35s var(--spring),box-shadow .25s}
+.swatches button:hover{transform:scale(1.12)}
+.swatches button.on{box-shadow:0 0 0 2px var(--s1),0 0 0 4px var(--c)}
+.drawer-foot{margin-top:auto;padding:16px 20px 20px;display:flex;align-items:center;justify-content:space-between;color:var(--tx3);font-size:12.5px}
+#toasts{position:fixed;z-index:200;left:50%;bottom:22px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none}
+.toast{display:flex;align-items:center;gap:9px;padding:10px 16px 10px 12px;border-radius:13px;background:var(--tx);color:var(--bg);font-size:13.5px;font-weight:540;box-shadow:var(--sh3);animation:toastIn .5s var(--spring) both}
+.toast .ic{color:var(--ok)}.toast.bad .ic{color:var(--bad)}
+.toast.out{animation:toastOut .3s var(--e) both}
+
+/* ── Movimiento ─────────────────────────────────────── */
+@keyframes pageIn{from{opacity:0;transform:translateY(10px)}}
+@keyframes rise{from{opacity:0;transform:translateY(12px)}}
+@keyframes fade{from{opacity:0}}
+@keyframes menuIn{from{opacity:0;transform:scale(.92) translateY(-4px)}}
+@keyframes menuOut{to{opacity:0;transform:scale(.96)}}
+@keyframes dlgIn{from{opacity:0;transform:translateY(16px) scale(.96)}}
+@keyframes toastIn{from{opacity:0;transform:translateY(16px) scale(.9)}}
+@keyframes toastOut{to{opacity:0;transform:translateY(8px) scale(.96)}}
+@keyframes pulse{50%{transform:scale(.6);opacity:.5}}
+@keyframes float{50%{transform:translateY(-5px)}}
+@keyframes dash{to{stroke-dashoffset:-12}}
+@keyframes led{0%,92%,100%{opacity:1}95%{opacity:.35}}
+@keyframes shake{20%{transform:translateX(-5px)}40%{transform:translateX(4px)}60%{transform:translateX(-3px)}80%{transform:translateX(2px)}}
+
