@@ -7,7 +7,7 @@
 
 **El gato amigo de los IT.** Inventario, wiki, esquemas de red, racks, monitor, salud de equipos e incidencias en una sola web, autoalojada y 100 % local.
 
-![Estado](https://img.shields.io/badge/estado-en%20desarrollo%20(WIP)-orange)
+![Estado](https://img.shields.io/badge/versión-2.0.0-blue)
 ![Rust](https://img.shields.io/badge/hecho%20en-Rust-b7410e)
 ![Ejecutable](https://img.shields.io/badge/servidor-un%20solo%20ejecutable-success)
 ![Datos](https://img.shields.io/badge/datos-solo%20en%20tu%20servidor-1f9d6a)
@@ -24,35 +24,20 @@
 > son **las mismas**: una instalación en Python se actualiza sin perder nada ([cómo](#vienes-de-la-versión-en-python)).
 
 > [!WARNING]
-> **Proyecto en desarrollo (WIP).** Funciona y tiene tests, pero aún cambia a menudo y puede haber fallos. Antes de
-> actualizar, haz una copia de `data/` ([cómo se actualiza](#actualizar-catlan)).
+> **Antes de actualizar, haz una copia de `data/`** ([cómo se actualiza](#actualizar-catlan)). Al pasar a la 2.0 hay que
+> reinstalar Kitty en los PCs: mira el [CHANGELOG](CHANGELOG.md).
 
 ## Novedades
 
-- **Programas en los PCs.** En **Opciones → Programas en los PCs** eliges programas por su id de winget (Chrome,
-  7-Zip, Firefox…). Kitty los **instala** en todos los PCs y los **mantiene actualizados** cada hora. En cada programa
-  ves en cuántos PCs está bien o ha fallado, y en la ficha de Salud de cada PC, cómo le fue.
-- **Kitty se actualiza solo.** Cuando pones un `kitty.exe` nuevo junto a catlan, cada PC lo detecta en unos minutos, lo
-  descarga, comprueba que llega entero (sha256) y se reemplaza. Ya no hace falta volver a pegar la línea de instalación.
-- **catlan se actualiza solo** (opcional). En **Opciones → Salud de catlan → Actualizaciones**: buscar la versión nueva
-  en GitHub, «Actualizar ahora» o activar «Actualizar solo» (una vez al día). Descarga, comprueba el sha256, se reemplaza
-  y se reinicia. Si reparte `kitty.exe`, también lo actualiza, y con él a todos los PCs.
-- **Control remoto con Kitty.** Desde la ficha del equipo o desde Salud, un técnico pide conectarse a un PC, y la
-  persona que lo usa lo **acepta o lo rechaza** en su pantalla. El técnico ve la pantalla en el navegador y usa el ratón y el
-  teclado. El PC no abre ningún puerto, porque todo pasa por catlan. El usuario puede cortar cuando quiera, y en el historial
-  del equipo queda quién se conectó, cuándo y cuánto tiempo.
-- **Kitty casi en directo.** Cada PC envía su estado **cada 15 segundos** y Salud se refresca sola cada 15 s. La
-  ventana de Kitty comprueba la conexión cada 3 s y ya no dice «sin conexión» por un corte suelto.
-- **Cerrar Kitty requiere un administrador.** «Salir de Kitty» pide usuario y contraseña de un **admin de catlan**,
-  y el código de la verificación en dos pasos si la tiene. El cierre queda anotado en el historial.
-- **Kitty como servicio.** `kitty servicio` se queda en marcha como SYSTEM desde que arranca el PC, aunque no haya nadie
-  con la sesión iniciada. El gato de la bandeja se abre solo al iniciar sesión.
-- **Mis tareas y notas.** En Incidencias, un tablero personal (solo lo ves tú) con columnas que se arrastran, junto a las
-  incidencias de tus grupos.
-- **Enlaces a incidencias en la wiki.** `[[INC-n]]` enlaza una incidencia, y en su ficha aparece en «Enlazada desde».
-- **`catlan restablecer` más seguro.** Si no encuentra la base de datos, no crea una nueva y te dice cómo indicar la
-  carpeta correcta.
-- **Nuevo logo** de catlan y de Kitty, con kit de iconos y guía de uso en [`docs/logo/`](docs/logo/README.md).
+- **Usuarios del dominio**: login con Active Directory (LDAP) y con Entra ID, Google Workspace o Keycloak (OIDC), y sus
+  grupos del dominio deciden quién es admin, quién edita y quién solo mira. Mira [Usuarios del dominio](#usuarios-del-dominio-ldap-y-oidc).
+- **2.0: HTTPS siempre y Kitty anclado a catlan.** catlan crea su propio certificado si no le das uno, y el comando de
+  instalación de Kitty lleva su huella: nadie en la red puede colar otro instalador ni ver la pantalla del control remoto.
+  **Hay que reinstalar Kitty** (mismo comando) para el control remoto y las actualizaciones.
+- **Cuánto se guarda**, ahora en Opciones → Salud de catlan; y probado con 3.000 PCs con Kitty.
+
+Todos los cambios, versión a versión, en [CHANGELOG.md](CHANGELOG.md). Seguridad y cómo avisar de un fallo:
+[SECURITY.md](SECURITY.md).
 
 <p align="center">
 <picture>
@@ -236,6 +221,33 @@ que envía lo mismo **cada 5 minutos**, con los errores y críticos del journal 
   **Las Kitty de antes siguen enviando el estado, pero hay que reinstalarlas** (mismo comando) para el control remoto,
   las actualizaciones y el anclaje.
 
+## Usuarios del dominio (LDAP y OIDC)
+
+En **Opciones → Inicio de sesión con el dominio** (solo administradores). Se puede poner uno, otro o los dos.
+
+- **Active Directory / LDAP.** Servidor (`ldaps://dc1.empresa.local`) y dominio (`empresa.local`). catlan hace el bind
+  **con el propio usuario** (`juan@empresa.local`; vale escribir `juan`, `juan@empresa.local` o `EMPRESA\juan`), le pregunta
+  al dominio quién es («¿quién soy?», RFC 4532) y busca su ficha por `sAMAccountName` para leer sus grupos (`memberOf`).
+  No hace falta cuenta de servicio. Solo **LDAPS**: con LDAP en claro la contraseña viajaría por la red. Si el
+  certificado del controlador no es de una CA que conozca el sistema, pega su huella SHA-256.
+- **OIDC** (Entra ID, Google Workspace, Keycloak…). El emisor (`https://login.microsoftonline.com/<tenant>/v2.0`,
+  `https://accounts.google.com`, `https://keycloak.empresa.com/realms/empresa`), el id y el secreto del cliente. Da de alta
+  como dirección de vuelta la que enseña catlan (`https://catlan.empresa.local/api/sso/callback`). Flujo de código con
+  PKCE (S256), `state` atado al navegador y `nonce`. En la página de login sale el botón «Entrar con…».
+  Los grupos salen del claim `groups` (o el que digas): en Entra, activa «groups claim» en la app; en Keycloak, el mapper
+  «Group Membership». **Google no manda grupos**: su dominio de correo verificado cuenta como el grupo `@empresa.com`.
+- **Grupos con acceso**, uno por línea: `grupo del dominio | grupo de catlan` o `grupo del dominio | admin`. El grupo
+  del dominio puede ir con su nombre (`IT`) o con el DN entero (`CN=IT,OU=Grupos,DC=empresa,DC=local`, entonces solo
+  ese). Quien no está en ninguno no entra. En cada entrada, sus grupos del dominio mandan su admin y sus grupos de catlan
+  (edición o solo vista); la contraseña y la verificación en dos pasos son las del dominio.
+- **Los usuarios locales siguen funcionando siempre**, `admin` incluido: entran con su contraseña de catlan aunque el
+  dominio no conteste, y un usuario del dominio con el mismo nombre nunca toma el local (no entra hasta que un
+  administrador borre el local). Deja `admin` con una contraseña larga y verificación en dos pasos como entrada de
+  emergencia.
+- Mismo límite de intentos que los locales (por IP y por usuario). El dominio caído no cuenta como intento fallido.
+- Las sesiones de los usuarios del dominio duran **12 horas** (las locales, 30 días): quien sale de la empresa deja de
+  entrar ese mismo día. Por Basic (scripts), la contraseña del dominio se recuerda 10 minutos.
+
 ## Actualizar catlan
 
 catlan solo se conecta a GitHub si un administrador lo pide. En **Opciones → Salud de catlan → Actualizaciones**:
@@ -320,6 +332,7 @@ python tests/test_catlan.py          # API completa contra el ejecutable (SMTP, 
 pip install snmpsim pysmi cryptography
 python tests/test_snmpv3.py          # SNMPv3 contra el simulador snmpsim, en las 7 combinaciones de firma y cifrado
 python tests/test_topologia.py       # auto-topología (LLDP, CDP, MAC, ARP) contra snmpsim, por v2c y v3
+python tests/carga.py 1000 90         # carga: 1.000 Kitty enviando cada 15 s durante 90 s (aparte: tarda)
 ```
 
 Los tests de Python prueban el ejecutable desde fuera, por su API, igual que lo usa la web. GitHub Actions compila y
@@ -327,7 +340,8 @@ pasa todo en cada cambio (el servidor en Linux, Kitty en Windows).
 
 ## Estado y límites conocidos
 
-- **WIP**: la interfaz y la API pueden cambiar entre versiones.
+- La API aún no está documentada (sin OpenAPI) y puede cambiar; los cambios que obliguen a hacer algo suben el primer
+  número de la versión.
 - La ventana de Kitty es **solo para Windows**; en Linux, Kitty envía el estado del equipo sin ventana.
 - La imagen de Docker no incluye `kitty.exe`: cópialo a `/data` para repartirlo.
 - Perfiles SNMP de Cisco, HP/Aruba, Ubiquiti, MikroTik y Hikvision **sin probar todavía con hardware real**;
@@ -335,12 +349,28 @@ pasa todo en cada cambio (el servidor en Linux, Kitty en Windows).
 - El control remoto ve y maneja **solo la pantalla principal** del PC.
 - Un usuario puede terminar `kitty.exe` desde el Administrador de tareas. El envío del estado no se corta (lo hace
   el servicio de SYSTEM) y Kitty vuelve a abrirse en el siguiente inicio de sesión.
-- Con envíos cada 15 s, el historial de métricas ocupa más. Se borra solo a los 7 días; se guardan medias por hora
-  durante más tiempo.
+- Con envíos cada 15 s, el historial de métricas ocupa más. Por defecto se borra a los 7 días y las medias por hora se
+  guardan 400; los días se cambian en **Opciones → Salud de catlan → Cuánto se guarda**.
 - Las actualizaciones automáticas de catlan necesitan versiones publicadas en GitHub (Releases); hasta la primera,
   «Buscar actualizaciones» dice que no hay ninguna.
+- Usuarios del dominio: solo los grupos directos de AD (sin anidados), sin LDAP en claro ni StartTLS (solo LDAPS), y
+  en Entra con más de 200 grupos el id_token no los trae. Probado con un AD y un proveedor OIDC de mentira, no con uno real.
 - Programas en los PCs: el mismo conjunto para todos los PCs con Kitty en Windows (no por grupos), y solo programas
   que estén en winget. Probado sin PCs reales todavía.
+
+## Requisitos y límites probados
+
+Con `python tests/carga.py <equipos> <segundos>`: Kitty de mentira, ya aceptados, que envían su estado por HTTPS cada
+15 s. En un PC de escritorio de 16 hilos con Windows 11, cliente y catlan en la misma máquina, 90 s por prueba:
+
+| Equipos con Kitty | Envíos/s | Errores | Latencia mediana · p99 | CPU de catlan (100 % = un núcleo) | Memoria |
+|---|---|---|---|---|---|
+| 500 | 33 | 0 | 5 ms · 29 ms | 7 % (máx. 11 %) | 15 MB |
+| 1.000 | 67 | 0 | 5 ms · 30 ms | 15 % (máx. 24 %) | 17 MB |
+| 3.000 | 200 | 0 | 7 ms · 32 ms | 54 % (máx. 64 %) | 19 MB |
+
+No incluye el monitor (pings, SNMP) ni a los técnicos usando la web a la vez, y no está medido en máquinas pequeñas
+(Raspberry Pi, VM de 1 vCPU): repítela en tu hardware antes de pasar de unos cientos de equipos.
 
 ## Licencia
 

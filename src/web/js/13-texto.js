@@ -36,13 +36,13 @@ function ago(ts) {
 const names = async () => Object.fromEntries((await api('items')).map(i => [i.id, i.name]));
 
 // ── Historial ───────────────────────────────────────────
-const KINDS = {page: ['Wiki', 'wiki', 'book'], item: ['Equipo', 'inv', 'box'], map: ['Esquema', 'maps', 'nodes'], rack: ['Rack', 'racks', 'rack'], check: ['Monitor', 'monitor', 'signal'], source: ['Salud', 'salud', 'thermo'], user: ['Usuario', 'users', 'user'], group: ['Grupo', 'users', 'users'], incident: ['Incidencia', 'inc', 'ticket'], agent: ['Kitty', 'inv', 'box'], expiry: ['Caducidad', 'cad', 'clock'], subnet: ['Red', 'redes', 'net'], db: ['Opciones', 'opts', 'cog'], alerts: ['Avisos', 'opts', 'bell']};
+const KINDS = {page: ['Wiki', 'wiki', 'book'], item: ['Equipo', 'inv', 'box'], map: ['Esquema', 'maps', 'nodes'], rack: ['Rack', 'racks', 'rack'], check: ['Monitor', 'monitor', 'signal'], source: ['Salud', 'salud', 'thermo'], user: ['Usuario', 'users', 'user'], group: ['Grupo', 'users', 'users'], incident: ['Incidencia', 'inc', 'ticket'], agent: ['Kitty', 'inv', 'box'], expiry: ['Caducidad', 'cad', 'clock'], subnet: ['Red', 'redes', 'net'], db: ['Opciones', 'opts', 'cog'], alerts: ['Avisos', 'opts', 'bell'], sso: ['Inicio de sesión', 'opts', 'key']};
 const VERB = {crear: 'creó', editar: 'editó', borrar: 'borró', aceptar: 'aceptó', rechazar: 'rechazó', olvidar: 'olvidó', vaciar: 'borró', descargar: 'descargó'};
 const NOUN = {page: 'la página', item: 'el equipo', map: 'el esquema', rack: 'el rack', check: 'la vigilancia de', source: 'la lectura de', agent: 'el Kitty de'};
 const hue = s => Math.abs([...(s || '?')].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)) % 360;
 function entry(l) {
   const k = KINDS[l.kind] || [l.kind, ''], snap = JSON.parse(l.data || '{}'), who = l.who || 'Alguien';
-  const target = l.action === 'borrar' ? `<b>${esc(l.name)}</b>` : `<a href="#/${k[1]}${['agent', 'db', 'alerts'].includes(l.kind) ? '' : '/' + +l.ref}">${esc(l.name) || 'sin nombre'}</a>`;
+  const target = l.action === 'borrar' ? `<b>${esc(l.name)}</b>` : `<a href="#/${k[1]}${['agent', 'db', 'alerts', 'sso'].includes(l.kind) ? '' : '/' + +l.ref}">${esc(l.name) || 'sin nombre'}</a>`;
   return `<li class="ev"><span class="av" style="--h:${hue(l.who)}" aria-hidden="true">${esc(who[0].toUpperCase())}</span>
     <div><p><b>${esc(who)}</b> ${VERB[l.action] || esc(l.action)} ${NOUN[l.kind] || ''} ${target}</p>
     <time datetime="${esc(l.ts)}" title="${esc(when(l.ts))}">${esc(ago(l.ts))}</time>

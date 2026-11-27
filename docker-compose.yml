@@ -1,6 +1,7 @@
 services:
   catlan:
     build: .
+    # o, sin compilar, la imagen publicada con cada versión: image: ghcr.io/trristan/catlan:latest (y quita build)
     ports: ["8080:8080", "514:514/udp"]  # 514/udp: syslog de tus equipos
     environment:
       # CATLAN_PASSWORD: cambiame   # contraseña inicial del usuario admin (sin ella: admin, a cambiar al entrar)

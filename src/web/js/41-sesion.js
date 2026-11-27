@@ -15,6 +15,13 @@ function showLogin() {
   off.forEach(x => x.inert = true);
   const f = el.firstChild;
   f.querySelector('input').focus();
+  const why = new URLSearchParams(location.search).get('sso') || '';
+  if (why) history.replaceState(null, '', location.pathname + location.hash);
+  fetch('/api/sso?e=' + encodeURIComponent(why)).then(r => r.json()).then(s => {
+    if (s.error) f.querySelector('.login-err').textContent = s.error;
+    if (s.ldap) f.elements.namedItem('name').previousSibling.textContent = 'Usuario de catlan o del dominio';
+    if (s.oidc) f.querySelector('.btn.pri').insertAdjacentHTML('afterend', `<a class="btn" href="/api/sso/start" style="height:40px">${ui('key', 16)}Entrar con ${esc(s.oidc)}</a>`);
+  }).catch(() => {});
   f.onsubmit = async e => {
     e.preventDefault();
     const r = await fetch('/api/login', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(Object.fromEntries(new FormData(f)))}).catch(() => null);
@@ -73,9 +80,9 @@ async function totpDialog() {
     try { ME = await api('me/totp', 'POST', {secret, code: f.get('code')}); toast('Verificación en dos pasos activada'); return; } catch {}
   }
 }
-$('#user-btn').onclick = e => menu(e.currentTarget, [['Cambiar contraseña', () => passDialog(false), {icon: 'edit'}],
+$('#user-btn').onclick = e => menu(e.currentTarget, [...(ME?.ext ? [] : [['Cambiar contraseña', () => passDialog(false), {icon: 'edit'}], // los del dominio, allí
   [ME?.totp ? 'Quitar verificación en dos pasos' : 'Verificación en dos pasos', totpDialog, {icon: 'key'}],
-  '-',
+  '-']),
   ['Cerrar sesión', async () => { await api('logout', 'POST'); location.reload(); }, {icon: 'x'}]]);
 applySettings();
 boot();

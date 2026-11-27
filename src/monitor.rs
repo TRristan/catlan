@@ -23,13 +23,13 @@ pub fn ping(host: &str) -> (bool, Option<f64>) {
     } else {
         cmd.args(["-c", "1", "-W", "1", host]);
     }
-    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // sin ventana de consola
     }
-    let Ok(mut child) = cmd.spawn() else { return (false, None) };
+    let Ok(mut child) = cmd.spawn() else { return tcp_ping(host) }; // sin comando ping (contenedor mínimo)
     let t0 = Instant::now();
     let ok = loop {
         match child.try_wait() {
@@ -46,11 +46,37 @@ pub fn ping(host: &str) -> (bool, Option<f64>) {
     if let Some(mut s) = child.stdout.take() {
         let _ = s.read_to_end(&mut raw);
     }
+    let mut err = vec![];
+    if let Some(mut s) = child.stderr.take() {
+        let _ = s.read_to_end(&mut err);
+    }
+    if !ok && re!(r"(?i)permi|socket|not found|no se encuentra").is_match(&String::from_utf8_lossy(&err)) {
+        return tcp_ping(host); // ping sin permiso para ICMP: mejor TCP que dar el equipo por caído
+    }
     let out = String::from_utf8_lossy(&raw);
     let m = re!(r"(?i)(?:time|tiempo)\s*[=<]\s*([\d.,]+)").captures(&out); // Windows en español: «tiempo=3ms»
     // Windows da código 0 también con «host inaccesible»: hace falta TTL o un tiempo (IPv6 no muestra TTL)
     let up = ok && (m.is_some() || out.to_lowercase().contains("ttl="));
     (up, if up { m.and_then(|m| m[1].replace(',', ".").parse().ok()) } else { None })
+}
+
+/// Sin ICMP: responde si algún puerto habitual acepta o rechaza la conexión (rechazar también es estar encendido).
+fn tcp_ping(host: &str) -> (bool, Option<f64>) {
+    let t0 = Instant::now();
+    let Some(ip) = (host, 0).to_socket_addrs().ok().and_then(|mut a| a.next()).map(|a| a.ip()) else { return (false, None) };
+    let up = std::thread::scope(|s| {
+        let hs: Vec<_> = [80u16, 443, 22, 445, 3389, 53]
+            .iter()
+            .map(|&p| {
+                s.spawn(move || match TcpStream::connect_timeout(&(ip, p).into(), Duration::from_secs(1)) {
+                    Ok(_) => true,
+                    Err(e) => e.kind() == std::io::ErrorKind::ConnectionRefused,
+                })
+            })
+            .collect();
+        hs.into_iter().any(|h| h.join().unwrap_or(false))
+    });
+    (up, up.then(|| ms(t0)))
 }
 
 pub const CHECK_KINDS: &[&str] = &["ping", "tcp", "http", "ssl", "dns"];
@@ -73,10 +99,10 @@ fn why(e: &(dyn std::error::Error + 'static)) -> String {
     let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(e);
     while let Some(x) = cur {
         if let Some(io) = x.downcast_ref::<std::io::Error>() {
-            if let Some(inner) = io.get_ref() {
-                if let Some(r) = inner.downcast_ref::<rustls::Error>() {
-                    return tls_why(r);
-                }
+            if let Some(inner) = io.get_ref()
+                && let Some(r) = inner.downcast_ref::<rustls::Error>()
+            {
+                return tls_why(r);
             }
             if matches!(io.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) {
                 return why_io(io);
@@ -85,10 +111,10 @@ fn why(e: &(dyn std::error::Error + 'static)) -> String {
         if let Some(r) = x.downcast_ref::<rustls::Error>() {
             return tls_why(r);
         }
-        if let Some(t) = x.downcast_ref::<ureq::Transport>() {
-            if t.kind() == ureq::ErrorKind::Dns {
-                return "el nombre no resuelve".into();
-            }
+        if let Some(t) = x.downcast_ref::<ureq::Transport>()
+            && t.kind() == ureq::ErrorKind::Dns
+        {
+            return "el nombre no resuelve".into();
         }
         cur = x.source();
     }
@@ -103,7 +129,7 @@ fn tls_why(r: &rustls::Error) -> String {
 }
 
 /// Conecta por TCP a la primera dirección del nombre que conteste.
-fn connect(host: &str, port: u16, t: Duration) -> Result<TcpStream, String> {
+pub fn connect(host: &str, port: u16, t: Duration) -> Result<TcpStream, String> {
     let addrs = (host, port).to_socket_addrs().map_err(|_| "el nombre no resuelve".to_string())?;
     let mut last = "el nombre no resuelve".to_string();
     for a in addrs {
@@ -124,8 +150,7 @@ fn probe_tcp(host: &str, port: u16) -> (bool, Option<f64>, String) {
 }
 
 /// Cliente HTTP: verifica certificados con los del sistema (una web con HTTPS roto es una web caída).
-pub static HTTP: LazyLock<ureq::Agent> =
-    LazyLock::new(|| ureq::AgentBuilder::new().timeout(Duration::from_secs(8)).user_agent("catlan").build());
+pub static HTTP: LazyLock<ureq::Agent> = LazyLock::new(|| ureq::AgentBuilder::new().timeout(Duration::from_secs(8)).user_agent("catlan").build());
 
 fn read_limited(r: ureq::Response, n: u64) -> Vec<u8> {
     let mut v = vec![];
@@ -166,10 +191,8 @@ pub fn get_with_auth(url: &str, user: &str, pass: &str) -> Result<Vec<u8>, HttpE
     let digest = resp.all("WWW-Authenticate").into_iter().find(|h| h.to_lowercase().starts_with("digest")).map(String::from);
     let auth = match digest {
         Some(h) => {
-            let f: HashMap<String, String> = re!(r#"(\w+)\s*=\s*(?:"([^"]*)"|([^,\s]+))"#)
-                .captures_iter(&h)
-                .map(|c| (c[1].to_lowercase(), c.get(2).or(c.get(3)).map_or("", |m| m.as_str()).to_string()))
-                .collect();
+            let f: HashMap<String, String> =
+                re!(r#"(\w+)\s*=\s*(?:"([^"]*)"|([^,\s]+))"#).captures_iter(&h).map(|c| (c[1].to_lowercase(), c.get(2).or(c.get(3)).map_or("", |m| m.as_str()).to_string())).collect();
             let gs = |k: &str| f.get(k).cloned().unwrap_or_default();
             let alg = if gs("algorithm").to_uppercase().starts_with("SHA-256") { "sha256" } else { "md5" };
             let hx = |s: String| crate::crypto::hex(&crate::crypto::hash(alg, s.as_bytes()));
@@ -240,20 +263,10 @@ impl rustls::client::danger::ServerCertVerifier for AnyCert {
     ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
         Ok(rustls::client::danger::ServerCertVerified::assertion())
     }
-    fn verify_tls12_signature(
-        &self,
-        _: &[u8],
-        _: &rustls::pki_types::CertificateDer,
-        _: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+    fn verify_tls12_signature(&self, _: &[u8], _: &rustls::pki_types::CertificateDer, _: &rustls::DigitallySignedStruct) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
         Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
     }
-    fn verify_tls13_signature(
-        &self,
-        _: &[u8],
-        _: &rustls::pki_types::CertificateDer,
-        _: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+    fn verify_tls13_signature(&self, _: &[u8], _: &rustls::pki_types::CertificateDer, _: &rustls::DigitallySignedStruct) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
         Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
     }
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
@@ -330,13 +343,11 @@ pub fn run_check(c: &Row) -> (bool, Option<f64>, String) {
 }
 
 // ── Avisos: correo, Telegram y webhook. Lo guardado en catlan manda; lo que no, sale de las variables de entorno ──
-pub const ALERT_KEYS: [&str; 9] =
-    ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "MAIL_FROM", "MAIL_TO", "TELEGRAM_TOKEN", "TELEGRAM_CHAT", "WEBHOOK_URL"];
+pub const ALERT_KEYS: [&str; 9] = ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "MAIL_FROM", "MAIL_TO", "TELEGRAM_TOKEN", "TELEGRAM_CHAT", "WEBHOOK_URL"];
 /// Nunca salen por la API (la URL de un webhook es una llave).
 pub const ALERT_SECRET: [&str; 3] = ["SMTP_PASS", "TELEGRAM_TOKEN", "WEBHOOK_URL"];
 /// Lo que vino de variables de entorno al arrancar.
-static ENV_ALERTS: LazyLock<HashMap<&'static str, String>> =
-    LazyLock::new(|| ALERT_KEYS.iter().map(|k| (*k, std::env::var(format!("CATLAN_{k}")).unwrap_or_default())).collect());
+static ENV_ALERTS: LazyLock<HashMap<&'static str, String>> = LazyLock::new(|| ALERT_KEYS.iter().map(|k| (*k, std::env::var(format!("CATLAN_{k}")).unwrap_or_default())).collect());
 static CFG: LazyLock<RwLock<HashMap<&'static str, String>>> = LazyLock::new(|| RwLock::new(ENV_ALERTS.clone()));
 
 pub fn cfg(k: &str) -> String {
@@ -415,10 +426,7 @@ fn mail(subject: &str, text: &str) -> Result<()> {
     // Como hacía smtplib: STARTTLS si el servidor lo ofrece (465: TLS desde el principio), sin exigir un certificado
     // de una CA pública: los servidores de correo internos suelen llevar uno propio.
     let tls = TlsParameters::builder(host.clone()).dangerous_accept_invalid_certs(true).dangerous_accept_invalid_hostnames(true).build_rustls()?;
-    let mut t = lettre::SmtpTransport::builder_dangerous(&host)
-        .port(port)
-        .timeout(Some(Duration::from_secs(15)))
-        .tls(if port == 465 { Tls::Wrapper(tls) } else { Tls::Opportunistic(tls) });
+    let mut t = lettre::SmtpTransport::builder_dangerous(&host).port(port).timeout(Some(Duration::from_secs(15))).tls(if port == 465 { Tls::Wrapper(tls) } else { Tls::Opportunistic(tls) });
     let user = cfg("SMTP_USER");
     if !user.is_empty() {
         t = t.credentials(Credentials::new(user, cfg("SMTP_PASS")));
@@ -441,15 +449,9 @@ pub fn notify(subject: &str, text: &str) -> Map<String, Value> {
     for ch in channels() {
         let r = match ch {
             "correo" => mail(subject, text),
-            "Telegram" => post_json(
-                &format!("https://api.telegram.org/bot{}/sendMessage", cfg("TELEGRAM_TOKEN")),
-                &json!({"chat_id": cfg("TELEGRAM_CHAT"), "text": format!("{subject}\n\n{text}")}),
-            ),
+            "Telegram" => post_json(&format!("https://api.telegram.org/bot{}/sendMessage", cfg("TELEGRAM_TOKEN")), &json!({"chat_id": cfg("TELEGRAM_CHAT"), "text": format!("{subject}\n\n{text}")})),
             // «text» lo leen Slack, Teams, Mattermost y Google Chat; «content», Discord
-            _ => post_json(
-                &cfg("WEBHOOK_URL"),
-                &json!({"text": format!("{subject}\n{text}"), "content": format!("{subject}\n{text}"), "subject": subject, "body": text}),
-            ),
+            _ => post_json(&cfg("WEBHOOK_URL"), &json!({"text": format!("{subject}\n{text}"), "content": format!("{subject}\n{text}"), "subject": subject, "body": text})),
         };
         match r {
             Ok(()) => out.insert(ch.into(), Value::Null),
@@ -492,16 +494,21 @@ fn probe(c: Row) -> Result<()> {
     let fails = if up { 0 } else { c.i("fails").unwrap_or(0) + 1 };
     let old = c.get("state").and_then(Value::as_str);
     // 2 fallos seguidos: sin falsas alarmas por un paquete perdido
-    let state = if up { Some("up") } else if fails >= 2 { Some("down") } else { old };
+    let state = if up {
+        Some("up")
+    } else if fails >= 2 {
+        Some("down")
+    } else {
+        old
+    };
     q("INSERT INTO pings(check_id, up, rtt) VALUES(?,?,?)", p![&c["id"], up, rtt.map_or(crate::db::SqlV::Null, crate::db::SqlV::Real)])?;
     let since = if state != old { ", since=CURRENT_TIMESTAMP" } else { "" };
     q(&format!("UPDATE checks SET state=?, fails=?, rtt=?, detail=?{since} WHERE id=?"), p![state, fails, rtt.map_or(crate::db::SqlV::Null, crate::db::SqlV::Real), &detail, &c["id"]])?;
-    if state == Some("down") {
-        if let Some(item) = c.i("item").filter(|i| *i != 0) {
-            if dependents()?.get(&item).is_some_and(|v| !v.is_empty()) {
-                return Ok(()); // cae porque cae otro del que cuelga: se avisa del culpable; si sigue caído cuando este vuelva, avisará entonces
-            }
-        }
+    if state == Some("down")
+        && let Some(item) = c.i("item").filter(|i| *i != 0)
+        && dependents()?.get(&item).is_some_and(|v| !v.is_empty())
+    {
+        return Ok(()); // cae porque cae otro del que cuelga: se avisa del culpable; si sigue caído cuando este vuelva, avisará entonces
     }
     let name = [c.s("label"), c.s("item_name"), c.s("host")].into_iter().find(|s| !s.is_empty()).unwrap_or("");
     let target = if c.s("kind") == "http" { c.s("url") } else { c.s("host") };
@@ -530,8 +537,7 @@ pub fn dependents() -> Result<HashMap<i64, Vec<String>>> {
         }
     }
     // un equipo está caído si todas sus comprobaciones fallan; fallando sin llegar a «caído» ya cuenta (llegan a destiempo)
-    let down: HashSet<Key> =
-        by_item.iter().filter(|(_, cs)| cs.iter().all(|c| c.s("state") == "down" || c.t("fails"))).map(|(i, _)| Key::Item(*i)).collect();
+    let down: HashSet<Key> = by_item.iter().filter(|(_, cs)| cs.iter().all(|c| c.s("state") == "down" || c.t("fails"))).map(|(i, _)| Key::Item(*i)).collect();
     let names: HashMap<i64, String> = q("SELECT id, name FROM items", p![])?.into_iter().map(|r| (r.i("id").unwrap_or(0), r.s("name").to_string())).collect();
     let mut verdict: HashMap<Key, Option<BTreeSet<String>>> = HashMap::new(); // None: en algún esquema es él el culpable
     for r in q("SELECT id, data FROM maps", p![])? {
@@ -640,8 +646,16 @@ pub fn monitor_health() -> Value {
     json!({"age": (now() - m.beat) as i64, "error": m.error, "error_ago": m.error_at.map(|t| (now() - t) as i64)})
 }
 
+/// El monitor, vigilado: si su hilo muere (un pánico fuera de `guarded`), se anota y vuelve a arrancar solo.
 pub fn start_monitor() {
-    let t = std::thread::spawn(monitor);
+    let t = std::thread::spawn(|| {
+        loop {
+            if let Err(p) = std::thread::spawn(monitor).join() {
+                mon_error(format!("el monitor se paró ({}); vuelve a arrancar", panic_msg(&*p)));
+            }
+            std::thread::sleep(Duration::from_secs(5));
+        }
+    });
     lock(&MON).thread = Some(t);
 }
 
@@ -695,10 +709,7 @@ fn monitor_round(pool: &Pool, n: u64) -> Result<()> {
         pool.submit(move || guarded("gather", || gather(&src)));
     }
     // los Kitty envían ellos; tres envíos sin noticias = apagado o sin red
-    for src in q(
-        &format!("{SOURCES} WHERE s.kind = 'kitty' AND COALESCE(s.error, '') != ? AND s.last <= datetime('now', '-' || (3 * s.every) || ' seconds')"),
-        p![KITTY_LOST],
-    )? {
+    for src in q(&format!("{SOURCES} WHERE s.kind = 'kitty' AND COALESCE(s.error, '') != ? AND s.last <= datetime('now', '-' || (3 * s.every) || ' seconds')"), p![KITTY_LOST])? {
         save_health(&src, &[], &[], None, Some(KITTY_LOST))?;
     }
     if n % 300 == 1 {
@@ -707,20 +718,43 @@ fn monitor_round(pool: &Pool, n: u64) -> Result<()> {
         warranties()?;
         daily_backup()?;
     }
-    if n % 1800 == 0 {
-        // en bruto, 7 días; lo de antes ya está resumido por horas
-        q("DELETE FROM pings WHERE ts < datetime('now', '-7 days')", p![])?;
-        q("DELETE FROM metrics WHERE ts < datetime('now', '-7 days')", p![])?;
-        q("DELETE FROM syslog WHERE ts < datetime('now', '-30 days')", p![])?;
-        q(&format!("DELETE FROM pings_h WHERE hour < datetime('now', '-{KEEP_DAYS} days')"), p![])?;
-        q(&format!("DELETE FROM metrics_h WHERE hour < datetime('now', '-{KEEP_DAYS} days')"), p![])?;
+    if n.is_multiple_of(1800) {
+        // en bruto, unos días; lo de antes ya está resumido por horas (días: Opciones → Salud de catlan)
+        let r = retention();
+        let d = |k: &str| r[k].as_i64().unwrap_or(1);
+        q("DELETE FROM pings WHERE ts < datetime('now', ?)", p![format!("-{} days", d("raw"))])?;
+        q("DELETE FROM metrics WHERE ts < datetime('now', ?)", p![format!("-{} days", d("raw"))])?;
+        q("DELETE FROM syslog WHERE ts < datetime('now', ?)", p![format!("-{} days", d("syslog"))])?;
+        q("DELETE FROM pings_h WHERE hour < datetime('now', ?)", p![format!("-{} days", d("hours"))])?;
+        q("DELETE FROM metrics_h WHERE hour < datetime('now', ?)", p![format!("-{} days", d("hours"))])?;
+        lock(writer()).execute_batch("PRAGMA optimize")?; // tras borrar mucho, que SQLite revise sus estadísticas
     }
     Ok(())
 }
 
-/// Resúmenes por hora: más de un año, para comparar con el mismo mes del año anterior.
+/// Días que se guarda cada cosa: (clave, por defecto, mínimo, máximo). Por horas, más de un año por defecto, para
+/// comparar con el mismo mes del año anterior.
+const RETENTION: [(&str, i64, i64, i64); 3] = [("raw", 7, 1, 90), ("syslog", 30, 1, 365), ("hours", KEEP_DAYS, 30, 1000)];
 pub const KEEP_DAYS: i64 = 400;
-pub const MAX_HOURS: i64 = 24 * KEEP_DAYS;
+pub const MAX_HOURS: i64 = 24 * 1000;
+
+pub fn retention() -> Value {
+    let saved = val("SELECT v FROM meta WHERE k='retention'", p![]).ok().and_then(|v| v.as_str().and_then(|s| serde_json::from_str::<Value>(s).ok())).unwrap_or_default();
+    RETENTION.iter().map(|&(k, def, lo, hi)| (k.to_string(), json!(saved[k].as_i64().unwrap_or(def).clamp(lo, hi)))).collect::<Map<_, _>>().into()
+}
+
+pub fn set_retention(b: &Value) -> Result<Value> {
+    let mut v = retention();
+    for &(k, _, lo, hi) in &RETENTION {
+        match b.get(k) {
+            None => {}
+            Some(x) if x.as_i64().is_some_and(|n| (lo..=hi).contains(&n)) => v[k] = x.clone(),
+            Some(_) => return bad(format!("{k}: entre {lo} y {hi} días")),
+        }
+    }
+    q("INSERT OR REPLACE INTO meta(k, v) VALUES('retention', ?)", p![v.to_string()])?;
+    Ok(v)
+}
 
 /// Resume por horas (media, mínimo y máximo) las horas ya cerradas. Empieza en la última hora resumida
 /// y la rehace, así que no importa haber estado apagado ni que una hora se resumiera a medias.
@@ -826,19 +860,16 @@ pub fn warranties_due() -> Result<Option<String>> {
     if rows.is_empty() {
         return Ok(None);
     }
-    let lines: Vec<String> = rows
-        .iter()
-        .map(|r| format!("- {}: {} ({})", r.s("name"), if r.s("day") == today { "hoy".into() } else { format!("el {}", r.s("day")) }, r.s("kind")))
-        .collect();
+    let lines: Vec<String> = rows.iter().map(|r| format!("- {}: {} ({})", r.s("name"), if r.s("day") == today { "hoy".into() } else { format!("el {}", r.s("day")) }, r.s("kind"))).collect();
     Ok(Some(lines.join("\n") + "\n\n-- catlan"))
 }
 
 /// Una vez al día: avisa de las garantías, licencias, dominios… que caducan dentro de 30 días y de los que caducan hoy.
 pub fn warranties() -> Result<()> {
-    if let Some(text) = warranties_due()? {
-        if !channels().is_empty() {
-            notify("catlan: caducidades", &text);
-        }
+    if let Some(text) = warranties_due()?
+        && !channels().is_empty()
+    {
+        notify("catlan: caducidades", &text);
     }
     Ok(())
 }
@@ -866,10 +897,8 @@ fn backups() -> Result<Vec<std::path::PathBuf>> {
     if !d.exists() {
         return Ok(vec![]);
     }
-    let mut v: Vec<_> = std::fs::read_dir(d)?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("catlan-") && n.ends_with(".db")))
-        .collect();
+    let mut v: Vec<_> =
+        std::fs::read_dir(d)?.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("catlan-") && n.ends_with(".db"))).collect();
     v.sort();
     Ok(v)
 }
@@ -879,15 +908,8 @@ pub static STARTED: LazyLock<String> = LazyLock::new(|| utc("%Y-%m-%d %H:%M:%S")
 /// La salud del propio catlan.
 pub fn system_health() -> Result<Value> {
     let size = |f: std::path::PathBuf| std::fs::metadata(f).map(|m| m.len()).unwrap_or(0);
-    let late = val("SELECT COUNT(*) FROM checks WHERE last IS NOT NULL AND last < datetime('now', '-' || (every * 3 + 60) || ' seconds')", p![])?
-        .as_i64()
-        .unwrap_or(0)
-        + val(
-            "SELECT COUNT(*) FROM sources WHERE kind != 'kitty' AND last IS NOT NULL AND last < datetime('now', '-' || (every * 3 + 60) || ' seconds')",
-            p![],
-        )?
-        .as_i64()
-        .unwrap_or(0);
+    let late = val("SELECT COUNT(*) FROM checks WHERE last IS NOT NULL AND last < datetime('now', '-' || (every * 3 + 60) || ' seconds')", p![])?.as_i64().unwrap_or(0)
+        + val("SELECT COUNT(*) FROM sources WHERE kind != 'kitty' AND last IS NOT NULL AND last < datetime('now', '-' || (every * 3 + 60) || ' seconds')", p![])?.as_i64().unwrap_or(0);
     let mut bk = vec![];
     for f in backups()?.iter().rev() {
         let md = std::fs::metadata(f)?;
@@ -900,15 +922,14 @@ pub fn system_health() -> Result<Value> {
     }
     Ok(json!({"version": crate::config::VERSION, "schema": crate::db::user_version()?, "db_bytes": size(db_path()),
         "wal_bytes": size(DATA.join("catlan.db-wal")), "integrity": crate::db::INTEGRITY.get(), "started": *STARTED, "backups": bk,
-        "monitor": monitor_health(), "late": late, "syslog": *SYSLOG_PORT, "https": crate::server::TLS.get().map_or("", |t| t.pin.as_str()), "counts": counts}))
+        "monitor": monitor_health(), "late": late, "syslog": *SYSLOG_PORT, "https": crate::server::TLS.get().map_or("", |t| t.pin.as_str()), "rejected": crate::server::REJECTED.load(std::sync::atomic::Ordering::Relaxed), "counts": counts}))
 }
 
 /// Nunca salen por la API ni al historial.
 pub const SECRET: [&str; 3] = ["community", "pass", "priv_pass"];
 
 pub fn health() -> Result<Value> {
-    let agents: HashMap<i64, Value> =
-        q("SELECT source, id FROM agents WHERE source IS NOT NULL", p![])?.into_iter().filter_map(|r| Some((r.i("source")?, r["id"].clone()))).collect();
+    let agents: HashMap<i64, Value> = q("SELECT source, id FROM agents WHERE source IS NOT NULL", p![])?.into_iter().filter_map(|r| Some((r.i("source")?, r["id"].clone()))).collect();
     let mut out = vec![];
     for mut s in q(&format!("{SOURCES} ORDER BY COALESCE(NULLIF(s.label, ''), i.name, s.host) COLLATE NOCASE"), p![])? {
         for k in SECRET {
@@ -920,10 +941,7 @@ pub fn health() -> Result<Value> {
         s.insert("problems".into(), problems);
         s.insert("info".into(), info);
         s.insert("agent".into(), agents.get(&id).cloned().unwrap_or(Value::Null));
-        let latest = q(
-            "SELECT key, label, value, unit FROM metrics WHERE source_id=? AND ts = (SELECT max(ts) FROM metrics WHERE source_id=?) ORDER BY key",
-            p![id, id],
-        )?;
+        let latest = q("SELECT key, label, value, unit FROM metrics WHERE source_id=? AND ts = (SELECT max(ts) FROM metrics WHERE source_id=?) ORDER BY key", p![id, id])?;
         s.insert("latest".into(), latest.rows.into_iter().map(Value::Object).collect::<Vec<_>>().into());
         out.push(Value::Object(s));
     }
@@ -972,7 +990,13 @@ pub fn latency(hours: i64) -> Result<Value> {
 
 /// Guarda una lectura (de SNMP o de un Kitty), el estado del equipo, y avisa si cambia.
 pub fn save_health(src: &Row, out: &[M], probs: &[String], info: Option<&Map<String, Value>>, err: Option<&str>) -> Result<()> {
-    let state = if err.is_some() { "error" } else if !probs.is_empty() { "warn" } else { "ok" };
+    let state = if err.is_some() {
+        "error"
+    } else if !probs.is_empty() {
+        "warn"
+    } else {
+        "ok"
+    };
     if !out.is_empty() {
         let mut c = lock(writer());
         let tx = c.transaction()?;
@@ -995,10 +1019,7 @@ pub fn save_health(src: &Row, out: &[M], probs: &[String], info: Option<&Map<Str
     let (subject, text) = if state == "ok" {
         (format!("catlan: {name} vuelve a estar bien"), format!("{name} ({host}) ya no tiene avisos."))
     } else {
-        (
-            format!("catlan: {name}: {}", list.first().cloned().unwrap_or_default()),
-            format!("{name} ({host}):\n\n{}", list.iter().map(|p| format!("- {p}")).collect::<Vec<_>>().join("\n")),
-        )
+        (format!("catlan: {name}: {}", list.first().cloned().unwrap_or_default()), format!("{name} ({host}):\n\n{}", list.iter().map(|p| format!("- {p}")).collect::<Vec<_>>().join("\n")))
     };
     alert("sources", src, Some(state), "ok", &subject, &text)
 }
@@ -1110,10 +1131,10 @@ pub fn ipam(row: &Row) -> Result<Value> {
     let Ok(net) = parse_net(row.s("cidr")) else { return bad("red no válida") };
     let mut used: BTreeMap<u32, Vec<Value>> = BTreeMap::new();
     for r in q("SELECT id, name, ip FROM items WHERE ip != ''", p![])? {
-        if let Ok(a) = r.s("ip").trim().parse::<Ipv4Addr>() {
-            if net.contains(u32::from(a)) {
-                used.entry(u32::from(a)).or_default().push(json!({"id": r["id"], "name": r["name"]}));
-            }
+        if let Ok(a) = r.s("ip").trim().parse::<Ipv4Addr>()
+            && net.contains(u32::from(a))
+        {
+            used.entry(u32::from(a)).or_default().push(json!({"id": r["id"], "name": r["name"]}));
         }
     }
     let scan: BTreeMap<u32, Value> = serde_json::from_str::<Vec<Value>>(row.s("scan"))
@@ -1126,7 +1147,13 @@ pub fn ipam(row: &Row) -> Result<Value> {
         .iter()
         .map(|a| {
             let its = used.get(a).cloned().unwrap_or_default();
-            let conflict = if its.len() > 1 { "duplicada" } else if its.is_empty() { "sin registrar" } else { "" };
+            let conflict = if its.len() > 1 {
+                "duplicada"
+            } else if its.is_empty() {
+                "sin registrar"
+            } else {
+                ""
+            };
             json!({"ip": Ipv4Addr::from(*a).to_string(), "items": its, "seen": scan.get(a), "up": if row.t("scanned") { json!(scan.contains_key(a)) } else { Value::Null }, "conflict": conflict})
         })
         .collect();
@@ -1189,14 +1216,7 @@ mod tests {
             .into_iter()
             .map(|r| Value::Array(r.into_iter().map(|x| x.1).collect()))
             .collect();
-        assert_eq!(
-            h,
-            vec![
-                json!(["2026-01-15 10:00:00", 4, 4, 25.0, 10.0, 40.0]),
-                json!(["2026-01-15 11:00:00", 2, 0, null, null, null]),
-                json!(["2026-02-01 12:00:00", 1, 0, null, null, null])
-            ]
-        );
+        assert_eq!(h, vec![json!(["2026-01-15 10:00:00", 4, 4, 25.0, 10.0, 40.0]), json!(["2026-01-15 11:00:00", 2, 0, null, null, null]), json!(["2026-02-01 12:00:00", 1, 0, null, null, null])]);
         let m = q("SELECT v, v_min, v_max FROM metrics_h WHERE source_id=7", p![]).unwrap().one().unwrap();
         assert_eq!((m.f("v"), m.f("v_min"), m.f("v_max")), (Some(60.0), Some(50.0), Some(70.0)));
         assert_eq!(series(7, MAX_HOURS).unwrap()["disk:/"]["points"], json!([["2026-01-15 10:00:00", 60.0]])); // más de 7 días: de los resúmenes
@@ -1215,8 +1235,12 @@ mod tests {
         for (name, days) in [("caduca-hoy", 0), ("caduca-en-30", 30), ("caduca-en-31", 31)] {
             q("INSERT INTO items(name, warranty) VALUES(?, date('now', 'localtime', ?))", p![name, format!("+{days} days")]).unwrap();
         }
-        q("INSERT INTO expiries(name, kind, date) VALUES('midominio.es', 'dominio', date('now', 'localtime', '+30 days')), \
-           ('Office', 'licencia', date('now', 'localtime', '+31 days'))", p![]).unwrap();
+        q(
+            "INSERT INTO expiries(name, kind, date) VALUES('midominio.es', 'dominio', date('now', 'localtime', '+30 days')), \
+           ('Office', 'licencia', date('now', 'localtime', '+31 days'))",
+            p![],
+        )
+        .unwrap();
         let t = warranties_due().unwrap().unwrap();
         assert!(warranties_due().unwrap().is_none());
         assert!(t.contains("caduca-hoy: hoy") && t.contains("caduca-en-30: el ") && !t.contains("caduca-en-31"), "{t}");

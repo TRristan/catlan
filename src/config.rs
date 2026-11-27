@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
-pub const VERSION: &str = "1.0";
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const MAX_BODY: usize = 20 * 1024 * 1024;
 
 fn env(k: &str) -> String {
@@ -20,9 +20,7 @@ fn env_num<T: std::str::FromStr>(k: &str, def: T) -> T {
 }
 
 /// Carpeta del ejecutable: los datos van a su lado, como iban al lado de catlan.py.
-pub static HERE: LazyLock<PathBuf> = LazyLock::new(|| {
-    std::env::current_exe().ok().and_then(|p| p.parent().map(PathBuf::from)).unwrap_or_else(|| PathBuf::from("."))
-});
+pub static HERE: LazyLock<PathBuf> = LazyLock::new(|| std::env::current_exe().ok().and_then(|p| p.parent().map(PathBuf::from)).unwrap_or_else(|| PathBuf::from(".")));
 pub static DATA: LazyLock<PathBuf> = LazyLock::new(|| match std::env::var("CATLAN_DATA") {
     Ok(d) if !d.is_empty() => PathBuf::from(d),
     _ => HERE.join("data"),
@@ -35,10 +33,16 @@ pub static KEY: LazyLock<String> = LazyLock::new(|| env("CATLAN_KEY"));
 /// Por defecto, el propio equipo (un nginx o Caddy en la misma máquina).
 pub static PROXIES: LazyLock<Vec<std::net::IpAddr>> = LazyLock::new(|| {
     let v = std::env::var("CATLAN_PROXIES").unwrap_or_else(|_| "127.0.0.1,::1".into());
-    v.split(',').map(str::trim).filter(|s| !s.is_empty()).map(|s| s.parse().unwrap_or_else(|_| {
-        eprintln!("CATLAN_PROXIES: {s} no es una IP");
-        std::process::exit(2)
-    })).collect()
+    v.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            s.parse().unwrap_or_else(|_| {
+                eprintln!("CATLAN_PROXIES: {s} no es una IP");
+                std::process::exit(2)
+            })
+        })
+        .collect()
 });
 /// 0 = sin receptor de syslog
 pub static SYSLOG_PORT: LazyLock<u16> = LazyLock::new(|| env_num("CATLAN_SYSLOG_PORT", 514));
@@ -58,11 +62,7 @@ pub fn db_path() -> PathBuf {
 pub fn data_resolved() -> String {
     let p = std::fs::canonicalize(&*DATA).unwrap_or_else(|_| DATA.clone());
     let s = p.to_string_lossy().to_string();
-    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
-        format!(r"\\{rest}")
-    } else {
-        s.strip_prefix(r"\\?\").map(String::from).unwrap_or(s)
-    }
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") { format!(r"\\{rest}") } else { s.strip_prefix(r"\\?\").map(String::from).unwrap_or(s) }
 }
 
 /// Una cookie por instalación: el navegador no separa cookies por puerto, y dos catlan en la misma máquina se cerraban la sesión.

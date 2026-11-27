@@ -1,6 +1,6 @@
 //! SQLite: una conexión que escribe (con candado) y una de solo lectura por hilo, esquema y migraciones numeradas.
 use crate::config::{DATA, db_path};
-use crate::util::{Row, lock, local};
+use crate::util::{Row, local, lock};
 use rusqlite::{Connection, params_from_iter, types::ValueRef};
 use serde_json::{Number, Value};
 use std::cell::RefCell;
@@ -268,6 +268,7 @@ pub const MIGRATIONS: &[&str] = &[
     "ALTER TABLE agents ADD COLUMN ukey TEXT /*sha256 de la clave de incidencias de Kitty, que pueden leer los usuarios del PC*/",
     "CREATE TABLE tasks(id INTEGER PRIMARY KEY AUTOINCREMENT, user INTEGER NOT NULL, text TEXT NOT NULL, col TEXT NOT NULL DEFAULT 'pendiente',      pos REAL NOT NULL DEFAULT 0, updated TEXT DEFAULT CURRENT_TIMESTAMP)",
     "CREATE TABLE apps(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT '', winget TEXT NOT NULL DEFAULT '',      notes TEXT DEFAULT '', updated TEXT DEFAULT CURRENT_TIMESTAMP) /*programas que Kitty instala y mantiene al día con winget*/",
+    "ALTER TABLE users ADD COLUMN ext TEXT NOT NULL DEFAULT '' /*usuario del dominio: ldap:sAMAccountName u oidc:emisor|sub; vacío, local*/",
 ];
 /// Las de antes de numerarlas: una BD vieja (user_version 0) puede tener ya cualquiera de ellas.
 const LEGACY: usize = 19;
@@ -275,20 +276,17 @@ const LEGACY: usize = 19;
 fn migrate(c: &Connection, fresh: bool) -> anyhow::Result<()> {
     let ver = c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?.max(0) as usize;
     if ver > MIGRATIONS.len() {
-        anyhow::bail!(
-            "Esta base de datos es de un catlan más nuevo (migración {ver}; este llega a la {}). Actualiza catlan.",
-            MIGRATIONS.len()
-        );
+        anyhow::bail!("Esta base de datos es de un catlan más nuevo (migración {ver}; este llega a la {}). Actualiza catlan.", MIGRATIONS.len());
     }
     if ver < MIGRATIONS.len() && !fresh {
         // copia completa antes de tocar nada
         backup_to(&DATA.join(format!("catlan-antes-de-v{}-{}.db", MIGRATIONS.len(), local("%Y%m%d-%H%M%S"))))?;
     }
     for (n, sql) in MIGRATIONS.iter().enumerate().skip(ver) {
-        if let Err(e) = c.execute_batch(sql) {
-            if !(n < LEGACY && e.to_string().contains("duplicate column")) {
-                return Err(e.into());
-            }
+        if let Err(e) = c.execute_batch(sql)
+            && !(n < LEGACY && e.to_string().contains("duplicate column"))
+        {
+            return Err(e.into());
         }
         c.execute_batch(&format!("PRAGMA user_version={}", n + 1))?;
     }
@@ -298,10 +296,7 @@ fn migrate(c: &Connection, fresh: bool) -> anyhow::Result<()> {
 /// Ids que nunca se reutilizan. Sin AUTOINCREMENT, SQLite da a lo nuevo el id del último borrado, y lo nuevo heredaba
 /// su historial en Actividad y sus enlaces ([[#id]], esquemas, racks, incidencias). Las BDs de antes se reconstruyen una vez.
 fn rebuild_ids(c: &mut Connection) -> anyhow::Result<()> {
-    let old: Vec<String> = c
-        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND sql LIKE '%(id INTEGER PRIMARY KEY,%'")?
-        .query_map([], |r| r.get(0))?
-        .collect::<Result<_, _>>()?;
+    let old: Vec<String> = c.prepare("SELECT name FROM sqlite_master WHERE type='table' AND sql LIKE '%(id INTEGER PRIMARY KEY,%'")?.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
     if old.is_empty() {
         return Ok(());
     }
@@ -323,9 +318,11 @@ fn rebuild_ids(c: &mut Connection) -> anyhow::Result<()> {
     let tx = c.transaction()?;
     for t in &old {
         let sql: String = tx.query_row("SELECT sql FROM sqlite_master WHERE name=?", [t], |r| r.get(0))?;
-        let new = crate::re!(r#"^CREATE TABLE (?:IF NOT EXISTS )?"?\w+"?"#)
-            .replacen(&sql, 1, format!("CREATE TABLE {t}_new").as_str())
-            .replacen("(id INTEGER PRIMARY KEY,", "(id INTEGER PRIMARY KEY AUTOINCREMENT,", 1);
+        let new = crate::re!(r#"^CREATE TABLE (?:IF NOT EXISTS )?"?\w+"?"#).replacen(&sql, 1, format!("CREATE TABLE {t}_new").as_str()).replacen(
+            "(id INTEGER PRIMARY KEY,",
+            "(id INTEGER PRIMARY KEY AUTOINCREMENT,",
+            1,
+        );
         tx.execute_batch(&new)?;
         tx.execute_batch(&format!("INSERT INTO {t}_new SELECT * FROM {t}; DROP TABLE {t}; ALTER TABLE {t}_new RENAME TO {t};"))?;
     }
@@ -333,11 +330,8 @@ fn rebuild_ids(c: &mut Connection) -> anyhow::Result<()> {
         // el contador empieza por encima de lo que se ve en Actividad: tampoco vuelven los ids ya borrados
         let k = kinds(t);
         let marks = if k.is_empty() { "NULL".to_string() } else { vec!["?"; k.len()].join(",") };
-        let top: Option<i64> = tx.query_row(
-            &format!("SELECT MAX(x) FROM (SELECT MAX(id) AS x FROM {t} UNION ALL SELECT MAX(ref) FROM log WHERE kind IN ({marks}))"),
-            params_from_iter(k.iter()),
-            |r| r.get(0),
-        )?;
+        let top: Option<i64> =
+            tx.query_row(&format!("SELECT MAX(x) FROM (SELECT MAX(id) AS x FROM {t} UNION ALL SELECT MAX(ref) FROM log WHERE kind IN ({marks}))"), params_from_iter(k.iter()), |r| r.get(0))?;
         tx.execute("DELETE FROM sqlite_sequence WHERE name=?", [t])?;
         tx.execute("INSERT INTO sqlite_sequence(name, seq) VALUES(?, ?)", rusqlite::params![t, top.unwrap_or(0)])?;
     }
@@ -353,9 +347,7 @@ pub fn init() -> anyhow::Result<()> {
     let mut c = connect()?;
     let integrity: String = c.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
     if integrity != "ok" {
-        println!(
-            "ATENCIÓN: la base de datos tiene daños (PRAGMA integrity_check): {integrity}\nRestaura la última copia de data/backups/ con catlan parado."
-        );
+        println!("ATENCIÓN: la base de datos tiene daños (PRAGMA integrity_check): {integrity}\nRestaura la última copia de data/backups/ con catlan parado.");
     }
     let _ = INTEGRITY.set(integrity);
     let fresh = c.query_row("SELECT 1 FROM sqlite_master", [], |_| Ok(())).is_err();

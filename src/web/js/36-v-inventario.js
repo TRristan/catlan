@@ -163,13 +163,24 @@ Object.assign(views, {
           ${row('Monitor', ok(m.age <= 30, `late (hace ${m.age} s)`, `parado desde hace ${esc(upTxt(m.age))}`) + (m.error ? `<div class="small muted mt">Último error${m.error_ago != null ? ` (hace ${esc(upTxt(m.error_ago))})` : ''}: <span class="mono">${esc(m.error)}</span></div>` : ''))}
           ${row('Comprobaciones atrasadas', h.late ? `<span class="pill warn"><i></i>${h.late}</span> <span class="small muted">llevan más de 3 vueltas sin hacerse</span>` : ok(true, 'ninguna'))}
           ${row('Base de datos', ok(h.integrity === 'ok', 'íntegra', 'con daños: ' + esc(h.integrity)) + ` · ${mb(h.db_bytes)}${h.wal_bytes ? ` + ${mb(h.wal_bytes)} en WAL` : ''}`)}
-          ${row('Syslog', h.syslog ? `UDP ${h.syslog}` : '<span class="dim">apagado</span>')}${row('HTTPS', h.https ? `autofirmado, huella <span class="mono small" style="word-break:break-all">${esc(h.https)}</span>` : 'con certificado propio')}
+          ${row('Syslog', h.syslog ? `UDP ${h.syslog}` : '<span class="dim">apagado</span>')}${row('HTTPS', h.https ? `autofirmado, huella <span class="mono small" style="word-break:break-all">${esc(h.https)}</span>` : 'con certificado propio')}${row('Conexiones rechazadas', h.rejected ? `<span class="pill warn"><i></i>${h.rejected.toLocaleString('es')} desde que arrancó (lleno o demasiadas desde una IP)</span>` : '<span class="dim">ninguna</span>')}
           ${Object.entries(h.counts).map(([k, v]) => row({items: 'Equipos', pages: 'Páginas', checks: 'Comprobaciones', sources: 'Fuentes de Salud', incidents: 'Incidencias', log: 'Entradas de Actividad', metrics: 'Lecturas (7 días)', syslog: 'Mensajes de syslog'}[k], v.toLocaleString('es'))).join('')}
         </tbody></table></section>
         <aside class="side-col"><section class="card pad" style="--i:1"><h3 class="card-t">${ui('layers', 15)}Copias diarias <span class="count">${h.backups.length}</span></h3>
           ${h.backups.length ? `<ul class="rel">${h.backups.map(b => `<li><span style="display:flex;justify-content:space-between;gap:8px;padding:6px 0"><span class="mono small">${esc(b.name)}</span><span class="dim small">${mb(b.bytes)} · ${esc(ago(b.at))}</span></span></li>`).join('')}</ul>`
             : '<p class="muted small">Aún ninguna: la primera se hace en los primeros minutos.</p>'}
           <p class="muted small">En <span class="mono">data/backups/</span> del servidor, una al día; se guardan las 7 últimas. Para restaurar, con catlan parado, copia una sobre <span class="mono">data/catlan.db</span>.</p></section></aside></div>`;
+    // Cuánto se guarda: lecturas en bruto, syslog y resúmenes por hora
+    const ret = await api('retention'), fld = (k, t, lo, hi) => `<div class="field"><label for="ret-${k}">${t}</label><input id="ret-${k}" name="${k}" type="number" min="${lo}" max="${hi}" required value="${ret[k]}" ${ME.admin ? '' : 'disabled'}></div>`;
+    app.insertAdjacentHTML('beforeend', `<section class="card pad mt" aria-labelledby="ret-t"><h3 class="card-t" id="ret-t">${ui('clock', 15)}Cuánto se guarda</h3>
+      <p class="small muted" style="margin:0 0 12px">En días. Se limpia cada hora; las gráficas de más días salen de los resúmenes por hora.</p>
+      <form id="ret-f" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;align-items:end">${fld('raw', 'Pings y lecturas en bruto (1–90)', 1, 90)}${fld('syslog', 'Syslog (1–365)', 1, 365)}${fld('hours', 'Resúmenes por hora (30–1000)', 30, 1000)}
+        ${ME.admin ? `<button class="btn" type="submit">Guardar</button>` : ''}</form></section>`);
+    $('#ret-f').onsubmit = async e => {
+      e.preventDefault();
+      const b = Object.fromEntries([...new FormData(e.target)].map(([k, v]) => [k, +v]));
+      try { await api('retention', 'PUT', b); toast('Guardado'); } catch {}
+    };
     // Actualizaciones de catlan desde GitHub: solo si un admin lo pide o activa «Actualizar solo»
     const u = await api('update');
     app.insertAdjacentHTML('beforeend', `<section class="card pad mt" aria-labelledby="up-t"><h3 class="card-t" id="up-t">${ui('redo', 15)}Actualizaciones</h3>

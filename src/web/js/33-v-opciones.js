@@ -91,6 +91,24 @@ Object.assign(views, {
             <div class="field full"><label for="al-w"><b class="small">Webhook</b> <span class="dim">· Slack, Teams, Mattermost, Google Chat o Discord</span></label><input id="al-w" name="WEBHOOK_URL" type="password" autocomplete="off" class="mono"></div>
             <div class="field full" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri">${ui('check', 16)}Guardar avisos</button><button type="button" class="btn" id="al-test">Enviar aviso de prueba</button></div>
           </form></section>
+        <section class="card pad mt" aria-labelledby="sso-t"><h3 class="card-t" id="sso-t">${ui('key', 16)}Inicio de sesión con el dominio</h3>
+          <p class="small muted" style="margin:0 0 12px">Usuarios de Active Directory (LDAP) o de Entra ID, Google Workspace o Keycloak (OIDC). Entran si alguno de sus grupos está abajo; sus grupos mandan su admin y lo que pueden editar en cada entrada. Los usuarios locales, <code>admin</code> incluido, entran siempre con su contraseña de catlan, aunque el dominio no conteste.</p>
+          <form id="sso-f" class="fields two" autocomplete="off">
+            <div class="field full"><b class="small">Active Directory / LDAP</b> <span class="dim small">· la contraseña la comprueba el dominio (bind con el propio usuario)</span></div>
+            <div class="field"><label for="sso-u">Servidor</label><input id="sso-u" name="ldap_url" class="mono" placeholder="ldaps://dc1.empresa.local"></div>
+            <div class="field"><label for="sso-d">Dominio</label><input id="sso-d" name="ldap_domain" class="mono" placeholder="empresa.local"></div>
+            <div class="field"><label for="sso-b">Base de búsqueda <span class="dim">· opcional</span></label><input id="sso-b" name="ldap_base" class="mono" placeholder="DC=empresa,DC=local"></div>
+            <div class="field"><label for="sso-pin">Huella del certificado <span class="dim">· si es autofirmado</span></label><input id="sso-pin" name="ldap_pin" class="mono" placeholder="SHA-256 en hex"></div>
+            <div class="field full"><b class="small">OIDC</b> <span class="dim small">· dirección de vuelta para dar de alta en el proveedor: <code id="sso-cb"></code></span></div>
+            <div class="field"><label for="sso-i">Emisor</label><input id="sso-i" name="oidc_issuer" class="mono" placeholder="https://login.microsoftonline.com/&lt;tenant&gt;/v2.0"></div>
+            <div class="field"><label for="sso-n">Texto del botón</label><input id="sso-n" name="oidc_name" placeholder="Microsoft"></div>
+            <div class="field"><label for="sso-c">Id de cliente</label><input id="sso-c" name="oidc_client" class="mono"></div>
+            <div class="field"><label for="sso-s">Secreto de cliente</label><input id="sso-s" name="oidc_secret" type="password" autocomplete="new-password" class="mono"></div>
+            <div class="field"><label for="sso-g">Claim de los grupos</label><input id="sso-g" name="oidc_groups" class="mono" placeholder="groups"></div>
+            <div class="field full"><label for="sso-m">Grupos del dominio con acceso <span class="dim">· uno por línea: <code>grupo del dominio | grupo de catlan</code> o <code>| admin</code>. Vale el nombre (IT), el DN entero o, en Google, <code>@empresa.com</code></span></label>
+              <textarea id="sso-m" name="map" rows="4" class="mono" placeholder="Administradores de catlan | admin&#10;IT | Técnicos&#10;Dirección | Lectura"></textarea></div>
+            <div class="field full"><button class="btn pri">${ui('check', 16)}Guardar inicio de sesión</button></div>
+          </form></section>
         <section class="card pad mt" style="border-color:color-mix(in oklab,var(--bad) 45%,var(--line))" aria-labelledby="dz-t">
           <h3 class="card-t" id="dz-t" style="color:var(--bad)">${ui('alert', 16)} Zona de peligro</h3>
           <p class="small" style="margin:0 0 12px">Borra todo el contenido de catlan: wiki, inventario, esquemas, racks, monitor, salud, incidencias, Kittys, dashboard, sonidos y actividad. Se quedan los usuarios y los grupos.</p>
@@ -106,6 +124,25 @@ Object.assign(views, {
       a.env.forEach(k => f.elements[k]?.insertAdjacentHTML('afterend', '<small class="dim env-note">Viene de una variable de entorno: lo que guardes aquí manda.</small>'));
     };
     paintAlerts(await api('alerts'));
+    const gid = Object.fromEntries(gs.map(g => [g.name.toLowerCase(), g.id])), gnm = Object.fromEntries(gs.map(g => [g.id, g.name]));
+    const paintSso = c => {
+      const f = $('#sso-f');
+      ['ldap_url', 'ldap_domain', 'ldap_base', 'ldap_pin', 'oidc_issuer', 'oidc_name', 'oidc_client', 'oidc_groups'].forEach(k => f.elements[k].value = c[k] || '');
+      f.oidc_secret.value = ''; f.oidc_secret.placeholder = c.set.oidc_secret ? 'Guardado · escribe para cambiarlo' : '';
+      f.map.value = c.map.map(m => `${m.from} | ${m.to === 'admin' ? 'admin' : gnm[m.to] || '?'}`).join('\n');
+    };
+    $('#sso-cb').textContent = location.origin + '/api/sso/callback';
+    paintSso(await api('sso/config'));
+    $('#sso-f').onsubmit = async e => {
+      e.preventDefault();
+      const body = Object.fromEntries(new FormData(e.target)), map = [];
+      for (const l of body.map.split('\n').map(l => l.trim()).filter(Boolean)) {
+        const i = l.lastIndexOf('|'), from = l.slice(0, i).trim(), to = l.slice(i + 1).trim().toLowerCase();
+        if (i < 0 || !from || !(to === 'admin' || gid[to])) return toast(`«${l}»: escribe «grupo del dominio | grupo de catlan» o «| admin» (los grupos de catlan están en Usuarios y grupos)`, 'bad');
+        map.push({from, to: to === 'admin' ? 'admin' : gid[to]});
+      }
+      try { paintSso(await api('sso/config', 'PUT', {...body, map})); toast('Inicio de sesión guardado'); } catch {}
+    };
     $('#bk').onclick = async e => { // cifrada: la copia lleva las credenciales de SNMP y de los avisos
       e.preventDefault();
       const f = await dialog(`<h3>Copia de seguridad cifrada</h3><p>Sin esta contraseña no se puede abrir: guárdala aparte (si se pierde, la copia no sirve).</p>
@@ -151,7 +188,7 @@ Object.assign(views, {
         <tbody>${us.map(u => `<tr data-id="${u.id}" data-n="${esc(u.name.toLowerCase())}"><td><input type="checkbox" class="usel" value="${u.id}" aria-label="Seleccionar ${esc(u.name)}"></td>
           <td><b>${esc(u.name)}</b>${u.id === ME.id ? ' <span class="dim">(tú)</span>' : ''}<div class="dim small">Desde ${esc(date(u.created).toLocaleDateString('es'))}</div></td>
           <td>${groupsOf(u.id).map(g => `<span class="gchip${g.role === 'view' ? ' view' : ''}">${esc(g.name)}</span>`).join('') || '<span class="dim small">—</span>'}</td>
-          <td class="hide-m">${u.admin ? '<span class="badge">Admin</span> ' : ''}${u.must_change ? '<span class="badge dim" title="Se le pedirá cambiar la contraseña al entrar">provisional</span>' : ''}</td>
+          <td class="hide-m">${u.admin ? '<span class="badge">Admin</span> ' : ''}${u.ext ? `<span class="badge dim" title="Entra con su cuenta del dominio (${u.ext === 'ldap' ? 'LDAP' : 'OIDC'}): sus grupos mandan">dominio</span> ` : ''}${u.must_change ? '<span class="badge dim" title="Se le pedirá cambiar la contraseña al entrar">provisional</span>' : ''}</td>
           <td><button class="btn icon ghost sm" data-more aria-label="Acciones de ${esc(u.name)}" aria-haspopup="menu">${ui('more')}</button></td></tr>`).join('')}</tbody></table></div>
       <div class="actionbar ubar" id="ubar" hidden><b id="ucount"></b><span class="grow"></span>
         <button class="btn" data-bulk="add" aria-haspopup="menu">${ui('plus', 15)}Añadir a grupo</button><button class="btn" data-bulk="rm" aria-haspopup="menu">Quitar de grupo</button>
@@ -205,7 +242,8 @@ Object.assign(views, {
     };
     app.querySelector('.utbl tbody').onclick = e => {
       const b = e.target.closest('[data-more]'), u = b && us.find(x => x.id === +b.closest('[data-id]').dataset.id); if (!u) return;
-      menu(b, u.id === ME.id ? [['Cambiar mi contraseña', () => passDialog(false), {icon: 'edit'}]] : [
+      if (u.ext && u.id !== ME.id) return menu(b, [['Borrar usuario', async () => { if (await ask('¿Borrar este usuario?', `«${esc(u.name)}» es del dominio: si sus grupos siguen dándole acceso, se volverá a crear al entrar.`)) { await api('users/' + u.id, 'DELETE'); toast('Usuario borrado'); route(false); } }, {icon: 'trash', danger: true}]]);
+      menu(b, u.id === ME.id ? (u.ext ? [] : [['Cambiar mi contraseña', () => passDialog(false), {icon: 'edit'}]]) : [
         [u.admin ? 'Quitar administrador' : 'Hacer administrador', async () => { await api('users/' + u.id, 'PUT', {admin: !u.admin}); route(false); }, {icon: 'user'}],
         ...(u.totp ? [['Quitar verificación en dos pasos', async () => { if (await ask('¿Quitar su verificación en dos pasos?', `«${esc(u.name)}» entrará solo con su contraseña hasta que la vuelva a activar.`, 'Quitar')) { await api('users/' + u.id, 'PUT', {totp: false}); toast('Verificación en dos pasos quitada'); route(false); } }, {icon: 'key'}]] : []),
         ['Contraseña nueva', async () => { const pw = genPass(); await api('users/' + u.id, 'PUT', {pass: pw}); await credsDialog('Contraseña provisional nueva', [{name: u.name, pass: pw}]); route(false); }, {icon: 'edit'}], '-',

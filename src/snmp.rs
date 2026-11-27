@@ -289,13 +289,7 @@ impl Snmp {
                 let why = if parts.len() >= 2 { parts[parts.len() - 2] } else { "" }; // informe vacío: sin motivo
                 if !oid.starts_with("1.3.6.1.6.3.15.1.1.") || !["2", "4"].contains(&why) {
                     // 2 reloj, 4 engineID
-                    bail!(
-                        "{}",
-                        usm_err(why).map(String::from).unwrap_or_else(|| format!(
-                            "el equipo rechazó la petición SNMPv3 ({})",
-                            if oid.is_empty() { "sin detalle" } else { &oid }
-                        ))
-                    );
+                    bail!("{}", usm_err(why).map(String::from).unwrap_or_else(|| format!("el equipo rechazó la petición SNMPv3 ({})", if oid.is_empty() { "sin detalle" } else { &oid })));
                 }
             }
             got.ok_or_else(|| anyhow!("no se pudo sincronizar con el reloj SNMPv3 del equipo"))?
@@ -315,22 +309,14 @@ impl Snmp {
             loop {
                 match s.recv(&mut buf) {
                     Ok(n) => {
-                        if let Some(r) = parse(self, &buf[..n]) {
-                            if r.0 == rid {
-                                return Ok((r.1, r.2, r.3));
-                            }
+                        if let Some(r) = parse(self, &buf[..n])
+                            && r.0 == rid
+                        {
+                            return Ok((r.1, r.2, r.3));
                         }
                     }
                     // tiempo agotado, o el «puerto cerrado» (ICMP) que Windows y Linux devuelven así
-                    Err(e)
-                        if matches!(
-                            e.kind(),
-                            std::io::ErrorKind::WouldBlock
-                                | std::io::ErrorKind::TimedOut
-                                | std::io::ErrorKind::ConnectionReset
-                                | std::io::ErrorKind::ConnectionRefused
-                        ) =>
-                    {
+                    Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut | std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionRefused) => {
                         break;
                     }
                     Err(e) => return Err(e.into()),
@@ -338,11 +324,7 @@ impl Snmp {
             }
         }
         let v3 = self.v3.is_some();
-        bail!(
-            "sin respuesta SNMP: revisa la IP, {} y que SNMP{} esté activado en el equipo",
-            if v3 { "el usuario" } else { "la comunidad" },
-            if v3 { " v3" } else { "" }
-        )
+        bail!("sin respuesta SNMP: revisa la IP, {} y que SNMP{} esté activado en el equipo", if v3 { "el usuario" } else { "la comunidad" }, if v3 { " v3" } else { "" })
     }
 
     pub fn v3_msg(&mut self, pdu: u8, oids: &[&str], b: i128, discover: bool) -> Result<Vec<u8>> {
@@ -351,11 +333,7 @@ impl Snmp {
         let lvl = if discover { 0 } else { self.lvl };
         let eng = if discover { vec![] } else { self.eng.clone().unwrap_or_default() };
         let (boots, et) = if discover { (0, 0) } else { (self.boots, self.etime + self.at.elapsed().as_secs() as i64) };
-        let mut body = tlv(
-            0x30,
-            &[tlv(4, &eng), tlv(4, b""), tlv(pdu, &[ber_int(self.rid as i128, 2), ber_int(0, 2), ber_int(b, 2), tlv(0x30, &varbinds(oids)?)].concat())]
-                .concat(),
-        );
+        let mut body = tlv(0x30, &[tlv(4, &eng), tlv(4, b""), tlv(pdu, &[ber_int(self.rid as i128, 2), ber_int(0, 2), ber_int(b, 2), tlv(0x30, &varbinds(oids)?)].concat())].concat());
         let salt = if lvl & 2 != 0 { rand_bytes(8) } else { vec![] };
         if lvl & 2 != 0 {
             let iv = [&(boots as u32).to_be_bytes()[..], &(et as u32).to_be_bytes(), &salt].concat();
@@ -364,10 +342,7 @@ impl Snmp {
         // hueco de la firma, se rellena al final
         let mark = if lvl & 1 != 0 { rand_bytes(auth_len(&v.auth).unwrap_or(12)) } else { vec![] };
         let user = if discover { vec![] } else { v.user.as_bytes().to_vec() };
-        let sec = tlv(
-            0x30,
-            &[tlv(4, &eng), ber_int(boots as i128, 2), ber_int(et as i128, 2), tlv(4, &user), tlv(4, &mark), tlv(4, &salt)].concat(),
-        );
+        let sec = tlv(0x30, &[tlv(4, &eng), ber_int(boots as i128, 2), ber_int(et as i128, 2), tlv(4, &user), tlv(4, &mark), tlv(4, &salt)].concat());
         let head = tlv(0x30, &[ber_int(self.rid as i128, 2), ber_int(65507, 2), tlv(4, &[lvl | 4]), ber_int(3, 2)].concat());
         let msg = tlv(0x30, &[ber_int(3, 2), head, tlv(4, &sec), body].concat());
         if mark.is_empty() {
@@ -505,10 +480,7 @@ mod tests {
 
     #[test]
     fn get_request_byte_a_byte() {
-        assert_eq!(
-            hex(&snmp_msg("public", 0xA0, 1, &["1.3.6.1.2.1.1.1.0"], 0, 0).unwrap()),
-            "302602010104067075626c6963a019020101020100020100300e300c06082b060102010101000500"
-        );
+        assert_eq!(hex(&snmp_msg("public", 0xA0, 1, &["1.3.6.1.2.1.1.1.0"], 0, 0).unwrap()), "302602010104067075626c6963a019020101020100020100300e300c06082b060102010101000500");
         assert_eq!(oid_str(&ber_oid("1.3.6.1.4.1.14988.1").unwrap()[2..]), "1.3.6.1.4.1.14988.1"); // arcos grandes
         assert_eq!(hex(&ber_int(128, 2)), "02020080");
         assert_eq!(hex(&ber_int(-1, 2)), "0201ff");
