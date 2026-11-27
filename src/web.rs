@@ -352,10 +352,11 @@ impl Ctx<'_> {
         let m = self.req.method.clone();
         // Escrituras desde otra web (CSRF): el navegador pone Origin; si no es este servidor, fuera.
         // Detrás de un proxy, este debe conservar la cabecera Host original.
-        if let Some(o) = self.req.opt_header("origin") {
-            if m != "GET" && netloc(o) != self.req.header("host") {
-                return err(403, "origen no permitido");
-            }
+        if let Some(o) = self.req.opt_header("origin")
+            && m != "GET"
+            && netloc(o) != self.req.header("host")
+        {
+            return err(403, "origen no permitido");
         }
         // Sin Origin: un navegador moderno dice igualmente de dónde viene la petición. Scripts y Kitty no mandan ninguna.
         if m != "GET" && !matches!(self.req.header("sec-fetch-site"), "" | "same-origin" | "none") {
@@ -366,10 +367,10 @@ impl Ctx<'_> {
         let parts: Vec<String> = path.split('/').filter(|p| !p.is_empty()).map(String::from).collect();
         let api = parts.first().is_some_and(|p| p == "api");
         let rest: Vec<&str> = parts.iter().skip(1).map(String::as_str).collect();
-        if !self.req.secure {
-            if let Some(r) = self.plain(&m, &parts, api, &rest, &full) {
-                return r;
-            }
+        if !self.req.secure
+            && let Some(r) = self.plain(&m, &parts, api, &rest, &full)
+        {
+            return r;
         }
         let free = !api || m == "POST" && (rest == ["login"] || rest.first() == Some(&"agent") && (rest.len() <= 2 || rest.get(1) == Some(&"remote"))); // la página, el login y Kitty, sin sesión
         let own = api && rest.first() == Some(&"tasks"); // el tablero personal no toca nada común: también para los de solo vista
@@ -772,12 +773,13 @@ impl Ctx<'_> {
                     args.push(db::jv(s));
                 }
                 let cur = q(&format!("UPDATE {res} SET {}, updated=CURRENT_TIMESTAMP WHERE id=?{}", sets.join(","), if seen.is_some() { " AND updated=?" } else { "" }), args)?;
-                if cur.rowcount == 0 && seen.is_some() {
-                    if let Some(now) = q(&format!("SELECT updated FROM {res} WHERE id=?"), p![rid_i])?.one() {
-                        let who = q("SELECT who FROM log WHERE kind=? AND ref=? ORDER BY id DESC LIMIT 1", p![kind_of(res), rid_i])?.one();
-                        let who = who.map(|w| w.s("who").to_string()).filter(|w| !w.is_empty()).unwrap_or("Alguien".into());
-                        return Ok(js(409, json!({"error": format!("{who} lo cambió mientras lo editabas."), "updated": now["updated"]})));
-                    }
+                if cur.rowcount == 0
+                    && seen.is_some()
+                    && let Some(now) = q(&format!("SELECT updated FROM {res} WHERE id=?"), p![rid_i])?.one()
+                {
+                    let who = q("SELECT who FROM log WHERE kind=? AND ref=? ORDER BY id DESC LIMIT 1", p![kind_of(res), rid_i])?.one();
+                    let who = who.map(|w| w.s("who").to_string()).filter(|w| !w.is_empty()).unwrap_or("Alguien".into());
+                    return Ok(js(409, json!({"error": format!("{who} lo cambió mientras lo editabas."), "updated": now["updated"]})));
                 }
             }
             let Some(row) = q(&format!("SELECT * FROM {res} WHERE id=?"), p![rid_i])?.one() else { return Ok(err(404, "no existe")) };
@@ -1253,11 +1255,11 @@ impl Ctx<'_> {
 
     /// Kitty rechazado u olvidado: fuera de Salud, con su historial (si no, avisaría de que «no responde»).
     fn drop_source(a: &Row) -> Result<()> {
-        if let Some(s) = a.i("source") {
-            if !q("SELECT 1 FROM sources WHERE id=? AND kind='kitty'", p![s])?.is_empty() {
-                for (t, col) in [("sources", "id"), ("metrics", "source_id"), ("metrics_h", "source_id")] {
-                    q(&format!("DELETE FROM {t} WHERE {col}=?"), p![s])?;
-                }
+        if let Some(s) = a.i("source")
+            && !q("SELECT 1 FROM sources WHERE id=? AND kind='kitty'", p![s])?.is_empty()
+        {
+            for (t, col) in [("sources", "id"), ("metrics", "source_id"), ("metrics_h", "source_id")] {
+                q(&format!("DELETE FROM {t} WHERE {col}=?"), p![s])?;
             }
         }
         q("UPDATE agents SET source=NULL WHERE id=?", p![&a["id"]])?;

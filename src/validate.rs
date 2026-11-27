@@ -213,10 +213,10 @@ pub fn check_incident(d: &Row, rid: Option<i64>) -> Result<()> {
         return bad("estado o prioridad no válidos");
     }
     for (k, table, what) in [("assignee", "users", "la persona"), ("grp", "groups", "el grupo"), ("item", "items", "el equipo"), ("parent", "incidents", "la incidencia padre")] {
-        if let Some(v) = d.get(k).filter(|v| !v.is_null()) {
-            if !is_int(v) || q(&format!("SELECT 1 FROM {table} WHERE id=?"), p![v])?.is_empty() {
-                return bad(format!("{what} no existe"));
-            }
+        if let Some(v) = d.get(k).filter(|v| !v.is_null())
+            && (!is_int(v) || q(&format!("SELECT 1 FROM {table} WHERE id=?"), p![v])?.is_empty())
+        {
+            return bad(format!("{what} no existe"));
         }
     }
     // subiendo por los padres no se puede llegar a ella misma: sería un círculo

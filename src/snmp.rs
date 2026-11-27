@@ -309,10 +309,10 @@ impl Snmp {
             loop {
                 match s.recv(&mut buf) {
                     Ok(n) => {
-                        if let Some(r) = parse(self, &buf[..n]) {
-                            if r.0 == rid {
-                                return Ok((r.1, r.2, r.3));
-                            }
+                        if let Some(r) = parse(self, &buf[..n])
+                            && r.0 == rid
+                        {
+                            return Ok((r.1, r.2, r.3));
                         }
                     }
                     // tiempo agotado, o el «puerto cerrado» (ICMP) que Windows y Linux devuelven así

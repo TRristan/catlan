@@ -382,37 +382,37 @@ pub fn interfaces(s: &mut dyn Walk, sid: Option<i64>, out: &mut Vec<M>, probs: &
         if let Some(rin) = rin {
             nowc.insert(i.clone(), (t, rin, rout, err));
         }
-        if let (Some(&(pt, pin, pout, perr)), Some(rin)) = (prev.get(i), rin) {
-            if t > pt {
-                let dt = t - pt;
-                // shortcut: con 32 bits solo se corrige una vuelta del contador; para enlaces rápidos hace falta ifHCInOctets (SNMP v2c/v3)
-                let d = |a: i128, b: i128| {
-                    if a >= b {
-                        Some(a - b)
-                    } else if hc {
-                        None
-                    } else {
-                        Some(a + (1i128 << 32) - b)
-                    }
-                }; // None: contador reiniciado
-                if let (Some(din), Some(dout)) = (d(rin, pin), d(rout, pout)) {
-                    let rx = round(din as f64 * 8.0 / dt / 1e6, 3);
-                    let tx = round(dout as f64 * 8.0 / dt / 1e6, 3);
-                    let er = round((err - perr).max(0) as f64 / dt * 60.0, 2);
-                    p["rx"] = json!(rx);
-                    p["tx"] = json!(tx);
-                    p["err"] = json!(er);
-                    if up {
-                        out.push(m(format!("rx:{name}"), format!("{name} ↓"), rx, "Mbps"));
-                        out.push(m(format!("tx:{name}"), format!("{name} ↑"), tx, "Mbps"));
-                        out.push(m(format!("err:{name}"), name.clone(), er, "/min"));
-                    }
-                    if er > 10.0 {
-                        probs.push(format!("{name}: {} errores/min", fmt_g(er)));
-                    }
-                    if up && speed != 0 && rx.max(tx) > speed as f64 * 0.9 {
-                        probs.push(format!("{name}: al {:.0} % de su capacidad", rx.max(tx) / speed as f64 * 100.0));
-                    }
+        if let (Some(&(pt, pin, pout, perr)), Some(rin)) = (prev.get(i), rin)
+            && t > pt
+        {
+            let dt = t - pt;
+            // shortcut: con 32 bits solo se corrige una vuelta del contador; para enlaces rápidos hace falta ifHCInOctets (SNMP v2c/v3)
+            let d = |a: i128, b: i128| {
+                if a >= b {
+                    Some(a - b)
+                } else if hc {
+                    None
+                } else {
+                    Some(a + (1i128 << 32) - b)
+                }
+            }; // None: contador reiniciado
+            if let (Some(din), Some(dout)) = (d(rin, pin), d(rout, pout)) {
+                let rx = round(din as f64 * 8.0 / dt / 1e6, 3);
+                let tx = round(dout as f64 * 8.0 / dt / 1e6, 3);
+                let er = round((err - perr).max(0) as f64 / dt * 60.0, 2);
+                p["rx"] = json!(rx);
+                p["tx"] = json!(tx);
+                p["err"] = json!(er);
+                if up {
+                    out.push(m(format!("rx:{name}"), format!("{name} ↓"), rx, "Mbps"));
+                    out.push(m(format!("tx:{name}"), format!("{name} ↑"), tx, "Mbps"));
+                    out.push(m(format!("err:{name}"), name.clone(), er, "/min"));
+                }
+                if er > 10.0 {
+                    probs.push(format!("{name}: {} errores/min", fmt_g(er)));
+                }
+                if up && speed != 0 && rx.max(tx) > speed as f64 * 0.9 {
+                    probs.push(format!("{name}: al {:.0} % de su capacidad", rx.max(tx) / speed as f64 * 100.0));
                 }
             }
         }
@@ -759,17 +759,19 @@ pub fn kitty_read(name: &str, x: &Value) -> (Vec<M>, Map<String, Value>) {
     if let Some(load) = nf(x.get("load")) {
         out.push(m("cpu", "CPU", load.min(100.0), "%"));
     }
-    if let (Some(mt), Some(mf)) = (mt, mf) {
-        if mt != 0.0 && mf <= mt {
-            out.push(m("mem", "Memoria", 100.0 * (mt - mf) / mt, "%"));
-        }
+    if let (Some(mt), Some(mf)) = (mt, mf)
+        && mt != 0.0
+        && mf <= mt
+    {
+        out.push(m("mem", "Memoria", 100.0 * (mt - mf) / mt, "%"));
     }
     for d in &disks {
         let (name, total, free) = (d.s("name"), d.f("total"), d.f("free"));
-        if let (false, Some(t), Some(f)) = (name.is_empty(), total, free) {
-            if t != 0.0 && f <= t {
-                out.push(m(format!("disk:{name}"), name, 100.0 * (t - f) / t, "%"));
-            }
+        if let (false, Some(t), Some(f)) = (name.is_empty(), total, free)
+            && t != 0.0
+            && f <= t
+        {
+            out.push(m(format!("disk:{name}"), name, 100.0 * (t - f) / t, "%"));
         }
     }
     let ips: Vec<Value> = x.get("ips").and_then(Value::as_array).map(|a| a.iter().take(16).filter_map(Value::as_str).map(|s| Value::from(trunc(s.trim(), 45))).collect()).unwrap_or_default();
@@ -900,12 +902,11 @@ pub fn guess(descr: &str, oid: &str) -> (String, String) {
 
 fn identify(ip: &str, community: &str) -> Map<String, Value> {
     let mut name = String::new();
-    if let Ok(a) = ip.parse::<std::net::IpAddr>() {
-        if let Ok(n) = dns_lookup::lookup_addr(&a) {
-            if n != ip {
-                name = n;
-            }
-        }
+    if let Ok(a) = ip.parse::<std::net::IpAddr>()
+        && let Ok(n) = dns_lookup::lookup_addr(&a)
+        && n != ip
+    {
+        name = n;
     }
     let mut out = json!({"ip": ip, "name": name, "descr": "", "vendor": "", "kind": "", "snmp": false});
     // un solo intento corto: quien no tiene SNMP no debe frenar el escaneo

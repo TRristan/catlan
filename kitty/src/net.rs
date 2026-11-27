@@ -144,10 +144,10 @@ pub fn send(ps: &Value, fresh: bool) -> Result<String, String> {
     }
     let state = res.get("state").and_then(Value::as_str).unwrap_or("").to_string();
     crate::apps::want(res.get("apps"));
-    if state == "adoptado" {
-        if let Some(n) = now {
-            conf::set("since", &n); // pendiente: los eventos esperan a que lo acepten
-        }
+    if state == "adoptado"
+        && let Some(n) = now
+    {
+        conf::set("since", &n); // pendiente: los eventos esperan a que lo acepten
     }
     Ok(state)
 }

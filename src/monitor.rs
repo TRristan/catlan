@@ -99,10 +99,10 @@ fn why(e: &(dyn std::error::Error + 'static)) -> String {
     let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(e);
     while let Some(x) = cur {
         if let Some(io) = x.downcast_ref::<std::io::Error>() {
-            if let Some(inner) = io.get_ref() {
-                if let Some(r) = inner.downcast_ref::<rustls::Error>() {
-                    return tls_why(r);
-                }
+            if let Some(inner) = io.get_ref()
+                && let Some(r) = inner.downcast_ref::<rustls::Error>()
+            {
+                return tls_why(r);
             }
             if matches!(io.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) {
                 return why_io(io);
@@ -111,10 +111,10 @@ fn why(e: &(dyn std::error::Error + 'static)) -> String {
         if let Some(r) = x.downcast_ref::<rustls::Error>() {
             return tls_why(r);
         }
-        if let Some(t) = x.downcast_ref::<ureq::Transport>() {
-            if t.kind() == ureq::ErrorKind::Dns {
-                return "el nombre no resuelve".into();
-            }
+        if let Some(t) = x.downcast_ref::<ureq::Transport>()
+            && t.kind() == ureq::ErrorKind::Dns
+        {
+            return "el nombre no resuelve".into();
         }
         cur = x.source();
     }
@@ -504,12 +504,11 @@ fn probe(c: Row) -> Result<()> {
     q("INSERT INTO pings(check_id, up, rtt) VALUES(?,?,?)", p![&c["id"], up, rtt.map_or(crate::db::SqlV::Null, crate::db::SqlV::Real)])?;
     let since = if state != old { ", since=CURRENT_TIMESTAMP" } else { "" };
     q(&format!("UPDATE checks SET state=?, fails=?, rtt=?, detail=?{since} WHERE id=?"), p![state, fails, rtt.map_or(crate::db::SqlV::Null, crate::db::SqlV::Real), &detail, &c["id"]])?;
-    if state == Some("down") {
-        if let Some(item) = c.i("item").filter(|i| *i != 0) {
-            if dependents()?.get(&item).is_some_and(|v| !v.is_empty()) {
-                return Ok(()); // cae porque cae otro del que cuelga: se avisa del culpable; si sigue caído cuando este vuelva, avisará entonces
-            }
-        }
+    if state == Some("down")
+        && let Some(item) = c.i("item").filter(|i| *i != 0)
+        && dependents()?.get(&item).is_some_and(|v| !v.is_empty())
+    {
+        return Ok(()); // cae porque cae otro del que cuelga: se avisa del culpable; si sigue caído cuando este vuelva, avisará entonces
     }
     let name = [c.s("label"), c.s("item_name"), c.s("host")].into_iter().find(|s| !s.is_empty()).unwrap_or("");
     let target = if c.s("kind") == "http" { c.s("url") } else { c.s("host") };
@@ -719,7 +718,7 @@ fn monitor_round(pool: &Pool, n: u64) -> Result<()> {
         warranties()?;
         daily_backup()?;
     }
-    if n % 1800 == 0 {
+    if n.is_multiple_of(1800) {
         // en bruto, unos días; lo de antes ya está resumido por horas (días: Opciones → Salud de catlan)
         let r = retention();
         let d = |k: &str| r[k].as_i64().unwrap_or(1);
@@ -867,10 +866,10 @@ pub fn warranties_due() -> Result<Option<String>> {
 
 /// Una vez al día: avisa de las garantías, licencias, dominios… que caducan dentro de 30 días y de los que caducan hoy.
 pub fn warranties() -> Result<()> {
-    if let Some(text) = warranties_due()? {
-        if !channels().is_empty() {
-            notify("catlan: caducidades", &text);
-        }
+    if let Some(text) = warranties_due()?
+        && !channels().is_empty()
+    {
+        notify("catlan: caducidades", &text);
     }
     Ok(())
 }
@@ -1132,10 +1131,10 @@ pub fn ipam(row: &Row) -> Result<Value> {
     let Ok(net) = parse_net(row.s("cidr")) else { return bad("red no válida") };
     let mut used: BTreeMap<u32, Vec<Value>> = BTreeMap::new();
     for r in q("SELECT id, name, ip FROM items WHERE ip != ''", p![])? {
-        if let Ok(a) = r.s("ip").trim().parse::<Ipv4Addr>() {
-            if net.contains(u32::from(a)) {
-                used.entry(u32::from(a)).or_default().push(json!({"id": r["id"], "name": r["name"]}));
-            }
+        if let Ok(a) = r.s("ip").trim().parse::<Ipv4Addr>()
+            && net.contains(u32::from(a))
+        {
+            used.entry(u32::from(a)).or_default().push(json!({"id": r["id"], "name": r["name"]}));
         }
     }
     let scan: BTreeMap<u32, Value> = serde_json::from_str::<Vec<Value>>(row.s("scan"))

@@ -282,10 +282,10 @@ fn migrate(c: &Connection, fresh: bool) -> anyhow::Result<()> {
         backup_to(&DATA.join(format!("catlan-antes-de-v{}-{}.db", MIGRATIONS.len(), local("%Y%m%d-%H%M%S"))))?;
     }
     for (n, sql) in MIGRATIONS.iter().enumerate().skip(ver) {
-        if let Err(e) = c.execute_batch(sql) {
-            if !(n < LEGACY && e.to_string().contains("duplicate column")) {
-                return Err(e.into());
-            }
+        if let Err(e) = c.execute_batch(sql)
+            && !(n < LEGACY && e.to_string().contains("duplicate column"))
+        {
+            return Err(e.into());
         }
         c.execute_batch(&format!("PRAGMA user_version={}", n + 1))?;
     }
