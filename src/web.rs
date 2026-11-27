@@ -17,15 +17,32 @@ use std::io::Write;
 use std::sync::{LazyLock, Mutex};
 
 const IMAGE_TYPES: &[&str] = &["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"];
-const AUDIO_TYPES: &[&str] =
-    &["audio/mpeg", "audio/wav", "audio/x-wav", "audio/wave", "audio/ogg", "audio/webm", "audio/mp4", "audio/aac", "audio/x-m4a"];
+const AUDIO_TYPES: &[&str] = &["audio/mpeg", "audio/wav", "audio/x-wav", "audio/wave", "audio/ogg", "audio/webm", "audio/mp4", "audio/aac", "audio/x-m4a"];
 /// Lo que Kitty cuenta de su equipo.
 const AGENT_FACTS: [&str; 5] = ["name", "ip", "serial", "os", "kind"];
 /// Lo que se vacía al «Borrar la base de datos»: todo el contenido. Quedan los usuarios, los grupos, las sesiones y el id
 /// de la instalación (los Kitty instalados vuelven a pedir entrar aquí).
 const WIPE: &[&str] = &[
-    "pages", "items", "maps", "log", "checks", "pings", "pings_h", "sounds", "sources", "metrics", "metrics_h", "dash", "incidents", "notes", "agents",
-    "expiries", "syslog", "subnets", "tasks", "apps",
+    "pages",
+    "items",
+    "maps",
+    "log",
+    "checks",
+    "pings",
+    "pings_h",
+    "sounds",
+    "sources",
+    "metrics",
+    "metrics_h",
+    "dash",
+    "incidents",
+    "notes",
+    "agents",
+    "expiries",
+    "syslog",
+    "subnets",
+    "tasks",
+    "apps",
 ];
 /// Columnas del tablero personal.
 const TASK_COLS: [&str; 4] = ["notas", "pendiente", "hoy", "hecho"];
@@ -43,9 +60,7 @@ fn table_cols(t: &str) -> Option<&'static [&'static str]> {
         "pages" => &["title", "body"],
         "items" => &["name", "kind", "ip", "serial", "location", "status", "notes", "warranty"],
         "checks" => &["host", "label", "item", "every", "kind", "port", "url", "expect", "warn_days", "sound"],
-        "sources" => &[
-            "host", "label", "item", "kind", "community", "port", "user", "pass", "every", "temp_max", "disk_max", "v3", "auth", "priv", "priv_pass",
-        ],
+        "sources" => &["host", "label", "item", "kind", "community", "port", "user", "pass", "every", "temp_max", "disk_max", "v3", "auth", "priv", "priv_pass"],
         "expiries" => &["name", "kind", "date", "item", "notes"],
         "subnets" => &["name", "cidr", "vlan", "notes"],
         "apps" => &["name", "winget", "notes"],
@@ -256,11 +271,7 @@ impl Ctx<'_> {
     fn log(&self, action: &str, kind: &str, r: impl db::IntoSql, name: impl db::IntoSql, data: &Value) -> Result<()> {
         let r = r.sql();
         let snap = data.to_string();
-        let last = q(
-            "SELECT id, action, who, ts > datetime('now', '-60 seconds') AS fresh FROM log WHERE kind=? AND ref=? ORDER BY id DESC LIMIT 1",
-            p![kind, r.clone()],
-        )?
-        .one();
+        let last = q("SELECT id, action, who, ts > datetime('now', '-60 seconds') AS fresh FROM log WHERE kind=? AND ref=? ORDER BY id DESC LIMIT 1", p![kind, r.clone()])?.one();
         // esquemas y racks se autoguardan al arrastrar: agrupa ediciones seguidas en una sola entrada
         if let Some(l) = last.filter(|l| ["map", "rack"].contains(&kind) && action == "editar" && l.s("action") == "editar" && l.s("who") == self.user && l.t("fresh")) {
             q("UPDATE log SET ts=CURRENT_TIMESTAMP, name=?, data=? WHERE id=?", p![name, snap, &l["id"]])?;
@@ -341,10 +352,11 @@ impl Ctx<'_> {
         let m = self.req.method.clone();
         // Escrituras desde otra web (CSRF): el navegador pone Origin; si no es este servidor, fuera.
         // Detrás de un proxy, este debe conservar la cabecera Host original.
-        if let Some(o) = self.req.opt_header("origin") {
-            if m != "GET" && netloc(o) != self.req.header("host") {
-                return err(403, "origen no permitido");
-            }
+        if let Some(o) = self.req.opt_header("origin")
+            && m != "GET"
+            && netloc(o) != self.req.header("host")
+        {
+            return err(403, "origen no permitido");
         }
         // Sin Origin: un navegador moderno dice igualmente de dónde viene la petición. Scripts y Kitty no mandan ninguna.
         if m != "GET" && !matches!(self.req.header("sec-fetch-site"), "" | "same-origin" | "none") {
@@ -355,10 +367,10 @@ impl Ctx<'_> {
         let parts: Vec<String> = path.split('/').filter(|p| !p.is_empty()).map(String::from).collect();
         let api = parts.first().is_some_and(|p| p == "api");
         let rest: Vec<&str> = parts.iter().skip(1).map(String::as_str).collect();
-        if !self.req.secure {
-            if let Some(r) = self.plain(&m, &parts, api, &rest, &full) {
-                return r;
-            }
+        if !self.req.secure
+            && let Some(r) = self.plain(&m, &parts, api, &rest, &full)
+        {
+            return r;
         }
         let free = !api || m == "POST" && (rest == ["login"] || rest.first() == Some(&"agent") && (rest.len() <= 2 || rest.get(1) == Some(&"remote"))); // la página, el login y Kitty, sin sesión
         let own = api && rest.first() == Some(&"tasks"); // el tablero personal no toca nada común: también para los de solo vista
@@ -512,10 +524,7 @@ impl Ctx<'_> {
                     return bad("silenciar de 0 minutos a 7 días");
                 }
                 let mins = mins.as_i64().unwrap_or(0);
-                let cur = q(
-                    &format!("UPDATE {res} SET mute_from=NULL, mute_until = CASE WHEN ? > 0 THEN datetime('now', '+' || ? || ' minutes') END WHERE id=?"),
-                    p![mins, mins, rid_i],
-                )?;
+                let cur = q(&format!("UPDATE {res} SET mute_from=NULL, mute_until = CASE WHEN ? > 0 THEN datetime('now', '+' || ? || ' minutes') END WHERE id=?"), p![mins, mins, rid_i])?;
                 if cur.rowcount == 0 {
                     return Ok(err(404, "no existe"));
                 }
@@ -527,6 +536,19 @@ impl Ctx<'_> {
             ("maintenance", "POST") => return self.maintenance(),
             ("log", "POST") if rid.is_some() && parts.len() == 4 && sub == Some("undo") => {
                 return self.undo(rid.unwrap_or("").parse().map_err(|_| Bad("id no válido".into()))?);
+            }
+            ("retention", _) => {
+                // cuántos días se guarda cada cosa: verlo, todos; cambiarlo, los administradores
+                return Ok(match m {
+                    "GET" => js(200, monitor::retention()),
+                    "PUT" if self.admin => {
+                        let v = monitor::set_retention(&self.body()?)?;
+                        self.log("editar", "retention", 0, "cuánto se guarda", &v)?;
+                        js(200, v)
+                    }
+                    "PUT" => err(403, "solo para administradores"),
+                    _ => err(405, "método no permitido"),
+                });
             }
             ("update", _) => {
                 // actualizar catlan desde GitHub: solo administradores
@@ -617,21 +639,14 @@ impl Ctx<'_> {
             ("sources", "POST") if sub == Some("topology") => {
                 let src = q("SELECT * FROM sources WHERE id=?", p![rid_i])?.one();
                 let Some(src) = src.filter(|s| !["kitty", "hikvision"].contains(&s.s("kind"))) else {
-                    return Ok(if q("SELECT 1 FROM sources WHERE id=?", p![rid_i])?.is_empty() {
-                        err(404, "no existe")
-                    } else {
-                        err(400, "solo los equipos que se leen por SNMP")
-                    });
+                    return Ok(if q("SELECT 1 FROM sources WHERE id=?", p![rid_i])?.is_empty() { err(404, "no existe") } else { err(400, "solo los equipos que se leen por SNMP") });
                 };
                 let (mid, name, nbrs, new) = match health::auto_map(&src) {
                     Ok(x) => x,
                     Err(e) => return Ok(err(400, &e.to_string())),
                 };
                 if nbrs.is_empty() {
-                    return Ok(err(
-                        400,
-                        "el equipo no ha contado ningún vecino: activa LLDP o CDP en el switch y comprueba que SNMP deja leer las tablas BRIDGE/LLDP",
-                    ));
+                    return Ok(err(400, "el equipo no ha contado ningún vecino: activa LLDP o CDP en el switch y comprueba que SNMP deja leer las tablas BRIDGE/LLDP"));
                 }
                 self.log(if new { "crear" } else { "editar" }, "map", mid, &name, &json!({"auto": true, "vecinos": nbrs.len()}))?;
                 return Ok(js(200, json!({"map": mid, "name": name, "neighbors": nbrs})));
@@ -707,11 +722,8 @@ impl Ctx<'_> {
             let mut out = vec![];
             for b in &batch {
                 let d: Vec<(&String, &Value)> = b.as_object().ok_or(Shape)?.iter().filter(|(k, _)| cols.contains(&k.as_str())).collect();
-                let (keys, vals): (Vec<String>, Vec<SqlV>) = if d.is_empty() {
-                    (vec![cols[0].to_string()], p![""])
-                } else {
-                    (d.iter().map(|(k, _)| k.to_string()).collect(), d.iter().map(|(_, v)| db::jv(v)).collect())
-                };
+                let (keys, vals): (Vec<String>, Vec<SqlV>) =
+                    if d.is_empty() { (vec![cols[0].to_string()], p![""]) } else { (d.iter().map(|(k, _)| k.to_string()).collect(), d.iter().map(|(_, v)| db::jv(v)).collect()) };
                 let id = q(&format!("INSERT INTO {res}({}) VALUES({})", keys.join(","), vec!["?"; keys.len()].join(",")), vals)?.lastrowid;
                 let row = public(q(&format!("SELECT * FROM {res} WHERE id=?"), p![id])?.one().unwrap_or_default());
                 self.log("crear", kind_of(res), id, &row[cols[0]], &Value::Object(row.clone()))?;
@@ -760,16 +772,14 @@ impl Ctx<'_> {
                 if let Some(s) = &seen {
                     args.push(db::jv(s));
                 }
-                let cur = q(
-                    &format!("UPDATE {res} SET {}, updated=CURRENT_TIMESTAMP WHERE id=?{}", sets.join(","), if seen.is_some() { " AND updated=?" } else { "" }),
-                    args,
-                )?;
-                if cur.rowcount == 0 && seen.is_some() {
-                    if let Some(now) = q(&format!("SELECT updated FROM {res} WHERE id=?"), p![rid_i])?.one() {
-                        let who = q("SELECT who FROM log WHERE kind=? AND ref=? ORDER BY id DESC LIMIT 1", p![kind_of(res), rid_i])?.one();
-                        let who = who.map(|w| w.s("who").to_string()).filter(|w| !w.is_empty()).unwrap_or("Alguien".into());
-                        return Ok(js(409, json!({"error": format!("{who} lo cambió mientras lo editabas."), "updated": now["updated"]})));
-                    }
+                let cur = q(&format!("UPDATE {res} SET {}, updated=CURRENT_TIMESTAMP WHERE id=?{}", sets.join(","), if seen.is_some() { " AND updated=?" } else { "" }), args)?;
+                if cur.rowcount == 0
+                    && seen.is_some()
+                    && let Some(now) = q(&format!("SELECT updated FROM {res} WHERE id=?"), p![rid_i])?.one()
+                {
+                    let who = q("SELECT who FROM log WHERE kind=? AND ref=? ORDER BY id DESC LIMIT 1", p![kind_of(res), rid_i])?.one();
+                    let who = who.map(|w| w.s("who").to_string()).filter(|w| !w.is_empty()).unwrap_or("Alguien".into());
+                    return Ok(js(409, json!({"error": format!("{who} lo cambió mientras lo editabas."), "updated": now["updated"]})));
                 }
             }
             let Some(row) = q(&format!("SELECT * FROM {res} WHERE id=?"), p![rid_i])?.one() else { return Ok(err(404, "no existe")) };
@@ -839,13 +849,7 @@ impl Ctx<'_> {
         let data = db::backup_to(&tmp).and_then(|_| Ok(std::fs::read(&tmp)?)); // desde su propia conexión: la web sigue mientras se copia
         let _ = std::fs::remove_file(&tmp);
         let data = data?;
-        self.log(
-            "descargar",
-            "db",
-            0,
-            format!("una copia de seguridad{}", if pw.is_some() { " cifrada" } else { "" }),
-            &json!({"bytes": data.len()}),
-        )?;
+        self.log("descargar", "db", 0, format!("una copia de seguridad{}", if pw.is_some() { " cifrada" } else { "" }), &json!({"bytes": data.len()}))?;
         let name = format!("catlan-{}{}", crate::util::local("%Y%m%d-%H%M"), if pw.is_some() { ".catlan" } else { ".db" });
         Ok(match pw {
             Some(pw) => Resp::new(200, seal(&data, &pw), "application/octet-stream"),
@@ -915,8 +919,7 @@ impl Ctx<'_> {
         }
         let (f0, f1) = (t0.format("%Y-%m-%d %H:%M:%S").to_string(), t1.format("%Y-%m-%d %H:%M:%S").to_string());
         let marks = vec!["?"; items.len()].join(",");
-        let ips: Vec<Value> =
-            q(&format!("SELECT ip FROM items WHERE id IN ({marks}) AND ip != ''"), items.iter().map(|i| SqlV::Integer(*i)).collect())?.into_iter().map(|r| r["ip"].clone()).collect();
+        let ips: Vec<Value> = q(&format!("SELECT ip FROM items WHERE id IN ({marks}) AND ip != ''"), items.iter().map(|i| SqlV::Integer(*i)).collect())?.into_iter().map(|r| r["ip"].clone()).collect();
         let mut n = 0;
         for t in ["checks", "sources"] {
             let mut args = p![&f0, &f1];
@@ -969,8 +972,7 @@ impl Ctx<'_> {
         let b = self.body()?;
         let key = b.as_object().and_then(|o| o.get("key")).and_then(Value::as_str).filter(|k| (32..=128).contains(&k.chars().count()));
         let Some(key) = key else { return bad("falta la clave de Kitty") };
-        let mut f: Map<String, Value> =
-            AGENT_FACTS.iter().map(|k| (k.to_string(), Value::from(trunc(b.get(*k).and_then(Value::as_str).unwrap_or("").trim(), 100)))).collect();
+        let mut f: Map<String, Value> = AGENT_FACTS.iter().map(|k| (k.to_string(), Value::from(trunc(b.get(*k).and_then(Value::as_str).unwrap_or("").trim(), 100)))).collect();
         if f.s("ip").is_empty() {
             f.insert("ip".into(), self.req.ip.clone().into()); // el Kitty de PowerShell no la calcula: la de su conexión
         }
@@ -1045,7 +1047,9 @@ impl Ctx<'_> {
         };
         Ok(match q("SELECT * FROM agents WHERE ukey=? ORDER BY id DESC LIMIT 1", p![sha256_hex(u)])?.one() {
             Some(a) if a.s("state") == "adoptado" => Ok(a),
-            Some(a) => Err(js(403, json!({"error": if a.s("state") == "pendiente" { "IT todavía no ha aceptado este equipo en catlan" } else { "catlan ha rechazado este equipo" }, "state": a["state"]}))),
+            Some(a) => {
+                Err(js(403, json!({"error": if a.s("state") == "pendiente" { "IT todavía no ha aceptado este equipo en catlan" } else { "catlan ha rechazado este equipo" }, "state": a["state"]})))
+            }
             None => Err(js(404, json!({"error": "este equipo aún no se ha presentado a catlan: espera unos minutos", "state": null}))),
         })
     }
@@ -1196,9 +1200,15 @@ impl Ctx<'_> {
         self.note(id, "abrió la incidencia", true)?;
         self.log("crear", "incident", id, title, &json!({"title": title, "body": body, "priority": prio, "item": a["item"], "desde": "Kitty"}))?;
         if prio == "crítica" {
-            monitor::notify(&format!("catlan: incidencia crítica INC-{id}: {title}"), &format!("Abierta desde Kitty en {}.
+            monitor::notify(
+                &format!("catlan: incidencia crítica INC-{id}: {title}"),
+                &format!(
+                    "Abierta desde Kitty en {}.
 
--- catlan", a.s("name")));
+-- catlan",
+                    a.s("name")
+                ),
+            );
         }
         Ok(js(201, q("SELECT id, title, status, priority, created, updated FROM incidents WHERE id=?", p![id])?.one()))
     }
@@ -1245,11 +1255,11 @@ impl Ctx<'_> {
 
     /// Kitty rechazado u olvidado: fuera de Salud, con su historial (si no, avisaría de que «no responde»).
     fn drop_source(a: &Row) -> Result<()> {
-        if let Some(s) = a.i("source") {
-            if !q("SELECT 1 FROM sources WHERE id=? AND kind='kitty'", p![s])?.is_empty() {
-                for (t, col) in [("sources", "id"), ("metrics", "source_id"), ("metrics_h", "source_id")] {
-                    q(&format!("DELETE FROM {t} WHERE {col}=?"), p![s])?;
-                }
+        if let Some(s) = a.i("source")
+            && !q("SELECT 1 FROM sources WHERE id=? AND kind='kitty'", p![s])?.is_empty()
+        {
+            for (t, col) in [("sources", "id"), ("metrics", "source_id"), ("metrics_h", "source_id")] {
+                q(&format!("DELETE FROM {t} WHERE {col}=?"), p![s])?;
             }
         }
         q("UPDATE agents SET source=NULL WHERE id=?", p![&a["id"]])?;
@@ -1476,13 +1486,9 @@ impl Ctx<'_> {
             }
             let col = col.unwrap_or_else(|| "pendiente".into());
             // sin posición: al final de su columna
-            q("INSERT INTO tasks(user, text, col, pos) VALUES(?, ?, ?, COALESCE(?, (SELECT max(pos) + 1 FROM tasks WHERE user=? AND col=?), 0))",
-                p![uid, text, col.clone(), pos, uid, col])?
-            .lastrowid
+            q("INSERT INTO tasks(user, text, col, pos) VALUES(?, ?, ?, COALESCE(?, (SELECT max(pos) + 1 FROM tasks WHERE user=? AND col=?), 0))", p![uid, text, col.clone(), pos, uid, col])?.lastrowid
         } else {
-            let n = q("UPDATE tasks SET text=COALESCE(?, text), col=COALESCE(?, col), pos=COALESCE(?, pos), updated=CURRENT_TIMESTAMP WHERE id=? AND user=?",
-                p![text, col, pos, rid_i, uid])?
-            .rowcount;
+            let n = q("UPDATE tasks SET text=COALESCE(?, text), col=COALESCE(?, col), pos=COALESCE(?, pos), updated=CURRENT_TIMESTAMP WHERE id=? AND user=?", p![text, col, pos, rid_i, uid])?.rowcount;
             if n == 0 {
                 return Ok(err(404, "no existe"));
             }
@@ -1507,15 +1513,7 @@ impl Ctx<'_> {
             let keys: Vec<&String> = d.keys().collect();
             let mut args: Vec<SqlV> = d.values().map(db::jv).collect();
             args.push(SqlV::Integer(self.uid()));
-            let id = q(
-                &format!(
-                    "INSERT INTO incidents({}author) VALUES({}?)",
-                    keys.iter().map(|k| format!("{k}, ")).collect::<String>(),
-                    "?, ".repeat(keys.len())
-                ),
-                args,
-            )?
-            .lastrowid;
+            let id = q(&format!("INSERT INTO incidents({}author) VALUES({}?)", keys.iter().map(|k| format!("{k}, ")).collect::<String>(), "?, ".repeat(keys.len())), args)?.lastrowid;
             self.note(id, "abrió la incidencia", true)?;
             self.log("crear", "incident", id, &d["title"], &Value::Object(d.clone()))?;
             let row = q(&format!("{INC} WHERE n.id=?"), p![id])?.one().unwrap_or_default();
@@ -1538,12 +1536,15 @@ impl Ctx<'_> {
             out.insert("kids".into(), q(&format!("{INC} WHERE n.parent=? ORDER BY n.id"), p![id])?.rows.into_iter().map(Value::Object).collect::<Vec<_>>().into());
             // trazabilidad: dónde se enlaza con [[INC-n]] (páginas, notas de equipos, otras incidencias y su seguimiento)
             let tag = format!("%[[INC-{id}]]%");
-            out.insert("mentions".into(), json!({
-                "pages": q("SELECT id, title FROM pages WHERE body LIKE ? ORDER BY title", p![&tag])?.rows,
-                "items": q("SELECT id, name FROM items WHERE notes LIKE ? ORDER BY name", p![&tag])?.rows,
-                "incidents": q("SELECT id, title, status FROM incidents WHERE id != ? AND (body LIKE ? OR id IN (SELECT incident FROM notes WHERE change = 0 AND text LIKE ?)) ORDER BY id DESC",
-                    p![id, &tag, &tag])?.rows,
-            }));
+            out.insert(
+                "mentions".into(),
+                json!({
+                    "pages": q("SELECT id, title FROM pages WHERE body LIKE ? ORDER BY title", p![&tag])?.rows,
+                    "items": q("SELECT id, name FROM items WHERE notes LIKE ? ORDER BY name", p![&tag])?.rows,
+                    "incidents": q("SELECT id, title, status FROM incidents WHERE id != ? AND (body LIKE ? OR id IN (SELECT incident FROM notes WHERE change = 0 AND text LIKE ?)) ORDER BY id DESC",
+                        p![id, &tag, &tag])?.rows,
+                }),
+            );
             return Ok(js(200, out));
         }
         if m == "POST" && parts.get(3).map(String::as_str) == Some("notes") && parts.len() == 4 {
@@ -1654,10 +1655,7 @@ impl Ctx<'_> {
             }
             names.push(name);
         }
-        let pws: Vec<String> = batch
-            .iter()
-            .map(|x| x.get("pass").and_then(Value::as_str).filter(|p| !p.is_empty()).map(String::from).unwrap_or_else(|| token_urlsafe(9)))
-            .collect();
+        let pws: Vec<String> = batch.iter().map(|x| x.get("pass").and_then(Value::as_str).filter(|p| !p.is_empty()).map(String::from).unwrap_or_else(|| token_urlsafe(9))).collect();
         let hashes = crate::util::par_map(&pws, 8, |pw| pw_hash(pw, None)); // PBKDF2 es lento a propósito: con 50 usuarios, en paralelo
         let mut out = vec![];
         for (((x, name), pw), h) in batch.iter().zip(&names).zip(&pws).zip(&hashes) {
@@ -1697,10 +1695,9 @@ impl Ctx<'_> {
                 other => {
                     failed(&ip); // también los códigos fallidos: 10 y fuera
                     return Ok(match other {
-                        Login::NeedCode => js(
-                            401,
-                            json!({"error": if b.get("code").is_some_and(truthy) { "código incorrecto" } else { "escribe el código de tu app de autenticación" }, "totp": true}),
-                        ),
+                        Login::NeedCode => {
+                            js(401, json!({"error": if b.get("code").is_some_and(truthy) { "código incorrecto" } else { "escribe el código de tu app de autenticación" }, "totp": true}))
+                        }
                         _ => err(401, "usuario o contraseña incorrectos"),
                     });
                 }
@@ -1793,13 +1790,7 @@ impl Ctx<'_> {
                 q("DELETE FROM sessions WHERE user_id=?", p![id])?;
                 lock(&BASIC).clear();
             }
-            self.log(
-                "editar",
-                "user",
-                id,
-                &row["name"],
-                &json!({"admin": b.get("admin"), "contraseña": b.get("pass").is_some(), "quitar 2FA": b.get("totp") == Some(&Value::Bool(false))}),
-            )?;
+            self.log("editar", "user", id, &row["name"], &json!({"admin": b.get("admin"), "contraseña": b.get("pass").is_some(), "quitar 2FA": b.get("totp") == Some(&Value::Bool(false))}))?;
             return Ok(js(200, me(id)?));
         }
         if m == "DELETE" {
@@ -1966,10 +1957,8 @@ fn refs(item: i64) -> Result<Value> {
 pub fn reset_password(name: &str) -> Result<i32> {
     let u = if name.is_empty() { None } else { q("SELECT id, name FROM users WHERE name=?", p![name])?.one() };
     let Some(u) = u else {
-        let names: Vec<String> = q("SELECT name, admin FROM users ORDER BY name COLLATE NOCASE", p![])?
-            .into_iter()
-            .map(|r| format!("{}{}", r.s("name"), if r.t("admin") { " (admin)" } else { "" }))
-            .collect();
+        let names: Vec<String> =
+            q("SELECT name, admin FROM users ORDER BY name COLLATE NOCASE", p![])?.into_iter().map(|r| format!("{}{}", r.s("name"), if r.t("admin") { " (admin)" } else { "" })).collect();
         let pre = if name.is_empty() { String::new() } else { format!("No existe el usuario «{name}». ") };
         println!("{pre}Usuarios en {}: {}\nUso: catlan restablecer <usuario>", DATA.join("catlan.db").display(), names.join(", "));
         return Ok(1);
@@ -1977,10 +1966,7 @@ pub fn reset_password(name: &str) -> Result<i32> {
     let pw = token_urlsafe(9);
     q("UPDATE users SET hash=?, must_change=1, totp='' WHERE id=?", p![pw_hash(&pw, None), &u["id"]])?;
     q("DELETE FROM sessions WHERE user_id=?", p![&u["id"]])?;
-    q(
-        "INSERT INTO log(who, action, kind, ref, name, data) VALUES('consola del servidor', 'restablecer contraseña', 'user', ?, ?, '{}')",
-        p![&u["id"], &u["name"]],
-    )?;
+    q("INSERT INTO log(who, action, kind, ref, name, data) VALUES('consola del servidor', 'restablecer contraseña', 'user', ?, ?, '{}')", p![&u["id"], &u["name"]])?;
     println!(
         "Contraseña provisional de {}: {pw}\nEntra con ella y catlan te pedirá cambiarla. Su verificación en dos pasos queda quitada.\n(Base de datos: {})",
         u.s("name"),

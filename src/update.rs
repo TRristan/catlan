@@ -106,12 +106,12 @@ pub fn apply() -> Result<String> {
     let sums = fetch_sums(assets)?;
     let bin = fetch(assets, &sums, mine)?.ok_or_else(|| anyhow!("la versión no trae {mine}"))?;
     // kitty.exe: si catlan reparte uno, también el nuevo (y los PCs se actualizan solos al verlo)
-    if let Some(k) = [HERE.join("kitty.exe"), DATA.join("kitty.exe")].into_iter().find(|p| p.is_file()) {
-        if let Some(b) = fetch(assets, &sums, "kitty.exe")? {
-            let tmp = k.with_extension("exe.nuevo");
-            std::fs::write(&tmp, b)?;
-            std::fs::rename(&tmp, &k)?;
-        }
+    if let Some(k) = [HERE.join("kitty.exe"), DATA.join("kitty.exe")].into_iter().find(|p| p.is_file())
+        && let Some(b) = fetch(assets, &sums, "kitty.exe")?
+    {
+        let tmp = k.with_extension("exe.nuevo");
+        std::fs::write(&tmp, b)?;
+        std::fs::rename(&tmp, &k)?;
     }
     let me = std::env::current_exe()?;
     let new = me.with_extension("nuevo");
@@ -144,10 +144,8 @@ pub fn restart() -> ! {
         let _ = c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
     }
     let systemd = std::env::var_os("INVOCATION_ID").is_some();
-    if !systemd {
-        if let Ok(me) = std::env::current_exe() {
-            let _ = std::process::Command::new(me).args(std::env::args_os().skip(1)).env("CATLAN_RESTART", "1").spawn();
-        }
+    if !systemd && let Ok(me) = std::env::current_exe() {
+        let _ = std::process::Command::new(me).args(std::env::args_os().skip(1)).env("CATLAN_RESTART", "1").spawn();
     }
     println!("catlan actualizado: reiniciando");
     std::process::exit(if systemd { 75 } else { 0 });

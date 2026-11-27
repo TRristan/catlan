@@ -997,6 +997,12 @@ try:
     assert call("/api/items")[1] == [] and call("/api/pages")[1] == [] and call("/api/incidents")[1] == [] and call("/api/health")[1] == []
     assert len(call("/api/users")[1]) == users_before
     assert [(h["action"], h["kind"]) for h in call("/api/log")[1]] == [("vaciar", "db")]
+    # Cuánto se guarda: por defecto 7 / 30 / 400 días; solo un admin lo cambia y dentro de sus límites
+    assert call("/api/retention")[1] == {"raw": 7, "syslog": 30, "hours": 400}
+    assert call("/api/retention", "PUT", {"raw": 0})[0] == 400 and call("/api/retention", "PUT", {"hours": "x"})[0] == 400
+    assert call("/api/retention", "PUT", {"raw": 14}, auth=LEC)[0] == 403
+    assert call("/api/retention", "PUT", {"raw": 14})[1] == {"raw": 14, "syslog": 30, "hours": 400} and call("/api/retention", auth=LEC)[1]["raw"] == 14
+    assert call("/api/system")[1]["rejected"] == 0
     # HTTPS siempre: certificado autofirmado y su huella para anclarlo en Kitty y en el comando de instalación
     import ssl
     ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE

@@ -1,0 +1,25 @@
+# Al subir una etiqueta vX.Y.Z: imagen de Docker en GitHub Container Registry (ghcr.io/<dueño>/catlan:X.Y.Z y :latest),
+# para que docker compose no tenga que compilar Rust en la máquina de cada uno.
+name: docker
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+  packages: write
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - id: meta
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: ${{ steps.meta.outputs.name }}:${{ github.ref_name }},${{ steps.meta.outputs.name }}:latest

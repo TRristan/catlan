@@ -1,8 +1,8 @@
 //! La ventana de Kitty: un icono en la bandeja y una página (ui.html, con el diseño de catlan) en un WebView2.
 use crate::{conf, facts, net, remote};
+use serde_json::{Value, json};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use serde_json::{Value, json};
 use std::time::Duration;
 use tao::dpi::LogicalSize;
 use tao::event::{Event, WindowEvent};
@@ -36,7 +36,14 @@ fn icon(n: u32) -> Vec<u8> {
             let e = t * std::f32::consts::SQRT_2;
             let top = (88.0 + t).min(x - 8.0 + e).min(248.0 - x + e);
             let jaw = |cx: f32| (x - cx).powi(2) + (y - 164.0).powi(2) <= (56.0 - t).powi(2);
-            let bottom = y <= 164.0 || if x < 96.0 { jaw(96.0) } else if x > 160.0 { jaw(160.0) } else { y <= 220.0 - t };
+            let bottom = y <= 164.0
+                || if x < 96.0 {
+                    jaw(96.0)
+                } else if x > 160.0 {
+                    jaw(160.0)
+                } else {
+                    y <= 220.0 - t
+                };
             (40.0 + t..=216.0 - t).contains(&x) && y >= top && bottom
         };
         let eye = |cx: f32| (x - cx).powi(2) + (y - 154.0).powi(2) <= 18f32.powi(2);
@@ -203,15 +210,17 @@ pub fn run(start_hidden: bool, updated: bool) {
     // que dice a la ventana si llega a catlan
     if let Ok(c) = &conf {
         let (url, ukey, p) = (c.url.clone(), c.ukey.clone(), proxy.clone());
-        std::thread::spawn(move || loop {
-            let (code, r) = net::post(&format!("{url}/api/agent/remote"), &json!({"ukey": ukey}));
-            if p.send_event(Ev::Js(js_call("conn", &json!({"status": code, "body": r})))).is_err() {
-                break;
+        std::thread::spawn(move || {
+            loop {
+                let (code, r) = net::post(&format!("{url}/api/agent/remote"), &json!({"ukey": ukey}));
+                if p.send_event(Ev::Js(js_call("conn", &json!({"status": code, "body": r})))).is_err() {
+                    break;
+                }
+                if r.get("id").is_some() && p.send_event(Ev::Ask(r)).is_err() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_secs(if code == 200 { 3 } else { 5 }));
             }
-            if r.get("id").is_some() && p.send_event(Ev::Ask(r)).is_err() {
-                break;
-            }
-            std::thread::sleep(Duration::from_secs(if code == 200 { 3 } else { 5 }));
         });
     }
 
@@ -264,10 +273,12 @@ pub fn run(start_hidden: bool, updated: bool) {
             }
             Event::UserEvent(Ev::Remote(r)) => {
                 // mientras dure, también lo dice la bandeja
-                let _ = tray.as_ref().map(|t| t.set_tooltip(Some(match &r {
-                    Ok(who) => format!("Kitty · {who} (IT) está conectado"),
-                    Err(_) => format!("Kitty · {}", facts::name()),
-                })));
+                let _ = tray.as_ref().map(|t| {
+                    t.set_tooltip(Some(match &r {
+                        Ok(who) => format!("Kitty · {who} (IT) está conectado"),
+                        Err(_) => format!("Kitty · {}", facts::name()),
+                    }))
+                });
                 let js = match r {
                     Ok(who) => js_call("remoteOn", &json!({"who": who})),
                     Err(why) => {
