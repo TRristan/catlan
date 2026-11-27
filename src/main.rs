@@ -79,10 +79,7 @@ fn start(args: &[String]) -> anyhow::Result<()> {
     }
     std::sync::LazyLock::force(&monitor::STARTED);
     // la IP de este equipo en la red (sin enviar nada): 0.0.0.0 no se puede abrir en el navegador
-    let lan = std::net::UdpSocket::bind("0.0.0.0:0")
-        .and_then(|u| u.connect("10.255.255.255:1").and_then(|_| u.local_addr()))
-        .map(|a| a.ip().to_string())
-        .unwrap_or_default();
+    let lan = std::net::UdpSocket::bind("0.0.0.0:0").and_then(|u| u.connect("10.255.255.255:1").and_then(|_| u.local_addr())).map(|a| a.ip().to_string()).unwrap_or_default();
     let (s, p) = (scheme(), *PORT);
     let also = if lan.is_empty() || lan == "127.0.0.1" || lan == "0.0.0.0" { String::new() } else { format!(" y {s}://{lan}:{p}") };
     println!("catlan {VERSION} en {s}://localhost:{p}{also}  (datos en {})", DATA.display());

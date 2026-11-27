@@ -306,11 +306,11 @@ impl Ctx {
 
     /// Kitty rechazado u olvidado: fuera de Salud, con su historial (si no, avisaría de que «no responde»).
     fn drop_source(a: &Row) -> Result<()> {
-        if let Some(s) = a.i("source") {
-            if !q("SELECT 1 FROM sources WHERE id=? AND kind='kitty'", p![s])?.is_empty() {
-                for (t, col) in [("sources", "id"), ("metrics", "source_id"), ("metrics_h", "source_id")] {
-                    q(&format!("DELETE FROM {t} WHERE {col}=?"), p![s])?;
-                }
+        if let Some(s) = a.i("source")
+            && !q("SELECT 1 FROM sources WHERE id=? AND kind='kitty'", p![s])?.is_empty()
+        {
+            for (t, col) in [("sources", "id"), ("metrics", "source_id"), ("metrics_h", "source_id")] {
+                q(&format!("DELETE FROM {t} WHERE {col}=?"), p![s])?;
             }
         }
         q("UPDATE agents SET source=NULL WHERE id=?", p![&a["id"]])?;

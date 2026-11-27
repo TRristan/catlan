@@ -161,10 +161,11 @@ async fn front(mut req: Request, next: Next) -> Response {
     // Escrituras desde otra web (CSRF): el navegador pone Origin; si no es este servidor, fuera. También al abrir un
     // WebSocket (es un GET, pero luego lleva teclado y ratón). Detrás de un proxy, este debe conservar la cabecera Host.
     let upgrade = h("upgrade").is_some();
-    if let Some(o) = h("origin") {
-        if (m != "GET" || upgrade) && netloc(o) != h("host").unwrap_or("") {
-            early = Some(err(403, "origen no permitido"));
-        }
+    if let Some(o) = h("origin")
+        && (m != "GET" || upgrade)
+        && netloc(o) != h("host").unwrap_or("")
+    {
+        early = Some(err(403, "origen no permitido"));
     }
     // Sin Origin: un navegador moderno dice igualmente de dónde viene la petición. Scripts y Kitty no mandan ninguna.
     if early.is_none() && (m != "GET" || upgrade) && !matches!(h("sec-fetch-site").unwrap_or(""), "" | "same-origin" | "none") {

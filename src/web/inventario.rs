@@ -192,12 +192,13 @@ impl Ctx {
                 args.push(db::jv(s));
             }
             let cur = q(&format!("UPDATE {res} SET {}, updated=CURRENT_TIMESTAMP WHERE id=?{}", sets.join(","), if seen.is_some() { " AND updated=?" } else { "" }), args)?;
-            if cur.rowcount == 0 && seen.is_some() {
-                if let Some(now) = q(&format!("SELECT updated FROM {res} WHERE id=?"), p![rid])?.one() {
-                    let who = q("SELECT who FROM log WHERE kind=? AND ref=? ORDER BY id DESC LIMIT 1", p![kind_of(res), rid])?.one();
-                    let who = who.map(|w| w.s("who").to_string()).filter(|w| !w.is_empty()).unwrap_or("Alguien".into());
-                    return Ok(js(409, json!({"error": format!("{who} lo cambió mientras lo editabas."), "updated": now["updated"]})));
-                }
+            if cur.rowcount == 0
+                && seen.is_some()
+                && let Some(now) = q(&format!("SELECT updated FROM {res} WHERE id=?"), p![rid])?.one()
+            {
+                let who = q("SELECT who FROM log WHERE kind=? AND ref=? ORDER BY id DESC LIMIT 1", p![kind_of(res), rid])?.one();
+                let who = who.map(|w| w.s("who").to_string()).filter(|w| !w.is_empty()).unwrap_or("Alguien".into());
+                return Ok(js(409, json!({"error": format!("{who} lo cambió mientras lo editabas."), "updated": now["updated"]})));
             }
         }
         let Some(row) = q(&format!("SELECT * FROM {res} WHERE id=?"), p![rid])?.one() else { return Ok(err(404, "no existe")) };
