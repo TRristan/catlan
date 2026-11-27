@@ -74,6 +74,48 @@ def unseal(blob, pw):
     return bytes(a ^ b for a, b in zip(ct, stream))
 
 
+def ws_open(port, path, headers):
+    """WebSocket mínimo (RFC 6455), sin dependencias: (socket, código HTTP del saludo)."""
+    s = socket.create_connection(("127.0.0.1", int(port)), timeout=10)
+    key = base64.b64encode(os.urandom(16)).decode()
+    extra = "".join(f"{k}: {v}\r\n" for k, v in headers.items())
+    s.sendall(f"GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+              f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n{extra}\r\n".encode())
+    head = b""
+    while b"\r\n\r\n" not in head:  # de byte en byte: lo que venga detrás ya es del WebSocket
+        c = s.recv(1)
+        if not c:
+            break
+        head += c
+    return s, int(head.split()[1])
+
+
+def ws_send(s, data):
+    """Texto (str) o binario (bytes), enmascarado como manda un cliente."""
+    op, data = (1, data.encode()) if isinstance(data, str) else (2, data)
+    n, mask = len(data), os.urandom(4)
+    size = bytes([0x80 | n]) if n < 126 else bytes([0x80 | 126]) + n.to_bytes(2, "big") if n < 65536 else bytes([0x80 | 127]) + n.to_bytes(8, "big")
+    s.sendall(bytes([0x80 | op]) + size + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(data)))
+
+
+def ws_recv(s, timeout=10):
+    """El siguiente mensaje: str si es texto, bytes si es binario, None si catlan cierra."""
+    s.settimeout(timeout)
+    def get(n):
+        b = b""
+        while len(b) < n:
+            c = s.recv(n - len(b))
+            if not c:
+                raise EOFError
+            b += c
+        return b
+    h = get(2)
+    n = h[1] & 127
+    n = int.from_bytes(get(2 if n == 126 else 8), "big") if n >= 126 else n
+    data, op = get(n), h[0] & 15
+    return None if op == 8 else data.decode() if op == 1 else data
+
+
 def muted(row):
     now = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
     return bool(row.get("mute_until")) and row["mute_until"] > now and (row.get("mute_from") or "") <= now
@@ -743,16 +785,40 @@ try:
         except urllib.error.HTTPError as e:
             return e.code, None
     assert frame(b"\xff\xd8x")[1] == {"state": "pedida", "why": ""}  # sin permiso: ni pantalla ni ratón
+    # el técnico la ve por un WebSocket: solo con sesión, solo la suya y nunca abierto desde otra web
+    tech, st = ws_open(PORT, f"/api/remote/{sid}/ws", {"Authorization": AUTH})
+    assert st == 101 and json.loads(ws_recv(tech))["state"] == "pedida"
+    assert ws_open(PORT, f"/api/remote/{sid}/ws", {})[1] == 401 and ws_open(PORT, "/api/remote/nada/ws", {"Authorization": AUTH})[1] == 404
+    assert ws_open(PORT, f"/api/remote/{sid}/ws", {"Authorization": AUTH, "Origin": "https://malo.example"})[1] == 403
     assert agent("remote/answer", {"ukey": UK, "id": sid, "ok": True})[1]["state"] == "aceptada"
-    assert call(f"/api/remote/{sid}/input", "POST", [{"t": "m", "x": .5, "y": .5}, {"t": "k", "c": "KeyA", "k": "a", "d": True}])[0] == 200
-    assert call(f"/api/remote/{sid}/input", "POST", [{"x": 1}])[0] == 400 and call(f"/api/remote/{sid}/input", "POST", {"t": "m"})[0] == 400
+    assert json.loads(ws_recv(tech))["state"] == "aceptada"  # sin preguntar: llega solo
+    ws_send(tech, json.dumps([{"t": "m", "x": .5, "y": .5}, {"t": "k", "c": "KeyA", "k": "a", "d": True}]))
+    ws_send(tech, json.dumps({"t": "m"}))
+    assert "error" in json.loads(ws_recv(tech))  # una lista de eventos, o nada
     assert frame(b"no es jpeg")[0] == 400 and frame(b"\xff\xd8x", key="z" * 64)[0] == 404
-    st, r = frame(b"\xff\xd8\xff\xe0pantalla")
+    st, r = frame(b"\xff\xd8\xff\xe0pantalla")  # una Kitty de antes del WebSocket: un fotograma por petición
     assert st == 200 and [e["t"] for e in r["input"]] == ["m", "k"], r
     assert frame(b"")[1]["input"] == []  # pantalla sin cambios: va vacío, solo a por el ratón
-    assert call(f"/api/remote/{sid}/frame?after=0") == (200, b"\xff\xd8\xff\xe0pantalla")
+    assert ws_recv(tech) == b"\xff\xd8\xff\xe0pantalla"  # la pantalla llega al técnico en cuanto la envía Kitty
+    # la Kitty de ahora, también por WebSocket: fotogramas de ida, ratón y teclado de vuelta al momento
+    assert ws_open(PORT, "/api/agent/remote/ws", {"X-Kitty": "z" * 64, "X-Sesion": sid})[1] == 404
+    assert ws_open(PORT, "/api/agent/remote/ws", {"X-Kitty": UK, "X-Sesion": "otra"})[1] == 404
+    kit, st = ws_open(PORT, "/api/agent/remote/ws", {"X-Kitty": UK, "X-Sesion": sid})
+    assert st == 101
+    ws_send(kit, b"\xff\xd8\xff\xe0otra")
+    assert ws_recv(tech) == b"\xff\xd8\xff\xe0otra"
+    ws_send(tech, json.dumps([{"t": "w", "d": 100}]))
+    assert json.loads(ws_recv(kit))["input"] == [{"t": "w", "d": 100}]
     assert agent("remote/answer", {"ukey": UK, "id": sid, "ok": False})[1]["state"] == "cerrada"  # lo corta el usuario del PC
-    assert call(f"/api/remote/{sid}/frame?after=1")[1]["why"] == "la cortó el usuario del PC" and frame(b"\xff\xd8x")[1]["state"] == "cerrada"
+    assert json.loads(ws_recv(tech))["why"] == "la cortó el usuario del PC" and json.loads(ws_recv(kit))["state"] == "cerrada"
+    assert frame(b"\xff\xd8x")[1]["state"] == "cerrada"
+    tech.close(), kit.close()
+    # Salud se refresca sola: el WebSocket avisa cuando llega una lectura nueva
+    hws, st = ws_open(PORT, "/api/health/ws", {"Authorization": AUTH})
+    assert st == 101
+    kitty(K1, every=1, facts=facts)
+    assert ws_recv(hws) == "salud"
+    hws.close()
     hist = [h["action"] for h in call(f"/api/log?kind=item&ref={hk['item']}")[1]]
     assert hist[:3] == ["control remoto terminado", "control remoto aceptado", "pedir control remoto"], hist
     assert urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{PORT}/kitty.exe")).status == 200 if (Path(BIN).parent / "kitty.exe").exists() else call("/kitty.exe", auth="")[0] == 404

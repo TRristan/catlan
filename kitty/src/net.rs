@@ -41,13 +41,36 @@ fn hex_sha256(b: &[u8]) -> String {
     sha2::Sha256::digest(b).iter().map(|x| format!("{x:02X}")).collect()
 }
 
-fn pinned(want: &str, seen: Arc<Mutex<String>>) -> ureq::Agent {
+fn pinned_tls(want: &str, seen: Arc<Mutex<String>>) -> Option<Arc<rustls::ClientConfig>> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let v = Pinned { want: want.to_string(), seen, provider: provider.clone() };
-    match rustls::ClientConfig::builder_with_provider(provider).with_safe_default_protocol_versions() {
-        Ok(b) => ureq::AgentBuilder::new().tls_config(Arc::new(b.dangerous().with_custom_certificate_verifier(Arc::new(v)).with_no_client_auth())).build(),
-        Err(_) => ureq::agent(),
+    let b = rustls::ClientConfig::builder_with_provider(provider).with_safe_default_protocol_versions().ok()?;
+    Some(Arc::new(b.dangerous().with_custom_certificate_verifier(Arc::new(v)).with_no_client_auth()))
+}
+
+fn pinned(want: &str, seen: Arc<Mutex<String>>) -> ureq::Agent {
+    match pinned_tls(want, seen) {
+        Some(c) => ureq::AgentBuilder::new().tls_config(c).build(),
+        None => ureq::agent(),
     }
+}
+
+/// El TLS de `agent()` para lo que no va por ureq (el WebSocket del control remoto): anclado al certificado
+/// autofirmado o, con uno de una CA, las del sistema.
+pub fn tls() -> Option<Arc<rustls::ClientConfig>> {
+    static T: OnceLock<Option<Arc<rustls::ClientConfig>>> = OnceLock::new();
+    T.get_or_init(|| match conf::Conf::load().map(|c| c.pin).unwrap_or_default() {
+        p if p.is_empty() => {
+            let mut roots = rustls::RootCertStore::empty();
+            for c in rustls_native_certs::load_native_certs().unwrap_or_default() {
+                let _ = roots.add(c);
+            }
+            let b = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider())).with_safe_default_protocol_versions().ok()?;
+            Some(Arc::new(b.with_root_certificates(roots).with_no_client_auth()))
+        }
+        p => pinned_tls(&p, Default::default()),
+    })
+    .clone()
 }
 
 /// Para hablar con el catlan que instaló Kitty: anclado a su certificado si es el autofirmado; si no, los del sistema.

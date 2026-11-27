@@ -302,7 +302,9 @@ escritura en curso y lo deja todo dentro de `catlan.db`. Si el monitor deja de l
 
 ```text
 src/          el servidor (Rust)
-  web.rs        la API, las sesiones y los permisos
+  server.rs     HTTPS y HTTP en el mismo puerto (tokio + hyper), límites por conexión e IP
+  web/          la API: una tabla de rutas por área (inventario, wiki, monitor, incidencias, usuarios, Kitty,
+                remoto), con el permiso de cada ruta, que comprueba un middleware; sesiones y WebSockets
   remote.rs     control remoto: el relevo entre la web del técnico y la Kitty del PC
   update.rs     actualizar catlan desde GitHub (Releases)
   db.rs         SQLite: esquema y migraciones numeradas
