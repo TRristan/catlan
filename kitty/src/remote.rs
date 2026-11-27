@@ -3,9 +3,13 @@
 use serde_json::{Value, json};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::io::{self, Read, Write};
+use std::net::TcpStream;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+use tungstenite::client::IntoClientRequest;
+use tungstenite::{Message, WebSocket};
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::{CURSOR_SHOWING, CURSORINFO, DI_NORMAL, DrawIconEx, GetCursorInfo, GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
@@ -135,9 +139,27 @@ fn apply(e: &Value, held: &mut Held) {
         t @ ("d" | "u") => {
             let down = t == "d";
             let fl = match f("b") as i32 {
-                1 => if down { MOUSEEVENTF_MIDDLEDOWN } else { MOUSEEVENTF_MIDDLEUP },
-                2 => if down { MOUSEEVENTF_RIGHTDOWN } else { MOUSEEVENTF_RIGHTUP },
-                _ => if down { MOUSEEVENTF_LEFTDOWN } else { MOUSEEVENTF_LEFTUP },
+                1 => {
+                    if down {
+                        MOUSEEVENTF_MIDDLEDOWN
+                    } else {
+                        MOUSEEVENTF_MIDDLEUP
+                    }
+                }
+                2 => {
+                    if down {
+                        MOUSEEVENTF_RIGHTDOWN
+                    } else {
+                        MOUSEEVENTF_RIGHTUP
+                    }
+                }
+                _ => {
+                    if down {
+                        MOUSEEVENTF_LEFTDOWN
+                    } else {
+                        MOUSEEVENTF_LEFTUP
+                    }
+                }
             };
             send(&[mouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, abs("x"), abs("y"), 0), mouse(fl, 0, 0, 0)]);
         }
@@ -174,70 +196,141 @@ fn apply(e: &Value, held: &mut Held) {
     }
 }
 
-/// POST con el fotograma; la respuesta trae el estado y lo que ha hecho el técnico.
-fn post_frame(url: &str, ukey: &str, id: &str, jpg: &[u8]) -> Result<Value, String> {
-    let r = crate::net::agent()
-        .post(&format!("{url}/api/agent/remote/frame"))
-        .timeout(Duration::from_secs(15))
-        .set("X-Kitty", ukey)
-        .set("X-Sesion", id)
-        .set("Content-Type", "image/jpeg")
-        .send_bytes(jpg);
-    match r {
-        Ok(r) => r.into_string().ok().and_then(|s| serde_json::from_str(&s).ok()).ok_or_else(|| "respuesta rara de catlan".into()),
-        Err(ureq::Error::Status(c, _)) => Err(format!("catlan respondió {c}")),
-        Err(e) => Err(format!("sin conexión con catlan ({})", e.kind())),
+/// El socket con catlan, con lecturas que esperan poco: un tiempo agotado se cuenta como «aún no hay nada» (WouldBlock),
+/// que es lo que rustls y tungstenite saben reanudar (Windows dice TimedOut).
+struct Sock(TcpStream);
+
+impl Read for Sock {
+    fn read(&mut self, b: &mut [u8]) -> io::Result<usize> {
+        self.0.read(b).map_err(|e| if e.kind() == io::ErrorKind::TimedOut { io::ErrorKind::WouldBlock.into() } else { e })
     }
 }
+
+impl Write for Sock {
+    fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+        self.0.write(b)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.flush()
+    }
+}
+
+type Ws = WebSocket<rustls::StreamOwned<rustls::ClientConnection, Sock>>;
+
+/// «https://host:puerto/…» → (host, puerto), también con IPv6 entre corchetes.
+fn host_port(url: &str) -> Option<(String, u16)> {
+    let hp = url.strip_prefix("https://")?.split('/').next()?;
+    let (h, p) = match hp.strip_prefix('[') {
+        Some(v6) => {
+            let (h, rest) = v6.split_once(']')?;
+            (h, rest.strip_prefix(':'))
+        }
+        None => match hp.rsplit_once(':') {
+            Some((h, p)) => (h, Some(p)),
+            None => (hp, None),
+        },
+    };
+    Some((h.to_string(), p.map_or(Some(443), |p| p.parse().ok())?))
+}
+
+/// El WebSocket de la sesión, por el mismo TLS (anclado) que el resto de Kitty.
+fn connect(url: &str, ukey: &str, id: &str) -> Result<Ws, String> {
+    let (host, port) = host_port(url).ok_or("catlan no está en una dirección https")?;
+    let tcp = TcpStream::connect((host.as_str(), port)).map_err(|e| e.to_string())?;
+    tcp.set_read_timeout(Some(Duration::from_secs(15))).map_err(|e| e.to_string())?;
+    let _ = tcp.set_nodelay(true);
+    let cfg = crate::net::tls().ok_or("no hay TLS")?;
+    let name = rustls::pki_types::ServerName::try_from(host.clone()).map_err(|e| e.to_string())?;
+    let conn = rustls::ClientConnection::new(cfg, name).map_err(|e| e.to_string())?;
+    let at = url.trim_start_matches("https://").split('/').next().unwrap_or("");
+    let mut req = format!("wss://{at}/api/agent/remote/ws").into_client_request().map_err(|e| e.to_string())?;
+    req.headers_mut().insert("X-Kitty", ukey.parse().map_err(|_| "clave rara")?);
+    req.headers_mut().insert("X-Sesion", id.parse().map_err(|_| "sesión rara")?);
+    let (ws, _) = tungstenite::client(req, rustls::StreamOwned::new(conn, Sock(tcp))).map_err(|e| e.to_string())?;
+    // ya abierto: leer solo lo que haya, para volver enseguida a por la pantalla
+    ws.get_ref().sock.0.set_read_timeout(Some(Duration::from_millis(20))).map_err(|e| e.to_string())?;
+    Ok(ws)
+}
+
+/// Sin cambios en la pantalla, un fotograma vacío cada tanto: así catlan sabe que Kitty sigue ahí.
+const ALIVE: Duration = Duration::from_secs(2);
 
 /// La sesión aceptada: pantalla hacia catlan y ratón y teclado de vuelta, hasta que alguien la corte.
 /// Devuelve por qué acabó, para enseñárselo al usuario.
 pub fn session(url: &str, ukey: &str, id: &str, stop: &Arc<AtomicBool>) -> String {
     let mut held = Held::default();
-    let (mut last, mut fails) = (0u64, 0);
-    let why = loop {
-        if stop.load(Ordering::Relaxed) {
-            let _ = crate::net::post(&format!("{url}/api/agent/remote/answer"), &json!({"ukey": ukey, "id": id, "ok": false}));
-            break "Has cortado la conexión.".to_string();
-        }
-        let t0 = Instant::now();
-        // sin cambios en la pantalla, se envía vacío: solo para recoger el ratón y el teclado
-        let jpg = capture()
-            .map(|(px, w, h)| {
-                let mut hs = DefaultHasher::new();
-                px.hash(&mut hs);
-                let hsh = hs.finish();
-                if hsh == last { vec![] } else { last = hsh; jpeg(&px, w, h) }
-            })
-            .unwrap_or_default(); // pantalla bloqueada o de UAC: Windows no deja verla
-        match post_frame(url, ukey, id, &jpg) {
-            Ok(r) => {
-                fails = 0;
-                if r.get("state").and_then(Value::as_str) != Some("aceptada") {
-                    let w = r.get("why").and_then(Value::as_str).unwrap_or("");
-                    break if w.is_empty() { "La sesión ha terminado.".into() } else { format!("La sesión ha terminado: {w}.") };
-                }
-                for e in r.get("input").and_then(Value::as_array).into_iter().flatten() {
-                    apply(e, &mut held);
-                }
-            }
-            Err(e) => {
-                fails += 1;
-                if fails >= 5 {
-                    break format!("Se perdió la conexión con catlan: {e}.");
-                }
-                std::thread::sleep(Duration::from_secs(1));
-            }
-        }
-        std::thread::sleep(TICK.saturating_sub(t0.elapsed()));
+    let why = match connect(url, ukey, id) {
+        Ok(ws) => run(ws, url, ukey, id, stop, &mut held),
+        Err(e) => format!("No se pudo conectar con catlan: {e}."),
     };
     held.release();
     why
 }
 
+fn run(mut ws: Ws, url: &str, ukey: &str, id: &str, stop: &Arc<AtomicBool>, held: &mut Held) -> String {
+    let (mut last, mut sent) = (0u64, Instant::now() - ALIVE);
+    let lost = |e: tungstenite::Error| format!("Se perdió la conexión con catlan: {e}.");
+    loop {
+        if stop.load(Ordering::Relaxed) {
+            let _ = crate::net::post(&format!("{url}/api/agent/remote/answer"), &json!({"ukey": ukey, "id": id, "ok": false}));
+            let _ = ws.close(None);
+            return "Has cortado la conexión.".into();
+        }
+        let t0 = Instant::now();
+        // sin cambios en la pantalla no se envía nada (solo el latido)
+        let jpg = capture()
+            .map(|(px, w, h)| {
+                let mut hs = DefaultHasher::new();
+                px.hash(&mut hs);
+                let hsh = hs.finish();
+                if hsh == last {
+                    vec![]
+                } else {
+                    last = hsh;
+                    jpeg(&px, w, h)
+                }
+            })
+            .unwrap_or_default(); // pantalla bloqueada o de UAC: Windows no deja verla
+        if !jpg.is_empty() || sent.elapsed() >= ALIVE {
+            if let Err(e) = ws.send(Message::Binary(jpg.into())) {
+                return lost(e);
+            }
+            sent = Instant::now();
+        }
+        // lo que mande catlan (ratón, teclado, el final) hasta que toque el siguiente fotograma
+        while t0.elapsed() < TICK {
+            match ws.read() {
+                Ok(Message::Text(t)) => {
+                    let r: Value = serde_json::from_str(t.as_str()).unwrap_or_default();
+                    if r.get("state").and_then(Value::as_str).is_some_and(|s| s != "aceptada") {
+                        let w = r.get("why").and_then(Value::as_str).unwrap_or("");
+                        return if w.is_empty() { "La sesión ha terminado.".into() } else { format!("La sesión ha terminado: {w}.") };
+                    }
+                    for e in r.get("input").and_then(Value::as_array).into_iter().flatten() {
+                        apply(e, held);
+                    }
+                }
+                Ok(Message::Close(_)) => return "La sesión ha terminado.".into(),
+                Ok(_) => {}
+                Err(tungstenite::Error::Io(e)) if e.kind() == io::ErrorKind::WouldBlock => {}
+                Err(e) => return lost(e),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn direcciones() {
+        assert_eq!(host_port("https://192.168.1.5:8080"), Some(("192.168.1.5".into(), 8080)));
+        assert_eq!(host_port("https://it.local"), Some(("it.local".into(), 443)));
+        assert_eq!(host_port("https://[fd00::5]:9000/x"), Some(("fd00::5".into(), 9000)));
+        assert_eq!(host_port("http://catlan:8080"), None);
+        assert_eq!(host_port("https://catlan:puerto"), None);
+    }
 
     #[test]
     fn teclas() {

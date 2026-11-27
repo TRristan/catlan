@@ -1027,8 +1027,12 @@ pub fn latency(hours: i64) -> Result<Value> {
     Ok(out.into())
 }
 
+/// Cambia con cada lectura guardada en Salud: la web, abierta en Salud, se entera por su WebSocket.
+pub static HEALTH: LazyLock<tokio::sync::watch::Sender<u64>> = LazyLock::new(|| tokio::sync::watch::channel(0).0);
+
 /// Guarda una lectura (de SNMP o de un Kitty), el estado del equipo, y avisa si cambia.
 pub fn save_health(src: &Row, out: &[M], probs: &[String], info: Option<&Map<String, Value>>, err: Option<&str>) -> Result<()> {
+    HEALTH.send_modify(|v| *v = v.wrapping_add(1));
     let state = if err.is_some() { "error" } else if !probs.is_empty() { "warn" } else { "ok" };
     if !out.is_empty() {
         let mut c = lock(writer());

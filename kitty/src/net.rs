@@ -1,7 +1,7 @@
 //! Hablar con catlan y enviar el estado del equipo (lo que hace `kitty servicio` cada minuto).
 use crate::{conf, facts};
-use serde_json::{Value, json};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use serde_json::{Value, json};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -19,14 +19,7 @@ struct Pinned {
 }
 
 impl rustls::client::danger::ServerCertVerifier for Pinned {
-    fn verify_server_cert(
-        &self,
-        cert: &CertificateDer<'_>,
-        _: &[CertificateDer<'_>],
-        _: &ServerName<'_>,
-        _: &[u8],
-        _: UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+    fn verify_server_cert(&self, cert: &CertificateDer<'_>, _: &[CertificateDer<'_>], _: &ServerName<'_>, _: &[u8], _: UnixTime) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
         let h = hex_sha256(cert);
         let ok = self.want.is_empty() || self.want.eq_ignore_ascii_case(&h);
         *self.seen.lock().unwrap_or_else(|e| e.into_inner()) = h;
@@ -48,13 +41,36 @@ fn hex_sha256(b: &[u8]) -> String {
     sha2::Sha256::digest(b).iter().map(|x| format!("{x:02X}")).collect()
 }
 
-fn pinned(want: &str, seen: Arc<Mutex<String>>) -> ureq::Agent {
+fn pinned_tls(want: &str, seen: Arc<Mutex<String>>) -> Option<Arc<rustls::ClientConfig>> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let v = Pinned { want: want.to_string(), seen, provider: provider.clone() };
-    match rustls::ClientConfig::builder_with_provider(provider).with_safe_default_protocol_versions() {
-        Ok(b) => ureq::AgentBuilder::new().tls_config(Arc::new(b.dangerous().with_custom_certificate_verifier(Arc::new(v)).with_no_client_auth())).build(),
-        Err(_) => ureq::agent(),
+    let b = rustls::ClientConfig::builder_with_provider(provider).with_safe_default_protocol_versions().ok()?;
+    Some(Arc::new(b.dangerous().with_custom_certificate_verifier(Arc::new(v)).with_no_client_auth()))
+}
+
+fn pinned(want: &str, seen: Arc<Mutex<String>>) -> ureq::Agent {
+    match pinned_tls(want, seen) {
+        Some(c) => ureq::AgentBuilder::new().tls_config(c).build(),
+        None => ureq::agent(),
     }
+}
+
+/// El TLS de `agent()` para lo que no va por ureq (el WebSocket del control remoto): anclado al certificado
+/// autofirmado o, con uno de una CA, las del sistema.
+pub fn tls() -> Option<Arc<rustls::ClientConfig>> {
+    static T: OnceLock<Option<Arc<rustls::ClientConfig>>> = OnceLock::new();
+    T.get_or_init(|| match conf::Conf::load().map(|c| c.pin).unwrap_or_default() {
+        p if p.is_empty() => {
+            let mut roots = rustls::RootCertStore::empty();
+            for c in rustls_native_certs::load_native_certs().unwrap_or_default() {
+                let _ = roots.add(c);
+            }
+            let b = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider())).with_safe_default_protocol_versions().ok()?;
+            Some(Arc::new(b.with_root_certificates(roots).with_no_client_auth()))
+        }
+        p => pinned_tls(&p, Default::default()),
+    })
+    .clone()
 }
 
 /// Para hablar con el catlan que instaló Kitty: anclado a su certificado si es el autofirmado; si no, los del sistema.
@@ -68,8 +84,7 @@ pub fn agent() -> &'static ureq::Agent {
 
 /// POST con JSON: (código HTTP, respuesta). Código 0: no se pudo hablar con catlan.
 pub fn post(url: &str, body: &Value) -> (u16, Value) {
-    let r = agent()
-        .post(url).timeout(Duration::from_secs(20)).set("Content-Type", "application/json; charset=utf-8").send_string(&body.to_string());
+    let r = agent().post(url).timeout(Duration::from_secs(20)).set("Content-Type", "application/json; charset=utf-8").send_string(&body.to_string());
     match r {
         Ok(r) => (r.status(), r.into_string().ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Null)),
         Err(ureq::Error::Status(c, r)) => (c, r.into_string().ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({"error": format!("catlan respondió {c}")}))),
@@ -81,7 +96,13 @@ pub fn post(url: &str, body: &Value) -> (u16, Value) {
 pub fn normalize(s: &str) -> Option<String> {
     let s = s.trim().trim_end_matches('/');
     let ok = !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || ".:/-[]".contains(c));
-    let u = if s.contains("://") { s.to_string() } else if s.contains(':') { format!("https://{s}") } else { format!("https://{s}:8080") };
+    let u = if s.contains("://") {
+        s.to_string()
+    } else if s.contains(':') {
+        format!("https://{s}")
+    } else {
+        format!("https://{s}:8080")
+    };
     (ok && u.starts_with("https://")).then_some(u)
 }
 
@@ -105,7 +126,9 @@ pub fn find() -> Option<String> {
     if probe("https://catlan:8080").is_some() {
         return Some("https://catlan:8080".into());
     }
-    let mut nets: Vec<[u8; 3]> = sysinfo::Networks::new_with_refreshed_list().values().flat_map(|n| n.ip_networks().iter().map(|i| i.addr))
+    let mut nets: Vec<[u8; 3]> = sysinfo::Networks::new_with_refreshed_list()
+        .values()
+        .flat_map(|n| n.ip_networks().iter().map(|i| i.addr))
         .filter_map(|a| match a {
             IpAddr::V4(v) if v.is_private() => Some([v.octets()[0], v.octets()[1], v.octets()[2]]),
             _ => None,
@@ -115,7 +138,9 @@ pub fn find() -> Option<String> {
     nets.dedup();
     // shortcut: solo el /24 de cada interfaz y el puerto 8080; si catlan está en otra subred, se escribe a mano
     let open: Vec<Ipv4Addr> = std::thread::scope(|s| {
-        let hs: Vec<_> = nets.iter().flat_map(|n| (1..255u8).map(move |h| Ipv4Addr::new(n[0], n[1], n[2], h)))
+        let hs: Vec<_> = nets
+            .iter()
+            .flat_map(|n| (1..255u8).map(move |h| Ipv4Addr::new(n[0], n[1], n[2], h)))
             .map(|ip| s.spawn(move || TcpStream::connect_timeout(&SocketAddr::new(ip.into(), 8080), Duration::from_millis(400)).ok().map(|_| ip)))
             .collect();
         hs.into_iter().filter_map(|h| h.join().ok().flatten()).collect()

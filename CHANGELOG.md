@@ -3,6 +3,17 @@
 Cada versión, lo que cambia para quien usa catlan. Sigue [SemVer](https://semver.org/lang/es/): el primer número sube
 cuando hay que hacer algo a mano al actualizar.
 
+## Sin publicar
+
+- **Servidor nuevo** (tokio + hyper + axum): las conexiones se reutilizan (keep-alive) y ya no hay un hilo por conexión.
+  Lo de seguridad sigue igual: HTTPS y HTTP en el mismo puerto, lo que se sirve en claro, cabeceras, proxies de
+  confianza, 503 y 64 conexiones por IP, y 10 s para mandar cada petición.
+- **Control remoto por WebSocket**: la pantalla llega en cuanto cambia y el ratón y el teclado van al PC sin esperar al
+  siguiente fotograma. Las Kitty de antes siguen funcionando por HTTP.
+- **Salud se refresca sola** al llegar lecturas nuevas (como mucho cada 5 s), en vez de preguntar cada 15 s.
+- Por dentro: las rutas de la API son tablas con el permiso de cada una, comprobado en un solo sitio y con una prueba
+  por ruta.
+
 ## 2.0.0
 
 **Hay que reinstalar Kitty en los PCs** (el mismo comando de Inventario → Añadir con Kitty). Las Kitty de antes siguen

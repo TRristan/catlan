@@ -98,5 +98,5 @@ fn start(args: &[String]) -> anyhow::Result<()> {
         println!("catlan parado");
         std::process::exit(0);
     })?;
-    server::serve(web::handle)
+    server::serve(web::app())
 }
