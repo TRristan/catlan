@@ -429,10 +429,11 @@ fn agent() -> ureq::Agent {
 }
 
 fn discovery(issuer: &str) -> Result<Value> {
-    if let Some((i, d, t)) = &*lock(&DISCO) {
-        if i == issuer && *t > now() {
-            return Ok(d.clone());
-        }
+    if let Some((i, d, t)) = &*lock(&DISCO)
+        && i == issuer
+        && *t > now()
+    {
+        return Ok(d.clone());
     }
     let d: Value = agent().get(&format!("{issuer}/.well-known/openid-configuration")).call()?.into_string()?.parse()?;
     for k in ["issuer", "authorization_endpoint", "token_endpoint"] {
@@ -534,10 +535,10 @@ fn oidc_finish_with(c: &Map<String, Value>, state: &str, code: &str) -> Result<E
         _ => vec![],
     };
     // Google Workspace no manda grupos: su dominio de correo (verificado) cuenta como el grupo «@empresa.com»
-    if t.val("email_verified") == &json!(true) || t.s("email_verified") == "true" {
-        if let Some((_, dom)) = t.s("email").rsplit_once('@') {
-            groups.push(format!("@{}", dom.to_lowercase()));
-        }
+    if (t.val("email_verified") == &json!(true) || t.s("email_verified") == "true")
+        && let Some((_, dom)) = t.s("email").rsplit_once('@')
+    {
+        groups.push(format!("@{}", dom.to_lowercase()));
     }
     Ok(Ext { key: format!("oidc:{}|{}", d.s("issuer"), t.s("sub")), name, groups })
 }
