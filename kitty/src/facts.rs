@@ -76,7 +76,7 @@ fn powershell(script: &str, max: Duration) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&reader.join().unwrap_or_default()).into_owned())
 }
 
-fn b64(b: &[u8]) -> String {
+pub fn b64(b: &[u8]) -> String {
     const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut s = String::new();
     for c in b.chunks(3) {

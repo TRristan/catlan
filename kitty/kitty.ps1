@@ -21,7 +21,9 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 if ($Pin) { # el certificado de catlan y ningún otro (es autofirmado: Windows no lo conoce)
-    [Net.ServicePointManager]::ServerCertificateValidationCallback = { param($s, $c) [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($c.GetRawCertData())).Replace('-', '') -eq '{{PIN}}' }
+    # en C#: un scriptblock de PowerShell 5 se ejecuta en un hilo sin runspace y falla con «Error inesperado de envío»
+    if (-not ('KittyPin' -as [type])) { Add-Type 'public static class KittyPin { public static void Set(string p) { System.Net.ServicePointManager.ServerCertificateValidationCallback = (s, c, h, e) => System.BitConverter.ToString(System.Security.Cryptography.SHA256.Create().ComputeHash(c.GetRawCertData())).Replace("-", "") == p; } }' }
+    [KittyPin]::Set($Pin)
 }
 if (-not (Test-Path $r)) { New-Item $r | Out-Null }
 $key = (Get-ItemProperty $r).key

@@ -102,17 +102,21 @@ fn install(url: &str, pin: &str) -> Result<(), String> {
     if !pin.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err("La huella del certificado de catlan no es válida.".into());
     }
+    // en C#: un scriptblock de PowerShell 5 se ejecuta en un hilo sin runspace y falla con «Error inesperado de envío»
     let check = if pin.is_empty() {
         String::new()
     } else {
         format!(
-            "[Net.ServicePointManager]::ServerCertificateValidationCallback = {{ param($s, $c) [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($c.GetRawCertData())).Replace('-', '') -eq '{pin}' }}; "
+            "Add-Type 'public static class KittyPin {{ public static void Set(string p) {{ System.Net.ServicePointManager.ServerCertificateValidationCallback = (s, c, h, e) => System.BitConverter.ToString(System.Security.Cryptography.SHA256.Create().ComputeHash(c.GetRawCertData())).Replace(\"-\", \"\") == p; }} }}'; [KittyPin]::Set('{pin}'); "
         )
     };
-    let args = format!(
-        "-NoProfile -ExecutionPolicy Bypass -Command \"try {{ [Net.ServicePointManager]::SecurityProtocol = 'Tls12'; {check}irm '{url}/kitty.ps1' | iex }} catch {{ $d = Join-Path $env:ProgramData 'Kitty'; \
-         New-Item -ItemType Directory -Force $d | Out-Null; $_.ToString() | Out-File -Encoding utf8 (Join-Path $d 'instalar.log'); exit 1 }}\""
+    let script = format!(
+        "try {{ [Net.ServicePointManager]::SecurityProtocol = 'Tls12'; {check}irm '{url}/kitty.ps1' | iex }} catch {{ $d = Join-Path $env:ProgramData 'Kitty'; \
+         New-Item -ItemType Directory -Force $d | Out-Null; $_.ToString() | Out-File -Encoding utf8 (Join-Path $d 'instalar.log'); exit 1 }}"
     );
+    // codificado: las comillas dobles del C# no sobreviven a -Command "..."
+    let utf16: Vec<u8> = script.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+    let args = format!("-NoProfile -ExecutionPolicy Bypass -EncodedCommand {}", crate::facts::b64(&utf16));
     let (verb, file, params) = (w("runas"), w("powershell.exe"), w(&args));
     let mut i: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
     i.cbSize = size_of::<SHELLEXECUTEINFOW>() as u32;
