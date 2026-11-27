@@ -7,6 +7,7 @@ mod monitor;
 mod remote;
 mod server;
 mod snmp;
+mod update;
 mod util;
 mod validate;
 mod web;
@@ -65,6 +66,7 @@ fn start(args: &[String]) -> anyhow::Result<()> {
         db::init()?; // no hace falta parar catlan: la BD admite a los dos (WAL)
         std::process::exit(web::reset_password(args.get(2).map_or("", String::as_str))?);
     }
+    update::on_start();
     db::init()?;
     monitor::apply_alerts()?;
     if db::q("SELECT 1 FROM users", p![])?.is_empty() {
@@ -84,6 +86,7 @@ fn start(args: &[String]) -> anyhow::Result<()> {
     let also = if lan.is_empty() || lan == "127.0.0.1" || lan == "0.0.0.0" { String::new() } else { format!(" y {s}://{lan}:{p}") };
     println!("catlan {VERSION} en {s}://localhost:{p}{also}  (datos en {})", DATA.display());
     monitor::start_monitor();
+    std::thread::spawn(update::auto_loop);
     if *SYSLOG_PORT != 0 {
         std::thread::spawn(monitor::syslog_server);
     }

@@ -8,7 +8,7 @@ HERE = Path(__file__).parent.parent  # la raíz del repositorio
 BIN = os.environ.get("CATLAN_BIN") or str(HERE / "target" / "release" / ("catlan.exe" if os.name == "nt" else "catlan"))
 if not Path(BIN).exists():
     sys.exit(f"No encuentro {BIN}: compila con «cargo build --release» o indica la ruta en CATLAN_BIN")
-MIGRATIONS = 30  # migraciones numeradas de src/db.rs
+MIGRATIONS = 31  # migraciones numeradas de src/db.rs
 SECRET = ("community", "pass", "priv_pass")
 SEAL = b"CATLAN-CIFRADO-1"
 sha = lambda t: hashlib.sha256(t.encode()).hexdigest()
@@ -548,7 +548,7 @@ try:
     st, ps = call("/kitty.ps1", auth="")
     ps = ps.decode()
     CAT = ps.split("$Catlan = '")[1][:32]
-    assert st == 200 and f"$Url = 'http://127.0.0.1:{PORT}'" in ps and all(c in "0123456789abcdef" for c in CAT) and "{{" not in ps
+    assert st == 200 and f"$Url = 'https://127.0.0.1:{PORT}'" in ps and all(c in "0123456789abcdef" for c in CAT) and "{{" not in ps
     try:
         urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{PORT}/kitty.ps1", headers={"Host": "x'; calc #"}))
         raise AssertionError("Host raro aceptado")
@@ -565,7 +565,7 @@ try:
     assert call("/api/agents", auth=LEC)[0] == 403 and call(f"/api/agents/{ag['id']}", "PUT", {"state": "adoptado"}, auth=LEC)[0] == 403
     it = call(f"/api/items/{call(f'/api/agents/{ag['id']}', 'PUT', {'state': 'adoptado'})[1]['item']}")[1]  # la ficha sale ya al aceptar
     assert (it["name"], it["ip"], it["serial"], it["kind"], it["status"]) == ("pc-kitty", "10.0.0.50", "KSN1", "pc", "activo")
-    assert kitty(K1) == (200, {"state": "adoptado", "item": it["id"], "catlan": CAT}) and len(call("/api/items")[1]) == n_items + 1
+    assert kitty(K1) == (200, {"state": "adoptado", "item": it["id"], "catlan": CAT, "apps": []}) and len(call("/api/items")[1]) == n_items + 1
     call(f"/api/items/{it['id']}", "PUT", {"name": "Portátil de Ana", "notes": "mío"})
     nlog = len(call(f"/api/log?kind=item&ref={it['id']}")[1])
     kitty(K1, ip="10.0.0.51"), kitty(K1, ip="10.0.0.51")
@@ -612,6 +612,20 @@ try:
     hk2 = next(h for h in call("/api/health")[1] if h["id"] == hk["id"])
     assert [e["rec"] for e in hk2["info"]["events"]] == [8, 7] and hk2["state"] == "warn"
     assert hk2["problems"] == ["Crítico en el registro: Kernel-Power 41 · Apagado inesperado."], hk2["problems"]
+    # Programas en los PCs: solo los admins eligen; Kitty recibe la lista y devuelve cómo le fue a winget
+    for bad in ({"name": "x", "winget": "-h"}, {"name": "x", "winget": "a b"}, {"name": "", "winget": "Google.Chrome"}, {"name": "x"}):
+        assert call("/api/apps", "POST", bad)[0] == 400, bad
+    assert call("/api/apps", "POST", {"name": "Chrome", "winget": "Google.Chrome"}, auth=LEC)[0] == 403
+    chrome = call("/api/apps", "POST", {"name": "Chrome", "winget": "Google.Chrome"})[1]
+    assert kitty(K1, every=1, facts=ok_disks)[1]["apps"] == ["Google.Chrome"]
+    kitty(K1, every=1, facts=ok_disks, apps={"Google.Chrome": {"ok": True, "msg": "instalado"}})
+    assert next(h for h in call("/api/health")[1] if h["id"] == hk["id"])["info"]["apps"] == {"Google.Chrome": {"ok": True, "msg": "instalado"}}
+    assert call(f"/api/apps/{chrome['id']}", "DELETE")[0] == 204 and kitty(K1, every=1, facts=ok_disks)[1]["apps"] == []
+    # Actualizar catlan: solo admins; sin pedirlo no se habla con GitHub (aquí no se pulsa «Buscar»)
+    up = call("/api/update")[1]
+    assert up["auto"] is False and up["last"] is None and up["current"] and call("/api/update", auth=LEC)[0] == 403
+    assert call("/api/update", "PUT", {"auto": True})[1]["auto"] is True and call("/api/update", "PUT", {"auto": "sí"})[0] == 400
+    assert call("/api/update", "PUT", {"auto": False})[1]["auto"] is False
     kitty(K1, every=1, facts=ok_disks, events=[ev(10, 2, minutes=1)])  # el siguiente envío trae solo lo nuevo: lo de antes sigue
     assert [e["rec"] for e in next(h for h in call("/api/health")[1] if h["id"] == hk["id"])["info"]["events"]] == [10, 8, 7]
     kitty(K1, every=1, facts=ok_disks, events=[])
@@ -669,6 +683,8 @@ try:
     hist = [h["action"] for h in call(f"/api/log?kind=item&ref={hk['item']}")[1]]
     assert hist[:3] == ["control remoto terminado", "control remoto aceptado", "pedir control remoto"], hist
     assert urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{PORT}/kitty.exe")).status == 200 if (Path(BIN).parent / "kitty.exe").exists() else call("/kitty.exe", auth="")[0] == 404
+    kexe = Path(BIN).parent / "kitty.exe"  # las Kitty instaladas comparan este sha256 con el suyo para actualizarse
+    assert call("/kitty.json", auth="")[1]["kitty"] == (hashlib.sha256(kexe.read_bytes()).hexdigest() if kexe.exists() else "")
     # expulsado: fuera de Salud con su historial; la ficha del inventario se queda
     assert call(f"/api/agents/{ag['id']}", "PUT", {"state": "rechazado"})[0] == 200 and not [h for h in call("/api/health")[1] if h["kind"] == "kitty"]
     assert call(f"/api/metrics?source={hk['id']}&hours=1")[1] == {} and len(call("/api/items")[1]) == n_items + 1
@@ -872,7 +888,7 @@ try:
     # Kitty para Linux: el instalador lleva esta dirección, va con LF y, en Linux, el agente habla bien con catlan
     st, sh = call("/kitty.sh", auth="")
     sh = sh.decode()
-    assert st == 200 and f"URL='http://127.0.0.1:{PORT}'" in sh and "{{" not in sh and "\r" not in sh
+    assert st == 200 and f"URL='https://127.0.0.1:{PORT}'" in sh and "{{" not in sh and "\r" not in sh
     if sys.platform.startswith("linux"):
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "agent.sh").write_text(sh.split("<<'AGENT'\n")[1].split("\nAGENT\n")[0])
@@ -981,6 +997,37 @@ try:
     assert call("/api/items")[1] == [] and call("/api/pages")[1] == [] and call("/api/incidents")[1] == [] and call("/api/health")[1] == []
     assert len(call("/api/users")[1]) == users_before
     assert [(h["action"], h["kind"]) for h in call("/api/log")[1]] == [("vaciar", "db")]
+    # HTTPS siempre: certificado autofirmado y su huella para anclarlo en Kitty y en el comando de instalación
+    import ssl
+    ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+    with socket.create_connection(("127.0.0.1", PORT)) as s, ctx.wrap_socket(s) as t:
+        der = t.getpeercert(binary_form=True)
+    with urllib.request.urlopen(f"https://127.0.0.1:{PORT}/kitty.json", context=ctx) as r:
+        kj, hdr = json.loads(r.read()), r.headers
+    assert kj["pin"] == hashlib.sha256(der).hexdigest().upper() and len(base64.b64decode(kj["spki"])) == 32, kj
+    assert hdr["X-Frame-Options"] == "DENY" and "frame-ancestors 'none'" in hdr["Content-Security-Policy"] and "Strict-Transport-Security" not in hdr  # HSTS no, con autofirmado
+    ps = urllib.request.urlopen(f"https://127.0.0.1:{PORT}/kitty.ps1", context=ctx).read().decode()
+    assert f"$Pin = '{kj['pin']}'" in ps and f"-eq '{kj['pin']}'" in ps and "{{" not in ps
+    # CSRF sin Origin: el navegador dice Sec-Fetch-Site
+    xs = urllib.request.Request(f"http://127.0.0.1:{PORT}/api/items", b'{"name":"csrf"}', method="POST", headers={"Authorization": AUTH, "Content-Type": "application/json", "Sec-Fetch-Site": "cross-site"})
+    try: urllib.request.urlopen(xs); assert False
+    except urllib.error.HTTPError as e: assert e.code == 403
+    # En claro desde la red (no desde este equipo): la página redirige a https y solo pasa la telemetría de las Kitty antiguas
+    u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); u.connect(("10.255.255.255", 1)); lan = u.getsockname()[0]; u.close()
+    if not lan.startswith("127.") and lan != "0.0.0.0":
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, *a): return None
+        def plain(path, method="GET", body=None):
+            req = urllib.request.Request(f"http://{lan}:{PORT}{path}", None if body is None else json.dumps(body).encode(), method=method, headers={"Authorization": AUTH, "Content-Type": "application/json"})
+            try:
+                with urllib.request.build_opener(NoRedirect).open(req) as r: return r.status, r.read(), r.headers
+            except urllib.error.HTTPError as e: return e.code, e.read(), e.headers
+        st, _, h = plain("/inventario")
+        assert st == 301 and h["Location"] == f"https://{lan}:{PORT}/inventario", (st, h)
+        assert plain("/api/items")[0] == 403 and plain("/api/login", "POST", {"name": "admin", "pass": "miau"})[0] == 403
+        assert plain("/api/agent/remote", "POST", {})[0] == 403 and plain("/api/agent/quit", "POST", {})[0] == 403 and plain("/kitty.exe")[0] == 403
+        assert plain("/kitty.ps1")[1].startswith(b"throw ") and json.loads(plain("/kitty.json")[1])["kitty"] == ""
+        assert "https" not in json.loads(plain("/api/agent", "POST", {})[1] or b"{}").get("error", "")  # Kitty antigua: sigue enviando
     # Fuerza bruta: 10 fallos en 15 min desde una IP y esa IP espera, aunque luego acierte (va al final: bloquea 127.0.0.1)
     codes = [raw("/api/login", "POST", {"name": "admin", "pass": f"intento{i}"})[0] for i in range(12)]
     assert codes[-1] == 429 and raw("/api/login", "POST", {"name": "admin", "pass": "miau"})[0] == 429, codes

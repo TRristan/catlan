@@ -1,6 +1,7 @@
 #!/bin/sh
 # Kitty para catlan, versión Linux: instalador. catlan lo sirve en /kitty.sh con su dirección y su id ya puestos.
-# En el equipo, como root:   curl -fsSL http://catlan:8080/kitty.sh | sudo sh
+# En el equipo, como root: el comando de catlan (Inventario → Añadir con Kitty). Va por https y, con el certificado
+# autofirmado de catlan, solo acepta ese (curl --pinnedpubkey con la huella de SPKI).
 # Deja un temporizador (systemd, o cron si no hay systemd) que cada 5 minutos envía a catlan lo mismo que el Kitty de
 # Windows: nombre, sistema, modelo, CPU, memoria, discos, IPs, tiempo encendido, nº de serie y los errores y críticos
 # del journal. Nada de usuarios, programas, procesos ni archivos. Necesita curl.
@@ -8,6 +9,7 @@
 set -eu
 URL='{{URL}}'
 CATLAN='{{ID}}'
+SPKI='{{SPKI}}' # sha256 de la clave pública de catlan; vacío si tiene un certificado propio de una CA
 DIR=${KITTY_DIR:-/etc/kitty} # KITTY_DIR: para probarlo sin root
 AGENT=/usr/local/lib/kitty-agent.sh
 
@@ -23,6 +25,7 @@ cat > "$AGENT" <<'AGENT'
 #!/bin/sh
 URL='{{URL}}'
 CATLAN='{{ID}}'
+SPKI='{{SPKI}}' # sha256 de la clave pública de catlan; vacío si tiene un certificado propio de una CA
 DIR=${KITTY_DIR:-/etc/kitty} # KITTY_DIR: para probarlo sin root
 if [ "${1:-}" = quitar ]; then
     systemctl disable --now kitty.timer 2>/dev/null || true
@@ -53,7 +56,7 @@ body="{\"key\":\"$(cat "$DIR/key")\",\"name\":$(j "$(hostname)"),\"ip\":\"\",\"s
 \"facts\":{\"osver\":$(j "$PRETTY_NAME $(uname -r)"),\"model\":$(j "$(cat /sys/class/dmi/id/sys_vendor /sys/class/dmi/id/product_name 2>/dev/null | paste -sd' ' -)"),
 \"cpu\":$(j "$(awk -F': ' '/^model name/ {print $2; exit}' /proc/cpuinfo)"),\"cores\":$(nproc),\"load\":$load,\"mem_total\":$(mem MemTotal),
 \"mem_free\":$(mem MemAvailable),\"uptime\":$(cut -d. -f1 /proc/uptime),\"serial\":$(j "$serial"),\"disks\":[$disks],\"ips\":[$ips]},\"events\":[$events]}"
-if ! res=$(printf %s "$body" | curl -fsS -m 20 -H 'Content-Type: application/json; charset=utf-8' --data-binary @- "$URL/api/agent" 2>&1); then
+if ! res=$(printf %s "$body" | curl -fsS -m 20 ${SPKI:+-k --pinnedpubkey sha256//$SPKI} -H 'Content-Type: application/json; charset=utf-8' --data-binary @- "$URL/api/agent" 2>&1); then
     note error "$res"; exit 1
 fi
 [ "$(printf %s "$res" | sed -n 's/.*"catlan": *"\([^"]*\)".*/\1/p')" = "$CATLAN" ] || { note error "$URL no es el catlan que lo instaló"; exit 1; } # atado a este catlan

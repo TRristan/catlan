@@ -9,6 +9,8 @@ pub struct Conf {
     pub url: String,
     pub catlan: String,
     pub ukey: String,
+    /// sha256 del certificado autofirmado de catlan (hex, mayúsculas): solo se habla con ese. Vacío: los certificados del sistema.
+    pub pin: String,
 }
 
 fn test_dir() -> Option<PathBuf> {
@@ -27,7 +29,7 @@ impl Conf {
             .and_then(|b| serde_json::from_slice(&b).ok())
             .ok_or_else(|| format!("Kitty no está instalado en este equipo (falta {})", p.display()))?;
         let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").trim_end_matches('/').to_string();
-        let c = Conf { url: s("url"), catlan: s("catlan"), ukey: s("ukey") };
+        let c = Conf { url: s("url"), catlan: s("catlan"), ukey: s("ukey"), pin: s("pin") };
         if c.url.is_empty() || c.ukey.len() < 32 {
             return Err(format!("{} está incompleto: vuelve a instalar Kitty desde catlan", p.display()));
         }

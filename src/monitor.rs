@@ -900,7 +900,7 @@ pub fn system_health() -> Result<Value> {
     }
     Ok(json!({"version": crate::config::VERSION, "schema": crate::db::user_version()?, "db_bytes": size(db_path()),
         "wal_bytes": size(DATA.join("catlan.db-wal")), "integrity": crate::db::INTEGRITY.get(), "started": *STARTED, "backups": bk,
-        "monitor": monitor_health(), "late": late, "syslog": *SYSLOG_PORT, "https": !crate::config::CERT.is_empty(), "counts": counts}))
+        "monitor": monitor_health(), "late": late, "syslog": *SYSLOG_PORT, "https": crate::server::TLS.get().map_or("", |t| t.pin.as_str()), "counts": counts}))
 }
 
 /// Nunca salen por la API ni al historial.

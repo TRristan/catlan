@@ -47,4 +47,4 @@
 - No hace copias de tus servidores: solo de su propia base de datos (**Opciones → Descargar copia de seguridad**).
 - No envía nada a nadie que no hayas configurado tú.
 - No necesita Internet para funcionar.
-- HTTPS propio solo si le das un certificado (`CATLAN_CERT` y `CATLAN_KEY`); si catlan sale de tu red local, mejor detrás de un proxy con HTTPS (Caddy, nginx, Traefik).
+- HTTPS siempre: con tu certificado (`CATLAN_CERT` y `CATLAN_KEY`) o con uno autofirmado que catlan crea al arrancar; su huella está en Salud de catlan. Detrás de un proxy, pon su IP en `CATLAN_PROXIES`.

@@ -176,7 +176,8 @@ fn apply(e: &Value, held: &mut Held) {
 
 /// POST con el fotograma; la respuesta trae el estado y lo que ha hecho el técnico.
 fn post_frame(url: &str, ukey: &str, id: &str, jpg: &[u8]) -> Result<Value, String> {
-    let r = ureq::post(&format!("{url}/api/agent/remote/frame"))
+    let r = crate::net::agent()
+        .post(&format!("{url}/api/agent/remote/frame"))
         .timeout(Duration::from_secs(15))
         .set("X-Kitty", ukey)
         .set("X-Sesion", id)

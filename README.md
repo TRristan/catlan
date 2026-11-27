@@ -24,11 +24,19 @@
 > son **las mismas**: una instalación en Python se actualiza sin perder nada ([cómo](#vienes-de-la-versión-en-python)).
 
 > [!WARNING]
-> **Proyecto en desarrollo (WIP).** Funciona y tiene tests, pero aún cambia a menudo y puede haber fallos. No tiene
-> actualizaciones automáticas: para actualizar, para catlan, haz una copia de `data/` y sustituye el ejecutable.
+> **Proyecto en desarrollo (WIP).** Funciona y tiene tests, pero aún cambia a menudo y puede haber fallos. Antes de
+> actualizar, haz una copia de `data/` ([cómo se actualiza](#actualizar-catlan)).
 
 ## Novedades
 
+- **Programas en los PCs.** En **Opciones → Programas en los PCs** eliges programas por su id de winget (Chrome,
+  7-Zip, Firefox…). Kitty los **instala** en todos los PCs y los **mantiene actualizados** cada hora. En cada programa
+  ves en cuántos PCs está bien o ha fallado, y en la ficha de Salud de cada PC, cómo le fue.
+- **Kitty se actualiza solo.** Cuando pones un `kitty.exe` nuevo junto a catlan, cada PC lo detecta en unos minutos, lo
+  descarga, comprueba que llega entero (sha256) y se reemplaza. Ya no hace falta volver a pegar la línea de instalación.
+- **catlan se actualiza solo** (opcional). En **Opciones → Salud de catlan → Actualizaciones**: buscar la versión nueva
+  en GitHub, «Actualizar ahora» o activar «Actualizar solo» (una vez al día). Descarga, comprueba el sha256, se reemplaza
+  y se reinicia. Si reparte `kitty.exe`, también lo actualiza, y con él a todos los PCs.
 - **Control remoto con Kitty.** Desde la ficha del equipo o desde Salud, un técnico pide conectarse a un PC, y la
   persona que lo usa lo **acepta o lo rechaza** en su pantalla. El técnico ve la pantalla en el navegador y usa el ratón y el
   teclado. El PC no abre ningún puerto, porque todo pasa por catlan. El usuario puede cortar cuando quiera, y en el historial
@@ -174,7 +182,7 @@ ventana: conserva la ficha del equipo.
 </picture>
 </p>
 
-`irm http://tu-catlan:8080/kitty.ps1 | iex` (PowerShell como administrador) instala **Kitty**, un programa pequeño
+El comando de **Inventario → Añadir con Kitty** (Windows PowerShell como administrador) instala **Kitty**, un programa pequeño
 (`kitty.exe`, unos 3,5 MB, en `Archivos de programa\Kitty`) que reparte el propio catlan:
 
 - **Cada 15 segundos**, `kitty servicio` (una tarea programada que arranca con el PC, como SYSTEM) envía **solo** nombre, sistema,
@@ -188,6 +196,11 @@ ventana: conserva la ficha del equipo.
 - **Control remoto** cuando IT lo pide: la ventana pregunta «¿Permitir?» (si nadie responde en 60 s, se rechaza sola).
   Si el usuario acepta, Kitty envía la pantalla (JPEG, solo cuando cambia, hasta unos 10 por segundo) y aplica el ratón
   y el teclado del técnico. Una barra avisa mientras dura y tiene un botón para **cortar**.
+- **Se actualiza solo**: cada 5 minutos el servicio compara su `kitty.exe` con el que reparte catlan y, si cambia, lo
+  descarga, comprueba su sha256 y se reemplaza; la ventana de cada usuario se reabre con el nuevo.
+- **Instala y actualiza programas** que IT elige en **Opciones → Programas en los PCs**, con winget (incluido en
+  Windows 10 y 11). Los instala para todo el equipo y busca actualizaciones cada hora. Quitar uno de la lista no lo
+  desinstala.
 - **Arranca solo** al iniciar sesión (clave `Run` de Windows) y **solo un administrador de catlan puede cerrarlo**
   desde «Salir de Kitty». Sin conexión con catlan, no se puede cerrar desde el menú. La X de la ventana solo la esconde.
 
@@ -201,7 +214,7 @@ Unregister-ScheduledTask Kitty -Confirm:$false; Stop-Process -Name kitty -Force;
 
 catlan reparte `kitty.exe` si está **junto a su ejecutable** o en su carpeta de datos (en Docker, en `/data`).
 
-En **Linux** (con curl), `curl -fsSL http://tu-catlan:8080/kitty.sh | sudo sh` deja un temporizador de systemd (o cron)
+En **Linux** (con curl), el comando `curl … /kitty.sh | sudo sh` de la misma ventana deja un temporizador de systemd (o cron)
 que envía lo mismo **cada 5 minutos**, con los errores y críticos del journal (sin ventana ni control remoto). Para quitarlo:
 `sudo sh /usr/local/lib/kitty-agent.sh quitar`.
 
@@ -215,8 +228,29 @@ que envía lo mismo **cada 5 minutos**, con los errores y críticos del journal 
   entra por Basic; si pierde el móvil, un administrador se la quita.
 - Las credenciales de SNMP y de los avisos nunca salen por la web. Van en la copia de seguridad, por eso la copia que
   baja la web **va cifrada con una contraseña** (PBKDF2 + SHAKE-256 + HMAC-SHA256).
-- **HTTPS propio** opcional con `CATLAN_CERT` y `CATLAN_KEY`; o, si catlan sale de tu red local, detrás de un proxy con
-  HTTPS (Caddy, nginx, Traefik). Con un certificado autofirmado, Kitty no conecta hasta que el PC confíe en él.
+- **HTTPS siempre**: sin `CATLAN_CERT`, catlan crea un certificado autofirmado en `data/tls.pem` y escribe su huella
+  SHA-256 al arrancar (y en **Salud de catlan**). El comando de instalación de Kitty lleva esa huella: PowerShell, curl y
+  Kitty solo hablan con ese certificado, y el instalador comprueba el SHA-256 de `kitty.exe` antes de ponerlo. En claro
+  (HTTP) solo responde al propio equipo, a los proxies de `CATLAN_PROXIES` y a la telemetría de las Kitty instaladas
+  antes; la web redirige a https, y sin cifrar no hay login, control remoto ni actualizaciones de Kitty.
+  **Las Kitty de antes siguen enviando el estado, pero hay que reinstalarlas** (mismo comando) para el control remoto,
+  las actualizaciones y el anclaje.
+
+## Actualizar catlan
+
+catlan solo se conecta a GitHub si un administrador lo pide. En **Opciones → Salud de catlan → Actualizaciones**:
+
+- **Buscar actualizaciones** mira la última versión publicada en
+  [Releases](https://github.com/TRristan/catlan/releases).
+- **Actualizar ahora** la descarga, comprueba su sha256 con el `SHA256SUMS` de la versión, reemplaza el ejecutable y
+  reinicia catlan. Antes de tocar la base de datos, catlan guarda una copia, como siempre.
+- **Actualizar solo** lo hace una vez al día.
+
+Funciona con el ejecutable en Linux y Windows de 64 bits. En **Docker**, actualiza la imagen. Si catlan corre como
+servicio de systemd, ponle `Restart=on-failure`: al actualizarse, sale para que systemd lo arranque con la versión nueva.
+
+Para publicar una versión: sube la versión en `Cargo.toml`, haz commit y crea la etiqueta (`git tag v1.1.0 && git push
+--tags`). GitHub Actions compila catlan para Linux y Windows y Kitty, y publica la versión con su `SHA256SUMS`.
 
 ## Configuración
 
@@ -228,7 +262,8 @@ Todo se configura desde la web. Opcionalmente, con variables de entorno:
 | `CATLAN_DATA` | `data/` junto al ejecutable | Carpeta de la base de datos |
 | `CATLAN_PASSWORD` | (vacío) | Contraseña inicial de `admin`. Vacía: `admin`, a cambiar al entrar |
 | `CATLAN_SYSLOG_PORT` | `514` | Puerto UDP del receptor de syslog (`0`: sin syslog; en Linux, 514 necesita root o `CAP_NET_BIND_SERVICE`) |
-| `CATLAN_CERT` · `CATLAN_KEY` | (vacío) | Rutas del certificado y su clave (PEM): catlan sirve HTTPS en `CATLAN_PORT` |
+| `CATLAN_CERT` · `CATLAN_KEY` | (vacío) | Certificado y clave propios (PEM). Vacío: autofirmado en `data/tls.pem` |
+| `CATLAN_PROXIES` | `127.0.0.1,::1` | Proxies de confianza: solo de ellos se cree `X-Forwarded-For` y `X-Forwarded-Proto` |
 | `CATLAN_SMTP_HOST` · `_PORT` · `_USER` · `_PASS` | (vacío) · `587` | Correo de avisos (465 = SSL directo). Lo de **Opciones → Avisos** manda sobre esto |
 | `CATLAN_MAIL_FROM` · `CATLAN_MAIL_TO` | (vacío) | Remitente y destinatarios (separados por comas) |
 | `CATLAN_TELEGRAM_TOKEN` · `CATLAN_TELEGRAM_CHAT` | (vacío) | Avisos por Telegram |
@@ -257,6 +292,7 @@ escritura en curso y lo deja todo dentro de `catlan.db`. Si el monitor deja de l
 src/          el servidor (Rust)
   web.rs        la API, las sesiones y los permisos
   remote.rs     control remoto: el relevo entre la web del técnico y la Kitty del PC
+  update.rs     actualizar catlan desde GitHub (Releases)
   db.rs         SQLite: esquema y migraciones numeradas
   monitor.rs    comprobaciones, avisos, resúmenes, SLA, syslog e IPAM
   snmp.rs       SNMP v2c y v3 (BER a mano, firma y cifrado USM)
@@ -267,6 +303,8 @@ kitty/        Kitty: el programa de los PCs (kitty.exe) y sus instaladores (kitt
   src/app.rs    la bandeja y la ventana (WebView2)
   src/remote.rs el control remoto: captura de pantalla, ratón y teclado
   src/net.rs    hablar con catlan y enviar el estado del PC
+  src/update.rs actualizarse solo con el kitty.exe de catlan
+  src/apps.rs   instalar y actualizar los programas que elige IT (winget)
 tests/        tests de la API contra el ejecutable (Python, sin dependencias)
 docs/         capturas, y en docs/logo/ el logo de catlan y de Kitty con su guía
 ```
@@ -297,7 +335,10 @@ pasa todo en cada cambio (el servidor en Linux, Kitty en Windows).
   el servicio de SYSTEM) y Kitty vuelve a abrirse en el siguiente inicio de sesión.
 - Con envíos cada 15 s, el historial de métricas ocupa más. Se borra solo a los 7 días; se guardan medias por hora
   durante más tiempo.
-- Sin actualizaciones automáticas.
+- Las actualizaciones automáticas de catlan necesitan versiones publicadas en GitHub (Releases); hasta la primera,
+  «Buscar actualizaciones» dice que no hay ninguna.
+- Programas en los PCs: el mismo conjunto para todos los PCs con Kitty en Windows (no por grupos), y solo programas
+  que estén en winget. Probado sin PCs reales todavía.
 
 ## Licencia
 

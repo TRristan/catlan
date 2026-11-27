@@ -1,0 +1,42 @@
+# Al subir una etiqueta vX.Y.Z (la misma versión que Cargo.toml): compila catlan para Linux y Windows y Kitty, y publica
+# una versión en GitHub con los ejecutables y su SHA256SUMS. Los catlan con «Actualizar solo» la instalan desde aquí.
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: La etiqueta coincide con Cargo.toml
+        run: test "${GITHUB_REF_NAME#v}" = "$(cargo pkgid -p catlan | sed 's/.*[#@]//')"
+      - run: cargo build --release --locked -p catlan
+      - run: cp target/release/catlan catlan-linux-x86_64
+      - uses: actions/upload-artifact@v4
+        with: {name: linux, path: catlan-linux-x86_64}
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --locked -p catlan -p kitty
+      - run: copy target\release\catlan.exe catlan-windows-x86_64.exe
+        shell: cmd
+      - run: copy target\release\kitty.exe kitty.exe
+        shell: cmd
+      - uses: actions/upload-artifact@v4
+        with: {name: windows, path: "*.exe"}
+  publish:
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {merge-multiple: true, path: out}
+      - run: cd out && sha256sum catlan-linux-x86_64 catlan-windows-x86_64.exe kitty.exe > SHA256SUMS && cat SHA256SUMS
+      - run: gh release create "$GITHUB_REF_NAME" out/* --repo "$GITHUB_REPOSITORY" --title "catlan $GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -83,16 +83,27 @@ fn ask(proxy: &EventLoopProxy<Ev>, f: &'static str, url: String, body: Value) {
 /// Instala Kitty en este PC con el instalador de ese catlan, como administrador (Windows pide permiso). Mismo instalador
 /// que el comando de catlan: deja la clave, el servicio que envía el estado cada minuto y el gato al iniciar sesión, y abre la Kitty
 /// instalada (cerrando esta). En catlan aparece en «Kitty pide entrar» hasta que IT lo acepta.
-fn install(url: &str) -> Result<(), String> {
+fn install(url: &str, pin: &str) -> Result<(), String> {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{GetExitCodeProcess, INFINITE, WaitForSingleObject};
     use windows_sys::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
     let w = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
     let log = conf::dir().join("instalar.log");
     let _ = std::fs::remove_file(&log);
-    // url ya validada (sin comillas ni espacios). PowerShell va oculto: el fallo, a un archivo que esta ventana pueda leer
+    // url ya validada (sin comillas ni espacios). PowerShell va oculto: el fallo, a un archivo que esta ventana pueda leer.
+    // Por https y, si catlan es autofirmado, solo con el certificado que ha enseñado al buscarlo (pin: hex, sin comillas)
+    if !pin.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("La huella del certificado de catlan no es válida.".into());
+    }
+    let check = if pin.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "[Net.ServicePointManager]::ServerCertificateValidationCallback = {{ param($s, $c) [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($c.GetRawCertData())).Replace('-', '') -eq '{pin}' }}; "
+        )
+    };
     let args = format!(
-        "-NoProfile -ExecutionPolicy Bypass -Command \"try {{ irm '{url}/kitty.ps1' | iex }} catch {{ $d = Join-Path $env:ProgramData 'Kitty'; \
+        "-NoProfile -ExecutionPolicy Bypass -Command \"try {{ [Net.ServicePointManager]::SecurityProtocol = 'Tls12'; {check}irm '{url}/kitty.ps1' | iex }} catch {{ $d = Join-Path $env:ProgramData 'Kitty'; \
          New-Item -ItemType Directory -Force $d | Out-Null; $_.ToString() | Out-File -Encoding utf8 (Join-Path $d 'instalar.log'); exit 1 }}\""
     );
     let (verb, file, params) = (w("runas"), w("powershell.exe"), w(&args));
@@ -120,8 +131,16 @@ fn install(url: &str) -> Result<(), String> {
     Err(if why.is_empty() { format!("La instalación ha fallado (código {code}).") } else { why.to_string() })
 }
 
-pub fn run(start_hidden: bool) {
-    let Some(_lock) = single_instance() else { return };
+pub fn run(start_hidden: bool, updated: bool) {
+    // recién actualizada: la anterior tarda un momento en cerrarse y soltar el candado
+    let tries = if updated { 50 } else { 1 };
+    let lock = (0..tries).find_map(|i| {
+        if i > 0 {
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        single_instance()
+    });
+    let Some(_lock) = lock else { return };
     let conf = conf::Conf::load();
     let el = EventLoopBuilder::<Ev>::with_user_event().build();
     let proxy = el.create_proxy();
@@ -193,6 +212,22 @@ pub fn run(start_hidden: bool) {
                 break;
             }
             std::thread::sleep(Duration::from_secs(if code == 200 { 3 } else { 5 }));
+        });
+    }
+
+    // ¿el servicio ha instalado un Kitty nuevo? Esta ventana se reabre con él
+    if let Some(me) = crate::update::installed() {
+        let p = proxy.clone();
+        std::thread::spawn(move || {
+            let mine = crate::update::sha256(&me);
+            loop {
+                std::thread::sleep(Duration::from_secs(60));
+                let now = crate::update::sha256(&me);
+                if now.is_some() && now != mine && std::process::Command::new(&me).arg("--actualizada").spawn().is_ok() {
+                    let _ = p.send_event(Ev::Quit);
+                    break;
+                }
+            }
         });
     }
 
@@ -308,9 +343,11 @@ pub fn run(start_hidden: bool) {
                         let (p, typed) = (proxy.clone(), m["url"].as_str().unwrap_or("").to_string());
                         std::thread::spawn(move || {
                             let r = match net::normalize(&typed) {
-                                None => Err("Esa dirección no es válida. Algo como http://catlan:8080".to_string()),
-                                Some(u) if net::probe(&u).is_none() => Err(format!("No encuentro catlan en {u}.")),
-                                Some(u) => install(&u),
+                                None => Err("Esa dirección no es válida. Algo como https://catlan:8080".to_string()),
+                                Some(u) => match net::probe(&u) {
+                                    None => Err(format!("No encuentro catlan en {u}.")),
+                                    Some((_, pin)) => install(&u, &pin),
+                                },
                             };
                             match r {
                                 Ok(()) => std::process::exit(0), // ya abre la Kitty instalada

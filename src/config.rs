@@ -31,13 +31,23 @@ pub static PORT: LazyLock<u16> = LazyLock::new(|| env_num("CATLAN_PORT", 8080));
 /// HTTPS propio: rutas del certificado y su clave (PEM); sin clave, va dentro del certificado.
 pub static CERT: LazyLock<String> = LazyLock::new(|| env("CATLAN_CERT"));
 pub static KEY: LazyLock<String> = LazyLock::new(|| env("CATLAN_KEY"));
+/// Proxies de confianza (IPs separadas por comas): solo de ellos se cree X-Forwarded-For y X-Forwarded-Proto.
+/// Por defecto, el propio equipo (un nginx o Caddy en la misma máquina).
+pub static PROXIES: LazyLock<Vec<std::net::IpAddr>> = LazyLock::new(|| {
+    let v = std::env::var("CATLAN_PROXIES").unwrap_or_else(|_| "127.0.0.1,::1".into());
+    v.split(',').map(str::trim).filter(|s| !s.is_empty()).map(|s| s.parse().unwrap_or_else(|_| {
+        eprintln!("CATLAN_PROXIES: {s} no es una IP");
+        std::process::exit(2)
+    })).collect()
+});
 /// 0 = sin receptor de syslog
 pub static SYSLOG_PORT: LazyLock<u16> = LazyLock::new(|| env_num("CATLAN_SYSLOG_PORT", 514));
 /// Contraseña del usuario admin inicial; vacía = «admin», a cambiar al entrar.
 pub static PASSWORD: LazyLock<String> = LazyLock::new(|| env("CATLAN_PASSWORD"));
 
+/// Siempre hay HTTPS: con CATLAN_CERT, el del admin; sin él, uno autofirmado en data/tls.pem.
 pub fn scheme() -> &'static str {
-    if CERT.is_empty() { "http" } else { "https" }
+    "https"
 }
 
 pub fn db_path() -> PathBuf {
