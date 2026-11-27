@@ -306,7 +306,8 @@ kitty/        Kitty: el programa de los PCs (kitty.exe) y sus instaladores (kitt
   src/net.rs    hablar con catlan y enviar el estado del PC
   src/update.rs actualizarse solo con el kitty.exe de catlan
   src/apps.rs   instalar y actualizar los programas que elige IT (winget)
-tests/        tests de la API contra el ejecutable (Python, sin dependencias)
+tests/        tests de la API contra el ejecutable (Python, sin dependencias) y de la web en
+              un navegador (test_ui.py, con Playwright)
 docs/         capturas, y en docs/logo/ el logo de catlan y de Kitty con su guía
 ```
 
