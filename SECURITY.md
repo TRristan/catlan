@@ -27,7 +27,12 @@ da por hecho y lo que hace cada parte.
   y por usuario, cookie de sesión `HttpOnly` y `SameSite=Lax`, y escrituras desde otras webs bloqueadas (CSRF).
 - **Navegador.** CSP sin código de fuera, sin meter catlan en marcos de otras webs (clickjacking) y HSTS con
   certificado propio.
-- **Secretos** (SNMP, SMTP, webhooks): nunca salen por la API. La copia que se descarga de la web va cifrada.
+- **Usuarios del dominio.** LDAP solo por LDAPS (certificado del sistema o anclado por su huella), nunca con contraseña
+  vacía (sería un bind anónimo) y buscando al usuario por lo que dice el dominio («¿quién soy?»), no por lo que se
+  escribió. OIDC con PKCE (S256), `state` en una cookie de este navegador (contra el login CSRF) y `nonce`; el id_token
+  llega directo del proveedor por TLS y se comprueban emisor, destinatario, caducidad y nonce. Los motivos de un fallo
+  van por código, no como texto en la dirección. Un usuario del dominio nunca toma un usuario local con el mismo nombre.
+- **Secretos** (SNMP, SMTP, webhooks, el secreto del cliente OIDC): nunca salen por la API. La copia que se descarga de la web va cifrada.
 
 ### Lo que no protege
 
@@ -36,6 +41,11 @@ da por hecho y lo que hace cada parte.
 - **SNMP v1/v2c.** La comunidad viaja en claro: usa v3 cuando el equipo lo permita.
 - **Un administrador de catlan** lo puede todo, incluido conectarse a cualquier PC con Kitty (con permiso de su usuario)
   e instalar programas en todos. Da ese rol a pocas personas y con verificación en dos pasos.
+- **El dominio.** Quien administra el AD o el proveedor OIDC decide quién entra y quién es admin en catlan (con los
+  grupos que pongas en Opciones). La firma del id_token no se comprueba: confía en el TLS con el proveedor, como permite
+  OIDC para el flujo de código.
+- **Quien sale de la empresa** sigue dentro hasta que caduca su sesión (12 horas) o un administrador lo borra; por Basic,
+  hasta 10 minutos.
 - **Un administrador del PC** puede leer la clave de Kitty y hacerse pasar por ese equipo ante catlan (no por otros).
 - **Kitty instalados antes de la 2.0**: siguen enviando el estado por HTTP en claro, sin anclaje. Reinstálalos.
 - **La primera vez** que pulsas «Conectar este PC» en un Kitty descargado, este se fía de quien conteste en la red
@@ -52,3 +62,5 @@ da por hecho y lo que hace cada parte.
    `CATLAN_PROXIES`, o darle uno propio con `CATLAN_CERT` y `CATLAN_KEY`.
 4. Proteger la carpeta `data/` y sus copias como cualquier otra base de datos con contraseñas.
 5. Reinstalar Kitty en los PCs que lo tenían de antes de la 2.0.
+6. Con usuarios del dominio: dar acceso solo a grupos concretos (no a «Usuarios del dominio») y mantener `admin` local
+   con contraseña larga y verificación en dos pasos para cuando el dominio no conteste.

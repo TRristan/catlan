@@ -268,6 +268,7 @@ pub const MIGRATIONS: &[&str] = &[
     "ALTER TABLE agents ADD COLUMN ukey TEXT /*sha256 de la clave de incidencias de Kitty, que pueden leer los usuarios del PC*/",
     "CREATE TABLE tasks(id INTEGER PRIMARY KEY AUTOINCREMENT, user INTEGER NOT NULL, text TEXT NOT NULL, col TEXT NOT NULL DEFAULT 'pendiente',      pos REAL NOT NULL DEFAULT 0, updated TEXT DEFAULT CURRENT_TIMESTAMP)",
     "CREATE TABLE apps(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT '', winget TEXT NOT NULL DEFAULT '',      notes TEXT DEFAULT '', updated TEXT DEFAULT CURRENT_TIMESTAMP) /*programas que Kitty instala y mantiene al día con winget*/",
+    "ALTER TABLE users ADD COLUMN ext TEXT NOT NULL DEFAULT '' /*usuario del dominio: ldap:sAMAccountName u oidc:emisor|sub; vacío, local*/",
 ];
 /// Las de antes de numerarlas: una BD vieja (user_version 0) puede tener ya cualquiera de ellas.
 const LEGACY: usize = 19;

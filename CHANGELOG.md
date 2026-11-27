@@ -3,6 +3,13 @@
 Cada versión, lo que cambia para quien usa catlan. Sigue [SemVer](https://semver.org/lang/es/): el primer número sube
 cuando hay que hacer algo a mano al actualizar.
 
+## Sin publicar
+
+### Nuevo
+- **Usuarios del dominio**: login con Active Directory (LDAPS, bind con el propio usuario) y con OIDC (Entra ID, Google
+  Workspace, Keycloak) con PKCE. Sus grupos del dominio dan el admin y los grupos de catlan. Se configura en
+  **Opciones → Inicio de sesión con el dominio**; los usuarios locales, `admin` incluido, siguen entrando siempre.
+
 ## 2.0.0
 
 **Hay que reinstalar Kitty en los PCs** (el mismo comando de Inventario → Añadir con Kitty). Las Kitty de antes siguen

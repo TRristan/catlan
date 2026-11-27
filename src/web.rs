@@ -6,6 +6,7 @@ use crate::health;
 use crate::monitor::{self, SECRET, SOURCES};
 use crate::remote;
 use crate::server::{Req, Resp};
+use crate::sso;
 use crate::util::{Bad, J, Row, Shape, bad, is_int, lock, now, obj, parse_qs, py_str, trunc, truthy};
 use crate::validate::*;
 use crate::{p, re};
@@ -178,6 +179,8 @@ enum Login {
     No,
     NeedCode,
     Ok(i64),
+    /// La contraseña del dominio valía (o el dominio no contesta), pero no entra: código de `sso::why`.
+    Refused(&'static str),
 }
 
 /// Por Basic no hay código: quien tiene 2FA no entra por Basic (para scripts, un usuario sin 2FA).
@@ -187,7 +190,12 @@ fn login_ok(name: &str, pw: &str, code: &str) -> Result<Login> {
         return Ok(Login::No);
     }
     let key = (name.to_lowercase(), crate::crypto::hex(&crate::crypto::hmac_sha256(&BASIC_KEY, pw.as_bytes())));
-    let Some(u) = q("SELECT id, hash, totp FROM users WHERE name=?", p![name])?.one() else { return Ok(Login::No) };
+    let u = q("SELECT id, hash, totp, ext FROM users WHERE name=?", p![name])?.one();
+    // los usuarios locales (admin incluido) nunca pasan por el dominio: así siempre se puede entrar, aunque esté caído
+    if u.as_ref().map_or_else(|| sso::ldap_on(&sso::conf()), |u| u.s("ext").starts_with("ldap:")) {
+        return ldap_ok(name, pw, &who, key, u.and_then(|u| u.i("id")));
+    }
+    let Some(u) = u.filter(|u| u.s("ext").is_empty()) else { return Ok(Login::No) }; // los de OIDC no tienen contraseña aquí
     let (id, hash, totp) = (u.i("id").unwrap_or(0), u.s("hash").to_string(), u.s("totp").to_string());
     let code_ok = || if totp_ok(&totp, code) { Login::Ok(id) } else { Login::NeedCode };
     // La caché solo vale si el hash guardado sigue siendo el mismo: otro proceso (catlan restablecer) puede haberlo cambiado
@@ -211,6 +219,60 @@ fn login_ok(name: &str, pw: &str, code: &str) -> Result<Login> {
     Ok(Login::Ok(id))
 }
 
+/// Contraseña del dominio: el mismo límite de intentos por usuario y la misma caché para Basic que los locales.
+/// shortcut: sin 2FA de catlan; la verificación en dos pasos del dominio, si la hay, no pasa por LDAP.
+fn ldap_ok(name: &str, pw: &str, who: &str, key: (String, String), id: Option<i64>) -> Result<Login> {
+    let t = now();
+    if let Some((i, _, _)) = lock(&BASIC).get(&key).filter(|(i, h, exp)| Some(*i) == id && h == "ldap" && *exp > t) {
+        return Ok(Login::Ok(*i));
+    }
+    match sso::ldap_login(name, pw) {
+        Ok(Some(x)) => Ok(match ext_user(&x)? {
+            Ok(id) => {
+                lock(&BASIC).insert(key, (id, "ldap".into(), t + BASIC_TTL));
+                Login::Ok(id)
+            }
+            Err(why) => Login::Refused(why),
+        }),
+        Ok(None) => {
+            failed(who);
+            Ok(Login::No)
+        }
+        Err(e) => {
+            eprintln!("LDAP: {e:#}");
+            Ok(Login::Refused("dominio"))
+        }
+    }
+}
+
+/// Alguien que el dominio ha reconocido: se crea la primera vez y, en cada entrada, sus grupos del dominio mandan su
+/// admin y sus grupos de catlan. Nunca toma un usuario local con el mismo nombre (admin incluido).
+fn ext_user(x: &sso::Ext) -> Result<std::result::Result<i64, &'static str>> {
+    let Some((admin, groups)) = sso::roles(&sso::conf(), &x.groups) else {
+        println!("{}: sin acceso a catlan (sus grupos: {})", x.name, x.groups.join("; "));
+        return Ok(Err("acceso"));
+    };
+    let id = match q("SELECT id FROM users WHERE ext=?", p![&x.key])?.one() {
+        Some(u) => u.i("id").unwrap_or(0),
+        None => {
+            let name = sso::local_name(&x.name);
+            let id = match q("INSERT INTO users(name, hash, ext) VALUES(?, '', ?)", p![&name, &x.key]) {
+                Ok(r) => r.lastrowid,
+                Err(e) if is_constraint(&e) => return Ok(Err("nombre")),
+                Err(e) => return Err(e),
+            };
+            q("INSERT INTO log(who, action, kind, ref, name, data) VALUES(?, 'crear', 'user', ?, ?, ?)", p![&name, id, &name, json!({"dominio": &x.key[..4]}).to_string()])?;
+            id
+        }
+    };
+    q("UPDATE users SET admin=? WHERE id=?", p![admin, id])?;
+    q("DELETE FROM members WHERE user_id=?", p![id])?;
+    for g in groups {
+        q("INSERT OR IGNORE INTO members(group_id, user_id) SELECT id, ? FROM groups WHERE id=?", p![id, g])?; // un grupo borrado después, fuera
+    }
+    Ok(Ok(id))
+}
+
 /// Solo vista: está en algún grupo de solo vista y en ninguno que pueda editar (los administradores siempre editan).
 fn readonly(uid: i64) -> Result<bool> {
     let r = q(
@@ -224,7 +286,7 @@ fn readonly(uid: i64) -> Result<bool> {
 }
 
 fn me(uid: i64) -> Result<Value> {
-    let mut u = q("SELECT id, name, admin, must_change, totp != '' AS totp FROM users WHERE id=?", p![uid])?.one().unwrap_or_default();
+    let mut u = q("SELECT id, name, admin, must_change, totp != '' AS totp, substr(ext, 1, 4) AS ext FROM users WHERE id=?", p![uid])?.one().unwrap_or_default();
     u.insert("readonly".into(), readonly(uid)?.into());
     u.insert("groups".into(), q("SELECT group_id FROM members WHERE user_id=?", p![uid])?.into_iter().map(|r| r["group_id"].clone()).collect::<Vec<_>>().into());
     Ok(u.into())
@@ -292,17 +354,18 @@ impl Ctx<'_> {
             let decoded = data_encoding::BASE64.decode(b64.trim().as_bytes()).ok().and_then(|b| String::from_utf8(b).ok());
             let uid = match decoded.as_deref().and_then(|s| s.split_once(':')) {
                 Some((n, pw)) => match login_ok(&trunc(n, 100), &trunc(pw, 200), "")? {
-                    Login::Ok(id) => Some(id),
-                    _ => None,
+                    Login::Ok(id) => Ok(id),
+                    Login::Refused(_) => Err(false),
+                    _ => Err(true),
                 },
-                None => None,
+                None => Err(true),
             };
-            if uid.is_none() {
+            if uid == Err(true) {
                 failed(&ip);
             }
             match uid {
-                Some(id) => q("SELECT * FROM users WHERE id=?", p![id])?.one(),
-                None => None,
+                Ok(id) => q("SELECT * FROM users WHERE id=?", p![id])?.one(),
+                Err(_) => None,
             }
         } else {
             None
@@ -372,7 +435,8 @@ impl Ctx<'_> {
         {
             return r;
         }
-        let free = !api || m == "POST" && (rest == ["login"] || rest.first() == Some(&"agent") && (rest.len() <= 2 || rest.get(1) == Some(&"remote"))); // la página, el login y Kitty, sin sesión
+        let sso_free = m == "GET" && [&["sso"][..], &["sso", "start"], &["sso", "callback"]].contains(&&rest[..]); // lo que necesita la página de login
+        let free = !api || sso_free || m == "POST" && (rest == ["login"] || rest.first() == Some(&"agent") && (rest.len() <= 2 || rest.get(1) == Some(&"remote"))); // la página, el login y Kitty, sin sesión
         let own = api && rest.first() == Some(&"tasks"); // el tablero personal no toca nada común: también para los de solo vista
         let pending = api && (rest.first() == Some(&"logout") || [&["me"][..], &["me", "password"]].contains(&&rest[..rest.len().min(2)])); // con contraseña provisional
         let r = (|| -> Result<Resp> {
@@ -458,6 +522,7 @@ impl Ctx<'_> {
         let sub = at(3);
         match (res, m) {
             ("login" | "logout" | "me" | "users", _) => return self.account(m, res, rid),
+            ("sso", _) => return self.sso(m, rid, &qs),
             ("backup", "GET" | "POST") => return self.backup(m),
             ("alerts", _) => return self.alerts(m),
             ("wipe", "POST") => return self.wipe(),
@@ -1618,6 +1683,92 @@ impl Ctx<'_> {
         Ok(err(405, "método no permitido"))
     }
 
+    /// Sesión nueva (la cookie): 30 días; 12 horas a los del dominio, para que quien se va de la empresa no siga dentro.
+    fn session(&self, uid: i64) -> Result<String> {
+        let ext = val("SELECT ext FROM users WHERE id=?", p![uid])?.as_str().is_some_and(|e| !e.is_empty());
+        let (hours, tok) = (if ext { 12 } else { 720 }, token_urlsafe(32));
+        q("DELETE FROM sessions WHERE expires <= datetime('now')", p![])?;
+        q("INSERT INTO sessions(token, user_id, expires) VALUES(?, ?, datetime('now', ?))", p![sha256_hex(&tok), uid, format!("+{hours} hours")])?;
+        let secure = if self.req.tls { "; Secure" } else { "" };
+        Ok(format!("{}={tok}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}{secure}", *COOKIE, hours * 3600))
+    }
+
+    /// Inicio de sesión con el dominio. Sin sesión: qué hay (para la página de login) y la ida y vuelta de OIDC.
+    /// La configuración, solo administradores (el secreto del cliente no sale).
+    fn sso(&mut self, m: &str, rid: Option<&str>, qs: &HashMap<String, Vec<String>>) -> Result<Resp> {
+        let arg = |k: &str| qs.get(k).map_or("", |v| v[0].as_str());
+        match (m, rid) {
+            ("GET", None) => Ok(js(200, sso::public(arg("e")))),
+            ("GET", Some("start")) => self.sso_start(),
+            ("GET", Some("callback")) => self.sso_callback(arg("state"), arg("code"), arg("error")),
+            (_, Some("config")) if !self.admin => Ok(err(403, "solo para administradores")),
+            ("GET", Some("config")) => Ok(js(200, sso::view())),
+            ("PUT", Some("config")) => {
+                let b = self.body()?;
+                let v = sso::set(&b)?;
+                let mut campos: Vec<&str> = b.as_object().into_iter().flat_map(|o| o.keys().map(String::as_str)).collect();
+                campos.sort();
+                self.log("editar", "sso", 0, "inicio de sesión con el dominio", &json!({"campos": campos}))?;
+                Ok(js(200, v))
+            }
+            _ => Ok(err(404, "no existe")),
+        }
+    }
+
+    fn sso_start(&self) -> Result<Resp> {
+        let back = |code: &str| Resp::new(302, vec![], "text/plain").header("Location", format!("/?sso={code}"));
+        let host = self.req.header("host");
+        if throttled(&self.req.ip) {
+            return Ok(back("intentos"));
+        }
+        if !sso::oidc_on(&sso::conf()) || !host_ok(host) {
+            return Ok(back("config"));
+        }
+        // la dirección que hay que dar de alta en el proveedor; tras un proxy, la que ve el navegador
+        let redirect = format!("{}://{host}/api/sso/callback", if self.req.tls { "https" } else { "http" });
+        Ok(match sso::oidc_start(&redirect) {
+            Ok((url, state)) => {
+                let secure = if self.req.tls { "; Secure" } else { "" };
+                Resp::new(302, vec![], "text/plain").header("Location", url).header("Set-Cookie", format!("{}_sso={state}; Path=/api/sso; HttpOnly; SameSite=Lax; Max-Age=600{secure}", *COOKIE))
+            }
+            Err(e) => {
+                eprintln!("OIDC: {e:#}");
+                back("proveedor")
+            }
+        })
+    }
+
+    /// Vuelta del proveedor: el `state` tiene que ser el de la cookie de este navegador (si no, otro podría colarle su sesión).
+    fn sso_callback(&self, state: &str, code: &str, error: &str) -> Result<Resp> {
+        let ip = &self.req.ip;
+        let clear = format!("{}_sso=; Path=/api/sso; HttpOnly; SameSite=Lax; Max-Age=0", *COOKIE);
+        let back = |code: &str| Resp::new(302, vec![], "text/plain").header("Location", format!("/?sso={code}")).header("Set-Cookie", clear.clone());
+        if throttled(ip) {
+            return Ok(back("intentos"));
+        }
+        if !error.is_empty() {
+            println!("OIDC: el proveedor dice {}", trunc(error, 100));
+            return Ok(back("cancelado"));
+        }
+        let mine = cookie(self.req.header("cookie"), &format!("{}_sso", *COOKIE)).unwrap_or("");
+        if state.is_empty() || !crate::crypto::ct_eq(state.as_bytes(), mine.as_bytes()) {
+            failed(ip);
+            return Ok(back("caducado"));
+        }
+        let x = match sso::oidc_finish(state, code) {
+            Ok(x) => x,
+            Err(e) => {
+                failed(ip);
+                eprintln!("OIDC: {e:#}");
+                return Ok(back(if e.downcast_ref::<Bad>().is_some() { "caducado" } else { "proveedor" }));
+            }
+        };
+        Ok(match ext_user(&x)? {
+            Ok(id) => Resp::new(302, vec![], "text/plain").header("Location", "/").header("Set-Cookie", self.session(id)?).header("Set-Cookie", clear),
+            Err(why) => back(why),
+        })
+    }
+
     /// Uno o muchos (lista). Todo se valida antes de guardar nada. Sin contraseña se genera una provisional,
     /// que solo se devuelve en esta respuesta; con contraseña o sin ella, se pide cambiarla al entrar.
     fn create_users(&self, b: &Value) -> Result<Resp> {
@@ -1693,20 +1844,19 @@ impl Ctx<'_> {
             let uid = match login_ok(&trunc(&bs("name"), 100), &trunc(&bs("pass"), 200), &trunc(&bs("code"), 10))? {
                 Login::Ok(id) => id,
                 other => {
-                    failed(&ip); // también los códigos fallidos: 10 y fuera
+                    if !matches!(other, Login::Refused(_)) {
+                        failed(&ip); // también los códigos fallidos: 10 y fuera (no el dominio caído: el admin local tiene que poder entrar)
+                    }
                     return Ok(match other {
                         Login::NeedCode => {
                             js(401, json!({"error": if b.get("code").is_some_and(truthy) { "código incorrecto" } else { "escribe el código de tu app de autenticación" }, "totp": true}))
                         }
+                        Login::Refused(why) => err(if why == "dominio" { 503 } else { 403 }, sso::why(why)),
                         _ => err(401, "usuario o contraseña incorrectos"),
                     });
                 }
             };
-            let tok = token_urlsafe(32);
-            q("DELETE FROM sessions WHERE expires <= datetime('now')", p![])?;
-            q("INSERT INTO sessions(token, user_id, expires) VALUES(?, ?, datetime('now', '+30 days'))", p![sha256_hex(&tok), uid])?;
-            let secure = if self.req.tls { "; Secure" } else { "" };
-            return Ok(js(200, me(uid)?).header("Set-Cookie", format!("{}={tok}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000{secure}", *COOKIE)));
+            return Ok(js(200, me(uid)?).header("Set-Cookie", self.session(uid)?));
         }
         if res == "logout" && m == "POST" {
             q("DELETE FROM sessions WHERE token=?", p![&self.token])?;
@@ -1715,6 +1865,10 @@ impl Ctx<'_> {
         let my_hash = || -> Result<String> { Ok(val("SELECT hash FROM users WHERE id=?", p![self.uid()])?.as_str().unwrap_or("").to_string()) };
         if res == "me" && m == "GET" && rid.is_none() {
             return Ok(js(200, me(self.uid())?));
+        }
+        let ext = |id: i64| -> Result<bool> { Ok(val("SELECT ext FROM users WHERE id=?", p![id])?.as_str().is_some_and(|e| !e.is_empty())) };
+        if res == "me" && m == "POST" && ext(self.uid())? {
+            return bad("tu usuario es del dominio: la contraseña y la verificación en dos pasos se cambian allí");
         }
         if res == "me" && m == "POST" && rid == Some("password") {
             if !pw_ok(&bs("old"), &my_hash()?) {
@@ -1766,7 +1920,7 @@ impl Ctx<'_> {
             return Ok(err(403, "solo para administradores"));
         }
         if m == "GET" {
-            return Ok(js(200, q("SELECT id, name, admin, must_change, totp != '' AS totp, created FROM users ORDER BY name COLLATE NOCASE", p![])?.rows));
+            return Ok(js(200, q("SELECT id, name, admin, must_change, totp != '' AS totp, substr(ext, 1, 4) AS ext, created FROM users ORDER BY name COLLATE NOCASE", p![])?.rows));
         }
         if m == "POST" && rid.is_none() {
             return self.create_users(&b);
@@ -1776,6 +1930,9 @@ impl Ctx<'_> {
         let id = row.i("id").unwrap_or(0);
         if Some(id) == self.uid && (m == "DELETE" || b.get("admin") == Some(&Value::Bool(false))) {
             return bad("no puedes quitarte el admin ni borrarte a ti mismo"); // así siempre queda un administrador
+        }
+        if m == "PUT" && ext(id)? && ["admin", "pass", "totp"].iter().any(|k| b.get(*k).is_some()) {
+            return bad("es un usuario del dominio: su contraseña es la del dominio y su admin lo dan sus grupos (Opciones → Inicio de sesión con el dominio)");
         }
         if m == "PUT" {
             if let Some(a) = b.get("admin") {

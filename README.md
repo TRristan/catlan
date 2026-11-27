@@ -29,6 +29,8 @@
 
 ## Novedades
 
+- **Usuarios del dominio**: login con Active Directory (LDAP) y con Entra ID, Google Workspace o Keycloak (OIDC), y sus
+  grupos del dominio deciden quién es admin, quién edita y quién solo mira. Mira [Usuarios del dominio](#usuarios-del-dominio-ldap-y-oidc).
 - **2.0: HTTPS siempre y Kitty anclado a catlan.** catlan crea su propio certificado si no le das uno, y el comando de
   instalación de Kitty lleva su huella: nadie en la red puede colar otro instalador ni ver la pantalla del control remoto.
   **Hay que reinstalar Kitty** (mismo comando) para el control remoto y las actualizaciones.
@@ -219,6 +221,33 @@ que envía lo mismo **cada 5 minutos**, con los errores y críticos del journal 
   **Las Kitty de antes siguen enviando el estado, pero hay que reinstalarlas** (mismo comando) para el control remoto,
   las actualizaciones y el anclaje.
 
+## Usuarios del dominio (LDAP y OIDC)
+
+En **Opciones → Inicio de sesión con el dominio** (solo administradores). Se puede poner uno, otro o los dos.
+
+- **Active Directory / LDAP.** Servidor (`ldaps://dc1.empresa.local`) y dominio (`empresa.local`). catlan hace el bind
+  **con el propio usuario** (`juan@empresa.local`; vale escribir `juan`, `juan@empresa.local` o `EMPRESA\juan`), le pregunta
+  al dominio quién es («¿quién soy?», RFC 4532) y busca su ficha por `sAMAccountName` para leer sus grupos (`memberOf`).
+  No hace falta cuenta de servicio. Solo **LDAPS**: con LDAP en claro la contraseña viajaría por la red. Si el
+  certificado del controlador no es de una CA que conozca el sistema, pega su huella SHA-256.
+- **OIDC** (Entra ID, Google Workspace, Keycloak…). El emisor (`https://login.microsoftonline.com/<tenant>/v2.0`,
+  `https://accounts.google.com`, `https://keycloak.empresa.com/realms/empresa`), el id y el secreto del cliente. Da de alta
+  como dirección de vuelta la que enseña catlan (`https://catlan.empresa.local/api/sso/callback`). Flujo de código con
+  PKCE (S256), `state` atado al navegador y `nonce`. En la página de login sale el botón «Entrar con…».
+  Los grupos salen del claim `groups` (o el que digas): en Entra, activa «groups claim» en la app; en Keycloak, el mapper
+  «Group Membership». **Google no manda grupos**: su dominio de correo verificado cuenta como el grupo `@empresa.com`.
+- **Grupos con acceso**, uno por línea: `grupo del dominio | grupo de catlan` o `grupo del dominio | admin`. El grupo
+  del dominio puede ir con su nombre (`IT`) o con el DN entero (`CN=IT,OU=Grupos,DC=empresa,DC=local`, entonces solo
+  ese). Quien no está en ninguno no entra. En cada entrada, sus grupos del dominio mandan su admin y sus grupos de catlan
+  (edición o solo vista); la contraseña y la verificación en dos pasos son las del dominio.
+- **Los usuarios locales siguen funcionando siempre**, `admin` incluido: entran con su contraseña de catlan aunque el
+  dominio no conteste, y un usuario del dominio con el mismo nombre nunca toma el local (no entra hasta que un
+  administrador borre el local). Deja `admin` con una contraseña larga y verificación en dos pasos como entrada de
+  emergencia.
+- Mismo límite de intentos que los locales (por IP y por usuario). El dominio caído no cuenta como intento fallido.
+- Las sesiones de los usuarios del dominio duran **12 horas** (las locales, 30 días): quien sale de la empresa deja de
+  entrar ese mismo día. Por Basic (scripts), la contraseña del dominio se recuerda 10 minutos.
+
 ## Actualizar catlan
 
 catlan solo se conecta a GitHub si un administrador lo pide. En **Opciones → Salud de catlan → Actualizaciones**:
@@ -322,6 +351,8 @@ pasa todo en cada cambio (el servidor en Linux, Kitty en Windows).
   guardan 400; los días se cambian en **Opciones → Salud de catlan → Cuánto se guarda**.
 - Las actualizaciones automáticas de catlan necesitan versiones publicadas en GitHub (Releases); hasta la primera,
   «Buscar actualizaciones» dice que no hay ninguna.
+- Usuarios del dominio: solo los grupos directos de AD (sin anidados), sin LDAP en claro ni StartTLS (solo LDAPS), y
+  en Entra con más de 200 grupos el id_token no los trae. Probado con un AD y un proveedor OIDC de mentira, no con uno real.
 - Programas en los PCs: el mismo conjunto para todos los PCs con Kitty en Windows (no por grupos), y solo programas
   que estén en winget. Probado sin PCs reales todavía.
 
