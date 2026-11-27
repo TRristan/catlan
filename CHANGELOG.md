@@ -3,7 +3,10 @@
 Cada versión, lo que cambia para quien usa catlan. Sigue [SemVer](https://semver.org/lang/es/): el primer número sube
 cuando hay que hacer algo a mano al actualizar.
 
-## Sin publicar
+## 2.0.0
+
+**Hay que reinstalar Kitty en los PCs** (el mismo comando de Inventario → Añadir con Kitty). Las Kitty de antes siguen
+enviando el estado, pero sin control remoto ni actualizaciones hasta que se reinstalan.
 
 ### Nuevo
 - **Usuarios del dominio**: login con Active Directory (LDAPS, bind con el propio usuario) y con OIDC (Entra ID, Google
@@ -19,11 +22,8 @@ cuando hay que hacer algo a mano al actualizar.
 - **Salud se refresca sola** al llegar lecturas nuevas (como mucho cada 5 s), en vez de preguntar cada 15 s.
 - Por dentro: las rutas de la API son tablas con el permiso de cada una, comprobado en un solo sitio y con una prueba
   por ruta.
-
-## 2.0.0
-
-**Hay que reinstalar Kitty en los PCs** (el mismo comando de Inventario → Añadir con Kitty). Las Kitty de antes siguen
-enviando el estado, pero sin control remoto ni actualizaciones hasta que se reinstalan.
+- La web, partida en archivos HTML, CSS y JS en `src/ui/`; se sigue sirviendo como una sola página dentro del
+  ejecutable.
 
 ### Seguridad
 - **HTTPS siempre.** Sin `CATLAN_CERT`, catlan crea un certificado autofirmado en `data/tls.pem` y enseña su huella al
@@ -48,7 +48,8 @@ enviando el estado, pero sin control remoto ni actualizaciones hasta que se rein
 - Prueba de carga (`tests/carga.py`): 3.000 Kitty cada 15 s sin errores (ver «Requisitos y límites» en el README).
 
 ### Desarrollo
-- CI con `cargo fmt --check`, `cargo clippy -D warnings` y `cargo audit`.
+- CI con `cargo fmt --check`, `cargo clippy -D warnings`, `cargo audit` y tests de la web en un navegador (Playwright).
+- Rust 1.88 como mínimo.
 - `SECURITY.md` con cómo avisar de fallos y el modelo de amenazas.
 
 ## 1.x
