@@ -32,6 +32,7 @@ roxmltree = "0.21.2"
 rpassword = "7.5.5"
 rusqlite = { version = "0.43.0", features = ["bundled", "backup"] }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-native-certs = "0.8.5"
 serde = "1.0.229"
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
 sha1 = "0.11.0"

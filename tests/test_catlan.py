@@ -1,14 +1,14 @@
 """Prueba de humo de la API contra el ejecutable de catlan (cargo build --release; o CATLAN_BIN=ruta): python tests/test_catlan.py
 Lo interno (BER, AES, USM, interfaces, SLA…) lo prueban las pruebas de Rust: cargo test"""
 from pathlib import Path
-import base64, gzip, hashlib, hmac, http.server, json, os, socket, sqlite3, socketserver, subprocess, sys, tempfile, threading, time, urllib.request, urllib.error
+import base64, gzip, hashlib, hmac, http.server, json, os, socket, sqlite3, socketserver, subprocess, sys, tempfile, threading, time, urllib.parse, urllib.request, urllib.error
 from datetime import datetime, timedelta, timezone
 
 HERE = Path(__file__).parent.parent  # la raíz del repositorio
 BIN = os.environ.get("CATLAN_BIN") or str(HERE / "target" / "release" / ("catlan.exe" if os.name == "nt" else "catlan"))
 if not Path(BIN).exists():
     sys.exit(f"No encuentro {BIN}: compila con «cargo build --release» o indica la ruta en CATLAN_BIN")
-MIGRATIONS = 31  # migraciones numeradas de src/db.rs
+MIGRATIONS = 32  # migraciones numeradas de src/db.rs
 SECRET = ("community", "pass", "priv_pass")
 SEAL = b"CATLAN-CIFRADO-1"
 sha = lambda t: hashlib.sha256(t.encode()).hexdigest()
@@ -175,6 +175,79 @@ web = http.server.ThreadingHTTPServer(("127.0.0.1", 0), FakeWeb)
 threading.Thread(target=web.serve_forever, daemon=True).start()
 WEB = f"http://127.0.0.1:{web.server_address[1]}"
 
+# Un Active Directory de mentira (LDAP en BER a mano): bind con el UPN, «¿quién soy?» y la búsqueda de su ficha
+DOMINIO = {"juan": ("clave-juan", ["CN=IT,OU=Grupos,DC=empresa,DC=local"]), "jefa": ("clave-jefa", ["CN=Jefes,DC=empresa,DC=local"]),
+           "ventas": ("clave-ventas", ["CN=Ventas,DC=empresa,DC=local"]), "admin": ("clave-admin-dominio", ["CN=Jefes,DC=empresa,DC=local"]),
+           "pepe": ("clave-pepe", ["CN=IT,OU=Grupos,DC=empresa,DC=local"])}
+
+
+class FakeLDAP(socketserver.BaseRequestHandler):
+    def handle(self):
+        buf, me = b"", None
+        done = lambda tag, code: tlv(tag, ber_int(code, 10) + tlv(4, b"") + tlv(4, b""))
+        while True:
+            while len(buf) < 2 or len(buf) < ber_read(buf, 0)[2]:
+                d = self.request.recv(65536)
+                if not d: return
+                buf += d
+            n = ber_read(buf, 0)[2]
+            _, m, _ = ber_read(buf[:n], 0)
+            buf = buf[n:]
+            _, mid, i = ber_read(m, 0)
+            tag, op, _ = ber_read(m, i)
+            say = lambda o: self.request.sendall(tlv(0x30, tlv(2, mid) + o))
+            if tag == 0x60:  # bind
+                _, _, j = ber_read(op, 0); _, dn, j = ber_read(op, j); _, pw, _ = ber_read(op, j)
+                user = dn.decode().removesuffix("@empresa.local")
+                me = user if user in DOMINIO and pw and DOMINIO[user][0] == pw.decode() else None
+                say(done(0x61, 0 if me else 49))
+            elif tag == 0x77:  # ¿quién soy?
+                say(tlv(0x78, ber_int(0, 10) + tlv(4, b"") + tlv(4, b"") + tlv(0x8b, b"u:EMPRESA\\" + me.encode())))
+            elif tag == 0x63:  # la ficha de quien ha hecho el bind
+                attr = lambda k, vs: tlv(0x30, tlv(4, k.encode()) + tlv(0x31, b"".join(tlv(4, v.encode()) for v in vs)))
+                say(tlv(0x64, tlv(4, f"CN={me},DC=empresa,DC=local".encode()) + tlv(0x30, attr("sAMAccountName", [me]) + attr("memberOf", DOMINIO[me][1]))))
+                say(done(0x65, 0))
+            else:
+                return
+
+
+ldap = socketserver.ThreadingTCPServer(("127.0.0.1", 0), FakeLDAP)
+threading.Thread(target=ldap.serve_forever, daemon=True).start()
+IDP_USER = {}  # lo que dirá el id_token de quien entra
+idp_seen = {}  # lo que pidió catlan en /auth: state, nonce, code_challenge…
+
+
+class FakeIdP(http.server.BaseHTTPRequestHandler):
+    """Un proveedor OIDC (como Keycloak): descubrimiento, /auth que «entra» y vuelve, y /token que comprueba PKCE."""
+    def send(self, code, body=None, loc=None):
+        self.send_response(code)
+        if loc: self.send_header("Location", loc)
+        raw = json.dumps(body).encode() if body is not None else b""
+        self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(raw))); self.end_headers(); self.wfile.write(raw)
+
+    def do_GET(self):
+        if self.path == "/.well-known/openid-configuration":
+            return self.send(200, {"issuer": IDP, "authorization_endpoint": IDP + "/auth", "token_endpoint": IDP + "/token"})
+        q = dict(urllib.parse.parse_qsl(self.path.split("?", 1)[1]))
+        idp_seen.update(q)
+        self.send(302, loc=f"{q['redirect_uri']}?code=c-{q['state'][:6]}&state={q['state']}")
+
+    def do_POST(self):
+        f = dict(urllib.parse.parse_qsl(self.rfile.read(int(self.headers["Content-Length"])).decode()))
+        pkce = base64.urlsafe_b64encode(hashlib.sha256(f["code_verifier"].encode()).digest()).rstrip(b"=").decode()
+        if pkce != idp_seen["code_challenge"] or f.get("client_secret") != "s3creto-oidc" or f["code"] != f"c-{idp_seen['state'][:6]}":
+            return self.send(400, {"error": "invalid_grant"})
+        enc = lambda d: base64.urlsafe_b64encode(json.dumps(d).encode()).rstrip(b"=").decode()
+        claims = {"iss": IDP, "aud": "catlan", "exp": time.time() + 300, "nonce": idp_seen["nonce"], **IDP_USER}
+        self.send(200, {"id_token": f"{enc({'alg': 'RS256'})}.{enc(claims)}.firma"})
+
+    def log_message(self, *a): pass
+
+
+idp = http.server.ThreadingHTTPServer(("127.0.0.1", 0), FakeIdP)
+threading.Thread(target=idp.serve_forever, daemon=True).start()
+IDP = f"http://127.0.0.1:{idp.server_address[1]}"
+
 from email import message_from_string, policy  # noqa: E402
 
 # NAS Synology de mentira: disco 2 caliente, /volume1 al 96 % y el RAID degradado
@@ -282,7 +355,7 @@ try:
             return e.code, "", json.loads(e.read() or b"null")
 
     st, adm, me = raw("/api/login", "POST", {"name": "admin", "pass": "miau"})
-    assert st == 200 and adm.startswith(f"catlan_{sha(str(Path(env['CATLAN_DATA']).resolve()))[:10]}=") and me == {"id": 1, "name": "admin", "admin": 1, "must_change": 0, "totp": 0, "readonly": False, "groups": []}
+    assert st == 200 and adm.startswith(f"catlan_{sha(str(Path(env['CATLAN_DATA']).resolve()))[:10]}=") and me == {"id": 1, "name": "admin", "admin": 1, "must_change": 0, "totp": 0, "ext": "", "readonly": False, "groups": []}
     assert raw("/api/pages", cookie=adm)[0] == 200 and raw("/api/login", "POST", {"name": "admin", "pass": "mal"})[0] == 401
     # Instalación nueva: la wiki trae la «Guía de catlan» (uso, funciones y qué hace con los datos), una sola vez
     guia = call("/api/pages")[1]
@@ -1069,6 +1142,87 @@ try:
     assert call("/api/retention", "PUT", {"raw": 14}, auth=LEC)[0] == 403
     assert call("/api/retention", "PUT", {"raw": 14})[1] == {"raw": 14, "syslog": 30, "hours": 400} and call("/api/retention", auth=LEC)[1]["raw"] == 14
     assert call("/api/system")[1]["rejected"] == 0
+    # Usuarios del dominio (LDAP y OIDC de mentira), en otro catlan: así sus intentos no cuentan para el límite de este
+    sso_p = subprocess.Popen([BIN], env={**env, "CATLAN_DATA": tempfile.mkdtemp(), "CATLAN_PORT": "18105", "CATLAN_SYSLOG_PORT": "0"}, stdout=subprocess.DEVNULL)
+    try:
+        class NoRedir(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, *a): return None
+
+        def s5(path, method="GET", body=None, cookie="", auth=""):  # (código, cookies, cuerpo o Location), sin seguir redirecciones
+            url = path if path.startswith("http") else f"http://127.0.0.1:18105{path}"
+            req = urllib.request.Request(url, None if body is None else json.dumps(body).encode(), method=method,
+                                         headers={"Content-Type": "application/json", "Cookie": cookie, **({"Authorization": auth} if auth else {})})
+            try:
+                r = urllib.request.build_opener(NoRedir).open(req)
+            except urllib.error.HTTPError as e:
+                r = e
+            raw = r.read()
+            jar = {c.split("=", 1)[0]: c.split(";")[0] for c in r.headers.get_all("Set-Cookie") or []}
+            return r.status if hasattr(r, "status") else r.code, jar, r.headers.get("Location") or (json.loads(raw) if raw[:1] in (b"{", b"[") else raw)
+        for _ in range(50):
+            try: s5("/"); break
+            except OSError: time.sleep(0.1)
+        tec = s5("/api/groups", "POST", {"name": "Técnicos", "role": "edit"}, auth=AUTH)[2]["id"]
+        lec = s5("/api/groups", "POST", {"name": "Lectura", "role": "view"}, auth=AUTH)[2]["id"]
+        s5("/api/users", "POST", {"name": "pepe", "pass": "local-de-pepe"}, auth=AUTH)  # un local con el nombre de uno del dominio
+        conf = {"ldap_url": f"ldap://127.0.0.1:{ldap.server_address[1]}", "ldap_domain": "empresa.local", "oidc_issuer": IDP, "oidc_client": "catlan",
+                "oidc_secret": "s3creto-oidc", "oidc_name": "Keycloak",
+                "map": [{"from": "IT", "to": tec}, {"from": "CN=Jefes,DC=empresa,DC=local", "to": "admin"}, {"from": "@empresa.com", "to": lec}]}
+        assert s5("/api/sso/config")[0] == 401
+        for bad in ({"ldap_url": "ldap://10.0.0.1"}, {"oidc_issuer": "http://idp.empresa.com"}, {"map": [{"from": "IT", "to": 999}]}, {"ldap_pin": "abc"}):
+            assert s5("/api/sso/config", "PUT", bad, auth=AUTH)[0] == 400, bad
+        c = s5("/api/sso/config", "PUT", conf, auth=AUTH)[2]
+        assert c["set"] == {"oidc_secret": True} and "s3creto" not in json.dumps(c) and c["map"][0] == {"from": "IT", "to": tec}
+        assert s5("/api/sso/config", "PUT", {"oidc_secret": "", "oidc_name": "Keycloak"}, auth=AUTH)[2]["set"]["oidc_secret"]  # vacío = conservar
+        assert "s3creto" not in json.dumps(s5("/api/log", auth=AUTH)[2]) and ("sso", "editar") in [(h["kind"], h["action"]) for h in s5("/api/log", auth=AUTH)[2]]
+        assert s5("/api/sso")[2] == {"ldap": True, "oidc": "Keycloak", "error": None} and "grupo" in s5("/api/sso?e=acceso")[2]["error"]
+        # LDAP: entra con la contraseña del dominio; sus grupos mandan lo que puede hacer
+        st, ck, me = s5("/api/login", "POST", {"name": "juan", "pass": "clave-juan"})
+        sess = next(v for k, v in ck.items() if not k.endswith("_sso"))
+        assert st == 200 and me["ext"] == "ldap" and me["admin"] == 0 and me["groups"] == [tec] and not me["readonly"], me
+        assert s5("/api/items", "POST", {"name": "del dominio"}, cookie=sess)[0] == 201
+        assert s5("/api/login", "POST", {"name": "EMPRESA\\juan", "pass": "clave-juan"})[2]["id"] == me["id"]  # el mismo usuario, se escriba como se escriba
+        assert s5("/api/login", "POST", {"name": "jefa@empresa.local", "pass": "clave-jefa"})[2]["admin"] == 1
+        st, _, r = s5("/api/login", "POST", {"name": "ventas", "pass": "clave-ventas"})
+        assert st == 403 and "grupo" in r["error"]  # su contraseña vale, pero ningún grupo suyo tiene acceso
+        assert s5("/api/login", "POST", {"name": "juan", "pass": "mala"})[0] == 401 and s5("/api/login", "POST", {"name": "juan", "pass": ""})[0] == 401
+        assert s5("/api/pages", auth="Basic " + base64.b64encode(b"juan:clave-juan").decode())[0] == 200  # Basic para scripts, también del dominio
+        # el admin local no lo tapa el del dominio, ni el local «pepe»
+        assert s5("/api/login", "POST", {"name": "admin", "pass": "clave-admin-dominio"})[0] == 401 and s5("/api/login", "POST", {"name": "admin", "pass": "miau"})[0] == 200
+        assert s5("/api/login", "POST", {"name": "pepe", "pass": "clave-pepe"})[0] == 401
+        st, _, r = s5("/api/login", "POST", {"name": "pepe@empresa.local", "pass": "clave-pepe"})
+        assert st == 403 and "local" in r["error"], r
+        # su contraseña y su admin son cosa del dominio
+        assert s5("/api/me/password", "POST", {"old": "clave-juan", "new": "otra-clave-1"}, cookie=sess)[0] == 400
+        assert s5(f"/api/users/{me['id']}", "PUT", {"pass": "provisional1"}, auth=AUTH)[0] == 400 and s5(f"/api/users/{me['id']}", "PUT", {"admin": True}, auth=AUTH)[0] == 400
+        assert {u["name"]: u["ext"] for u in s5("/api/users", auth=AUTH)[2]} == {"admin": "", "pepe": "", "juan": "ldap", "jefa": "ldap"}
+        # dominio caído: los del dominio no entran (503), el admin local sí, y no cuenta como intento fallido
+        s5("/api/sso/config", "PUT", {"ldap_url": "ldap://127.0.0.1:1"}, auth=AUTH)
+        codes = [s5("/api/login", "POST", {"name": "jefa", "pass": "clave-jefa"})[0] for _ in range(11)]  # «jefa» sin la caché de 10 minutos
+        assert codes == [503] * 11, codes
+        assert s5("/api/login", "POST", {"name": "admin", "pass": "miau"})[0] == 200
+        s5("/api/sso/config", "PUT", {"ldap_url": conf["ldap_url"]}, auth=AUTH)
+        # OIDC con PKCE: catlan → proveedor → catlan, con el state atado a este navegador por una cookie
+        IDP_USER.update({"sub": "ana-1", "preferred_username": "ana@empresa.com", "email": "ana@empresa.com", "email_verified": True})
+        st, ck, loc = s5("/api/sso/start")
+        assert st == 302 and loc.startswith(IDP + "/auth?") and "code_challenge_method=S256" in loc and "s3creto" not in loc, loc
+        state_ck = next(v for k, v in ck.items() if k.endswith("_sso"))
+        back = s5(loc)[2]  # el proveedor «entra» y devuelve el navegador a catlan
+        assert back.startswith("http://127.0.0.1:18105/api/sso/callback?code=") and idp_seen["redirect_uri"] == "http://127.0.0.1:18105/api/sso/callback"
+        assert s5(back)[2] == "/?sso=caducado"  # sin la cookie del state: otro navegador
+        st, ck, loc = s5(back, cookie=state_ck)
+        assert st == 302 and loc == "/", loc
+        sess = next(v for k, v in ck.items() if not k.endswith("_sso") and v.split("=", 1)[1])
+        me = s5("/api/me", cookie=sess)[2]
+        assert me["name"] == "ana@empresa.com" and me["ext"] == "oidc" and me["groups"] == [lec] and me["readonly"] is True, me
+        assert s5(back, cookie=state_ck)[2] == "/?sso=caducado"  # el mismo state no vale dos veces
+        assert s5("/api/login", "POST", {"name": "ana@empresa.com", "pass": "lo-que-sea"})[0] == 401  # sin contraseña en catlan
+        IDP_USER.update({"sub": "intruso", "preferred_username": "x@gmail.com", "email": "x@gmail.com"})
+        _, ck, loc = s5("/api/sso/start")
+        assert s5(s5(loc)[2], cookie=next(v for k, v in ck.items() if k.endswith("_sso")))[2] == "/?sso=acceso"  # de fuera de la empresa: no
+        assert s5("/api/sso/callback?error=access_denied&error_description=Llama+al+555")[2] == "/?sso=cancelado"  # su texto no llega a la página
+    finally:
+        sso_p.terminate()
     # HTTPS siempre: certificado autofirmado y su huella para anclarlo en Kitty y en el comando de instalación
     import ssl
     ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE

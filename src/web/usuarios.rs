@@ -1,13 +1,14 @@
 //! Usuarios y grupos: entrar y salir, la cuenta propia (contraseña, 2FA) y, para los administradores, gestionar
 //! usuarios, grupos, copias de seguridad, borrar la base de datos y actualizar catlan.
-use super::{BASIC, Ctx, Login, Perm, Route, err, failed, js, login_ok, no_content, r, readonly, throttled};
+use super::{BASIC, Ctx, Login, Perm, Route, cookie, err, ext_user, failed, is_ext, js, login_ok, no_content, r, readonly, throttled};
 use crate::config::{COOKIE, DATA};
 use crate::crypto::{pw_hash, pw_ok, seal, sha256_hex, token_hex, token_urlsafe, totp_ok};
 use crate::db::{self, is_constraint, q, val};
 use crate::health;
 use crate::server::Resp;
-use crate::util::{J, bad, is_int, lock, py_str, trunc, truthy};
-use crate::validate::check_pass;
+use crate::sso;
+use crate::util::{Bad, J, bad, is_int, lock, py_str, trunc, truthy};
+use crate::validate::{check_pass, host_ok};
 use crate::{p, re};
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -45,6 +46,12 @@ pub fn routes() -> Vec<Route> {
         r("GET", "/api/me", Perm::Pending, Ctx::me_get),
         r("POST", "/api/me/password", Perm::Pending, Ctx::me_password),
         r("POST", "/api/me/totp", Perm::User, Ctx::me_totp),
+        // inicio de sesión con el dominio: lo que necesita la página de login, sin sesión; la configuración, administradores
+        r("GET", "/api/sso", Perm::Free, |c| Ok(js(200, sso::public(c.qs.get("e").map_or("", |v| v[0].as_str()))))),
+        r("GET", "/api/sso/start", Perm::Free, Ctx::sso_start),
+        r("GET", "/api/sso/callback", Perm::Free, Ctx::sso_callback),
+        r("GET", "/api/sso/config", Perm::Admin, |_| Ok(js(200, sso::view()))),
+        r("PUT", "/api/sso/config", Perm::Admin, Ctx::sso_config),
         // todos: para asignar incidencias (sin ser admin, solo los nombres)
         r("GET", "/api/users", Perm::User, Ctx::users_list),
         r("POST", "/api/users", Perm::Admin, Ctx::users_create),
@@ -71,7 +78,7 @@ pub fn routes() -> Vec<Route> {
 }
 
 pub fn me(uid: i64) -> Result<Value> {
-    let mut u = q("SELECT id, name, admin, must_change, totp != '' AS totp FROM users WHERE id=?", p![uid])?.one().unwrap_or_default();
+    let mut u = q("SELECT id, name, admin, must_change, totp != '' AS totp, substr(ext, 1, 4) AS ext FROM users WHERE id=?", p![uid])?.one().unwrap_or_default();
     u.insert("readonly".into(), readonly(uid)?.into());
     u.insert("groups".into(), q("SELECT group_id FROM members WHERE user_id=?", p![uid])?.into_iter().map(|r| r["group_id"].clone()).collect::<Vec<_>>().into());
     Ok(u.into())
@@ -101,18 +108,102 @@ impl Ctx {
         let uid = match login_ok(&trunc(&bs("name"), 100), &trunc(&bs("pass"), 200), &trunc(&bs("code"), 10))? {
             Login::Ok(id) => id,
             other => {
-                failed(&ip); // también los códigos fallidos: 10 y fuera
+                if !matches!(other, Login::Refused(_)) {
+                    failed(&ip); // también los códigos fallidos: 10 y fuera (no el dominio caído: el admin local tiene que poder entrar)
+                }
                 return Ok(match other {
                     Login::NeedCode => js(401, json!({"error": if b.get("code").is_some_and(truthy) { "código incorrecto" } else { "escribe el código de tu app de autenticación" }, "totp": true})),
+                    Login::Refused(why) => err(if why == "dominio" { 503 } else { 403 }, sso::why(why)),
                     _ => err(401, "usuario o contraseña incorrectos"),
                 });
             }
         };
-        let tok = token_urlsafe(32);
+        Ok(js(200, me(uid)?).header("Set-Cookie", self.session(uid)?))
+    }
+
+    /// Sesión nueva (la cookie): 30 días; 12 horas a los del dominio, para que quien se va de la empresa no siga dentro.
+    fn session(&self, uid: i64) -> Result<String> {
+        let (hours, tok) = (if is_ext(uid)? { 12 } else { 720 }, token_urlsafe(32));
         q("DELETE FROM sessions WHERE expires <= datetime('now')", p![])?;
-        q("INSERT INTO sessions(token, user_id, expires) VALUES(?, ?, datetime('now', '+30 days'))", p![sha256_hex(&tok), uid])?;
+        q("INSERT INTO sessions(token, user_id, expires) VALUES(?, ?, datetime('now', ?))", p![sha256_hex(&tok), uid, format!("+{hours} hours")])?;
         let secure = if self.req.tls { "; Secure" } else { "" };
-        Ok(js(200, me(uid)?).header("Set-Cookie", format!("{}={tok}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000{secure}", *COOKIE)))
+        Ok(format!("{}={tok}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}{secure}", *COOKIE, hours * 3600))
+    }
+
+    /// Los del dominio cambian su contraseña y su 2FA allí.
+    fn not_ext(&self) -> Result<()> {
+        if is_ext(self.uid())? {
+            return bad("tu usuario es del dominio: la contraseña y la verificación en dos pasos se cambian allí");
+        }
+        Ok(())
+    }
+
+    // ── Inicio de sesión con el dominio (OIDC) ──
+
+    fn sso_start(&mut self) -> Result<Resp> {
+        let back = |code: &str| Resp::new(302, vec![], "text/plain").header("Location", format!("/?sso={code}"));
+        let host = self.req.header("host");
+        if throttled(&self.req.ip) {
+            return Ok(back("intentos"));
+        }
+        if !sso::oidc_on(&sso::conf()) || !host_ok(host) {
+            return Ok(back("config"));
+        }
+        // la dirección que hay que dar de alta en el proveedor; tras un proxy, la que ve el navegador
+        let redirect = format!("{}://{host}/api/sso/callback", if self.req.tls { "https" } else { "http" });
+        Ok(match sso::oidc_start(&redirect) {
+            Ok((url, state)) => {
+                let secure = if self.req.tls { "; Secure" } else { "" };
+                Resp::new(302, vec![], "text/plain").header("Location", url).header("Set-Cookie", format!("{}_sso={state}; Path=/api/sso; HttpOnly; SameSite=Lax; Max-Age=600{secure}", *COOKIE))
+            }
+            Err(e) => {
+                eprintln!("OIDC: {e:#}");
+                back("proveedor")
+            }
+        })
+    }
+
+    /// Vuelta del proveedor: el `state` tiene que ser el de la cookie de este navegador (si no, otro podría colarle su sesión).
+    fn sso_callback(&mut self) -> Result<Resp> {
+        let arg = |k: &str| self.qs.get(k).map_or(String::new(), |v| v[0].clone());
+        let (state, code, error) = (arg("state"), arg("code"), arg("error"));
+        let ip = &self.req.ip;
+        let clear = format!("{}_sso=; Path=/api/sso; HttpOnly; SameSite=Lax; Max-Age=0", *COOKIE);
+        let back = |code: &str| Resp::new(302, vec![], "text/plain").header("Location", format!("/?sso={code}")).header("Set-Cookie", clear.clone());
+        if throttled(ip) {
+            return Ok(back("intentos"));
+        }
+        if !error.is_empty() {
+            println!("OIDC: el proveedor dice {}", trunc(&error, 100));
+            return Ok(back("cancelado"));
+        }
+        let mine = cookie(self.req.header("cookie"), &format!("{}_sso", *COOKIE)).unwrap_or("");
+        if state.is_empty() || !crate::crypto::ct_eq(state.as_bytes(), mine.as_bytes()) {
+            failed(ip);
+            return Ok(back("caducado"));
+        }
+        let x = match sso::oidc_finish(&state, &code) {
+            Ok(x) => x,
+            Err(e) => {
+                failed(ip);
+                eprintln!("OIDC: {e:#}");
+                return Ok(back(if e.downcast_ref::<Bad>().is_some() { "caducado" } else { "proveedor" }));
+            }
+        };
+        Ok(match ext_user(&x)? {
+            Ok(id) => Resp::new(302, vec![], "text/plain").header("Location", "/").header("Set-Cookie", self.session(id)?).header("Set-Cookie", clear),
+            Err(why) => back(why),
+        })
+    }
+
+    /// La configuración del dominio (el secreto del cliente no sale).
+    fn sso_config(&mut self) -> Result<Resp> {
+        let b = self.body()?;
+        let v = sso::set(&b)?;
+        let mut campos: Vec<&str> = b.as_object().into_iter().flat_map(|o| o.keys().map(String::as_str)).collect();
+        campos.sort();
+        self.log("editar", "sso", 0, "inicio de sesión con el dominio", &json!({"campos": campos}))?;
+        Ok(js(200, v))
     }
 
     fn logout(&mut self) -> Result<Resp> {
@@ -126,6 +217,7 @@ impl Ctx {
 
     fn me_password(&mut self) -> Result<Resp> {
         let b = self.object()?;
+        self.not_ext()?;
         if !pw_ok(&b.get("old").map(py_str).unwrap_or_default(), &self.my_hash()?) {
             return Ok(err(400, "la contraseña actual no es correcta"));
         }
@@ -144,6 +236,7 @@ impl Ctx {
     /// Verificación en dos pasos (app de autenticación).
     fn me_totp(&mut self) -> Result<Resp> {
         let b = self.object()?;
+        self.not_ext()?;
         if b.get("off").is_some_and(truthy) {
             if !b.get("pass").and_then(Value::as_str).is_some_and(|p| pw_ok(p, &self.my_hash().unwrap_or_default())) {
                 return Ok(err(400, "la contraseña no es correcta"));
@@ -172,7 +265,7 @@ impl Ctx {
             // para asignar incidencias: solo nombres
             return Ok(js(200, q("SELECT id, name FROM users ORDER BY name COLLATE NOCASE", p![])?.rows));
         }
-        Ok(js(200, q("SELECT id, name, admin, must_change, totp != '' AS totp, created FROM users ORDER BY name COLLATE NOCASE", p![])?.rows))
+        Ok(js(200, q("SELECT id, name, admin, must_change, totp != '' AS totp, substr(ext, 1, 4) AS ext, created FROM users ORDER BY name COLLATE NOCASE", p![])?.rows))
     }
 
     /// Uno o muchos (lista). Todo se valida antes de guardar nada. Sin contraseña se genera una provisional,
@@ -256,6 +349,9 @@ impl Ctx {
             Ok(x) => x,
             Err(r) => return Ok(r),
         };
+        if is_ext(id)? && ["admin", "pass", "totp"].iter().any(|k| b.get(*k).is_some()) {
+            return bad("es un usuario del dominio: su contraseña es la del dominio y su admin lo dan sus grupos (Opciones → Inicio de sesión con el dominio)");
+        }
         if let Some(a) = b.get("admin") {
             q("UPDATE users SET admin=? WHERE id=?", p![*a == Value::Bool(true), id])?;
         }

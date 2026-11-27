@@ -5,6 +5,12 @@ cuando hay que hacer algo a mano al actualizar.
 
 ## Sin publicar
 
+### Nuevo
+- **Usuarios del dominio**: login con Active Directory (LDAPS, bind con el propio usuario) y con OIDC (Entra ID, Google
+  Workspace, Keycloak) con PKCE. Sus grupos del dominio dan el admin y los grupos de catlan. Se configura en
+  **Opciones → Inicio de sesión con el dominio**; los usuarios locales, `admin` incluido, siguen entrando siempre.
+
+### Por dentro
 - **Servidor nuevo** (tokio + hyper + axum): las conexiones se reutilizan (keep-alive) y ya no hay un hilo por conexión.
   Lo de seguridad sigue igual: HTTPS y HTTP en el mismo puerto, lo que se sirve en claro, cabeceras, proxies de
   confianza, 503 y 64 conexiones por IP, y 10 s para mandar cada petición.

@@ -17,6 +17,7 @@ use crate::crypto::{pw_ok, sha256_hex, totp_ok};
 use crate::db::{self, q};
 use crate::p;
 use crate::server::{Conn, Req, Resp};
+use crate::sso;
 use crate::util::{Bad, J, Row, Shape, lock, now, parse_qs, trunc};
 use anyhow::Result;
 use axum::extract::{RawPathParams, Request, State};
@@ -428,7 +429,7 @@ fn netloc(url: &str) -> &str {
     url.split_once("://").map(|(_, r)| r.split(['/', '?', '#']).next().unwrap_or("")).unwrap_or("")
 }
 
-fn cookie<'a>(header: &'a str, name: &str) -> Option<&'a str> {
+pub fn cookie<'a>(header: &'a str, name: &str) -> Option<&'a str> {
     header.split(';').filter_map(|c| c.trim().split_once('=')).find(|(k, _)| *k == name).map(|(_, v)| v.trim_matches('"'))
 }
 
@@ -473,6 +474,8 @@ pub enum Login {
     No,
     NeedCode,
     Ok(i64),
+    /// La contraseña del dominio valía (o el dominio no contesta), pero no entra: código de `sso::why`.
+    Refused(&'static str),
 }
 
 /// Por Basic no hay código: quien tiene 2FA no entra por Basic (para scripts, un usuario sin 2FA).
@@ -482,7 +485,12 @@ pub fn login_ok(name: &str, pw: &str, code: &str) -> Result<Login> {
         return Ok(Login::No);
     }
     let key = (name.to_lowercase(), crate::crypto::hex(&crate::crypto::hmac_sha256(&BASIC_KEY, pw.as_bytes())));
-    let Some(u) = q("SELECT id, hash, totp FROM users WHERE name=?", p![name])?.one() else { return Ok(Login::No) };
+    let u = q("SELECT id, hash, totp, ext FROM users WHERE name=?", p![name])?.one();
+    // los usuarios locales (admin incluido) nunca pasan por el dominio: así siempre se puede entrar, aunque esté caído
+    if u.as_ref().map_or_else(|| sso::ldap_on(&sso::conf()), |u| u.s("ext").starts_with("ldap:")) {
+        return ldap_ok(name, pw, &who, key, u.and_then(|u| u.i("id")));
+    }
+    let Some(u) = u.filter(|u| u.s("ext").is_empty()) else { return Ok(Login::No) }; // los de OIDC no tienen contraseña aquí
     let (id, hash, totp) = (u.i("id").unwrap_or(0), u.s("hash").to_string(), u.s("totp").to_string());
     let code_ok = || if totp_ok(&totp, code) { Login::Ok(id) } else { Login::NeedCode };
     // La caché solo vale si el hash guardado sigue siendo el mismo: otro proceso (catlan restablecer) puede haberlo cambiado
@@ -504,6 +512,65 @@ pub fn login_ok(name: &str, pw: &str, code: &str) -> Result<Login> {
         return Ok(code_ok());
     }
     Ok(Login::Ok(id))
+}
+
+/// Contraseña del dominio: el mismo límite de intentos por usuario y la misma caché para Basic que los locales.
+/// shortcut: sin 2FA de catlan; la verificación en dos pasos del dominio, si la hay, no pasa por LDAP.
+fn ldap_ok(name: &str, pw: &str, who: &str, key: (String, String), id: Option<i64>) -> Result<Login> {
+    let t = now();
+    if let Some((i, _, _)) = lock(&BASIC).get(&key).filter(|(i, h, exp)| Some(*i) == id && h == "ldap" && *exp > t) {
+        return Ok(Login::Ok(*i));
+    }
+    match sso::ldap_login(name, pw) {
+        Ok(Some(x)) => Ok(match ext_user(&x)? {
+            Ok(id) => {
+                lock(&BASIC).insert(key, (id, "ldap".into(), t + BASIC_TTL));
+                Login::Ok(id)
+            }
+            Err(why) => Login::Refused(why),
+        }),
+        Ok(None) => {
+            failed(who);
+            Ok(Login::No)
+        }
+        Err(e) => {
+            eprintln!("LDAP: {e:#}");
+            Ok(Login::Refused("dominio"))
+        }
+    }
+}
+
+/// Alguien que el dominio ha reconocido: se crea la primera vez y, en cada entrada, sus grupos del dominio mandan su
+/// admin y sus grupos de catlan. Nunca toma un usuario local con el mismo nombre (admin incluido).
+pub fn ext_user(x: &sso::Ext) -> Result<std::result::Result<i64, &'static str>> {
+    let Some((admin, groups)) = sso::roles(&sso::conf(), &x.groups) else {
+        println!("{}: sin acceso a catlan (sus grupos: {})", x.name, x.groups.join("; "));
+        return Ok(Err("acceso"));
+    };
+    let id = match q("SELECT id FROM users WHERE ext=?", p![&x.key])?.one() {
+        Some(u) => u.i("id").unwrap_or(0),
+        None => {
+            let name = sso::local_name(&x.name);
+            let id = match q("INSERT INTO users(name, hash, ext) VALUES(?, '', ?)", p![&name, &x.key]) {
+                Ok(r) => r.lastrowid,
+                Err(e) if db::is_constraint(&e) => return Ok(Err("nombre")),
+                Err(e) => return Err(e),
+            };
+            q("INSERT INTO log(who, action, kind, ref, name, data) VALUES(?, 'crear', 'user', ?, ?, ?)", p![&name, id, &name, json!({"dominio": &x.key[..4]}).to_string()])?;
+            id
+        }
+    };
+    q("UPDATE users SET admin=? WHERE id=?", p![admin, id])?;
+    q("DELETE FROM members WHERE user_id=?", p![id])?;
+    for g in groups {
+        q("INSERT OR IGNORE INTO members(group_id, user_id) SELECT id, ? FROM groups WHERE id=?", p![id, g])?; // un grupo borrado después, fuera
+    }
+    Ok(Ok(id))
+}
+
+/// Usuario del dominio (LDAP u OIDC): su contraseña, su 2FA y su admin no se cambian en catlan.
+pub fn is_ext(id: i64) -> Result<bool> {
+    Ok(q("SELECT ext FROM users WHERE id=?", p![id])?.one().is_some_and(|u| !u.s("ext").is_empty()))
 }
 
 /// Solo vista: está en algún grupo de solo vista y en ninguno que pueda editar (los administradores siempre editan).
@@ -528,20 +595,22 @@ fn session(cookies: &str, h: &str, ip: &str) -> Result<(Option<Row>, String)> {
     }
     let (Some(b64), false) = (h.strip_prefix("Basic "), throttled(ip)) else { return Ok((None, String::new())) };
     let decoded = data_encoding::BASE64.decode(b64.trim().as_bytes()).ok().and_then(|b| String::from_utf8(b).ok());
+    // Err(true): fallo que cuenta para el límite por IP; Err(false): el dominio no deja entrar (o no contesta), no cuenta
     let uid = match decoded.as_deref().and_then(|s| s.split_once(':')) {
         Some((n, pw)) => match login_ok(&trunc(n, 100), &trunc(pw, 200), "")? {
-            Login::Ok(id) => Some(id),
-            _ => None,
+            Login::Ok(id) => Ok(id),
+            Login::Refused(_) => Err(false),
+            _ => Err(true),
         },
-        None => None,
+        None => Err(true),
     };
-    if uid.is_none() {
+    if uid == Err(true) {
         failed(ip);
     }
     Ok((
         match uid {
-            Some(id) => q("SELECT * FROM users WHERE id=?", p![id])?.one(),
-            None => None,
+            Ok(id) => q("SELECT * FROM users WHERE id=?", p![id])?.one(),
+            Err(_) => None,
         },
         String::new(),
     ))
@@ -607,6 +676,11 @@ mod tests {
         ("GET", "/api/me", Perm::Pending),
         ("POST", "/api/me/password", Perm::Pending),
         ("POST", "/api/me/totp", Perm::User),
+        ("GET", "/api/sso", Perm::Free),
+        ("GET", "/api/sso/start", Perm::Free),
+        ("GET", "/api/sso/callback", Perm::Free),
+        ("GET", "/api/sso/config", Perm::Admin),
+        ("PUT", "/api/sso/config", Perm::Admin),
         ("GET", "/api/users", Perm::User),
         ("POST", "/api/users", Perm::Admin),
         ("PUT", "/api/users/{id}", Perm::Admin),

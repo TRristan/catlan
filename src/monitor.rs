@@ -129,7 +129,7 @@ fn tls_why(r: &rustls::Error) -> String {
 }
 
 /// Conecta por TCP a la primera dirección del nombre que conteste.
-fn connect(host: &str, port: u16, t: Duration) -> Result<TcpStream, String> {
+pub fn connect(host: &str, port: u16, t: Duration) -> Result<TcpStream, String> {
     let addrs = (host, port).to_socket_addrs().map_err(|_| "el nombre no resuelve".to_string())?;
     let mut last = "el nombre no resuelve".to_string();
     for a in addrs {

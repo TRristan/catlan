@@ -299,6 +299,7 @@ dependencies = [
  "rpassword",
  "rusqlite",
  "rustls",
+ "rustls-native-certs 0.8.5",
  "serde",
  "serde_json",
  "sha1 0.11.0",
