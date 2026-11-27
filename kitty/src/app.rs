@@ -207,8 +207,11 @@ pub fn run(start_hidden: bool, updated: bool) {
     });
 
     // ¿quiere IT conectarse? Cada 3 s, una pregunta corta (sin dejar conexiones abiertas en catlan); de paso, el latido
-    // que dice a la ventana si llega a catlan
-    if let Ok(c) = &conf {
+    // que dice a la ventana si llega a catlan. En claro catlan lo rechaza (403) y la ventana parpadearía entre «Conectado»
+    // (Mis avisos sí pasa) y «Sin conexión»: sin https no hay control remoto, y el estado lo da Mis avisos
+    if let Ok(c) = &conf
+        && c.url.starts_with("https://")
+    {
         let (url, ukey, p) = (c.url.clone(), c.ukey.clone(), proxy.clone());
         std::thread::spawn(move || {
             loop {
