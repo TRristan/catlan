@@ -135,9 +135,27 @@ fn apply(e: &Value, held: &mut Held) {
         t @ ("d" | "u") => {
             let down = t == "d";
             let fl = match f("b") as i32 {
-                1 => if down { MOUSEEVENTF_MIDDLEDOWN } else { MOUSEEVENTF_MIDDLEUP },
-                2 => if down { MOUSEEVENTF_RIGHTDOWN } else { MOUSEEVENTF_RIGHTUP },
-                _ => if down { MOUSEEVENTF_LEFTDOWN } else { MOUSEEVENTF_LEFTUP },
+                1 => {
+                    if down {
+                        MOUSEEVENTF_MIDDLEDOWN
+                    } else {
+                        MOUSEEVENTF_MIDDLEUP
+                    }
+                }
+                2 => {
+                    if down {
+                        MOUSEEVENTF_RIGHTDOWN
+                    } else {
+                        MOUSEEVENTF_RIGHTUP
+                    }
+                }
+                _ => {
+                    if down {
+                        MOUSEEVENTF_LEFTDOWN
+                    } else {
+                        MOUSEEVENTF_LEFTUP
+                    }
+                }
             };
             send(&[mouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, abs("x"), abs("y"), 0), mouse(fl, 0, 0, 0)]);
         }
@@ -176,13 +194,8 @@ fn apply(e: &Value, held: &mut Held) {
 
 /// POST con el fotograma; la respuesta trae el estado y lo que ha hecho el técnico.
 fn post_frame(url: &str, ukey: &str, id: &str, jpg: &[u8]) -> Result<Value, String> {
-    let r = crate::net::agent()
-        .post(&format!("{url}/api/agent/remote/frame"))
-        .timeout(Duration::from_secs(15))
-        .set("X-Kitty", ukey)
-        .set("X-Sesion", id)
-        .set("Content-Type", "image/jpeg")
-        .send_bytes(jpg);
+    let r =
+        crate::net::agent().post(&format!("{url}/api/agent/remote/frame")).timeout(Duration::from_secs(15)).set("X-Kitty", ukey).set("X-Sesion", id).set("Content-Type", "image/jpeg").send_bytes(jpg);
     match r {
         Ok(r) => r.into_string().ok().and_then(|s| serde_json::from_str(&s).ok()).ok_or_else(|| "respuesta rara de catlan".into()),
         Err(ureq::Error::Status(c, _)) => Err(format!("catlan respondió {c}")),
@@ -207,7 +220,12 @@ pub fn session(url: &str, ukey: &str, id: &str, stop: &Arc<AtomicBool>) -> Strin
                 let mut hs = DefaultHasher::new();
                 px.hash(&mut hs);
                 let hsh = hs.finish();
-                if hsh == last { vec![] } else { last = hsh; jpeg(&px, w, h) }
+                if hsh == last {
+                    vec![]
+                } else {
+                    last = hsh;
+                    jpeg(&px, w, h)
+                }
             })
             .unwrap_or_default(); // pantalla bloqueada o de UAC: Windows no deja verla
         match post_frame(url, ukey, id, &jpg) {

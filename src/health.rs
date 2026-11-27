@@ -65,10 +65,7 @@ fn host_resources(s: &mut Snmp, out: &mut Vec<M>) -> Result<()> {
         let typ = g(r, "2").text();
         if typ == "1.3.6.1.2.1.25.2.1.2" {
             out.push(m("mem", "Memoria", 100.0 * used as f64 / size as f64, "%"));
-        } else if typ == "1.3.6.1.2.1.25.2.1.4"
-            && size * unit >= 1 << 30
-            && !["/dev", "/run", "/sys", "/proc", "/boot", "/tmp"].iter().any(|p| name.starts_with(p))
-        {
+        } else if typ == "1.3.6.1.2.1.25.2.1.4" && size * unit >= 1 << 30 && !["/dev", "/run", "/sys", "/proc", "/boot", "/tmp"].iter().any(|p| name.starts_with(p)) {
             out.push(m(format!("disk:{name}"), name.clone(), 100.0 * used as f64 / size as f64, "%"));
         }
     }
@@ -103,12 +100,9 @@ fn p_synology(s: &mut Snmp, out: &mut Vec<M>, probs: &mut Vec<String>) -> Result
     if let Some(t) = fl(g(&gv, &oids[1])) {
         out.push(m("temp:sistema", "Sistema", t, "°C"));
     }
-    for (o, msg) in [
-        (&oids[0], "Estado del sistema: fallo"),
-        (&oids[2], "Fuente de alimentación con fallo"),
-        (&oids[3], "Ventilador del sistema con fallo"),
-        (&oids[4], "Ventilador de la CPU con fallo"),
-    ] {
+    for (o, msg) in
+        [(&oids[0], "Estado del sistema: fallo"), (&oids[2], "Fuente de alimentación con fallo"), (&oids[3], "Ventilador del sistema con fallo"), (&oids[4], "Ventilador de la CPU con fallo")]
+    {
         if *g(&gv, o) == SV::Int(2) {
             probs.push(msg.into());
         }
@@ -310,8 +304,7 @@ pub fn parse_hik(xml: &[u8]) -> Result<(Vec<M>, Vec<String>)> {
     let doc = roxmltree::Document::parse(&text)?;
     let (mut out, mut probs) = (vec![], vec![]);
     for hdd in doc.descendants().filter(|n| n.is_element() && n.tag_name().name() == "hdd") {
-        let f: HashMap<&str, String> =
-            hdd.children().filter(|c| c.is_element()).map(|c| (c.tag_name().name(), c.text().unwrap_or("").trim().to_string())).collect();
+        let f: HashMap<&str, String> = hdd.children().filter(|c| c.is_element()).map(|c| (c.tag_name().name(), c.text().unwrap_or("").trim().to_string())).collect();
         let fs = |k: &str| f.get(k).cloned().unwrap_or_default();
         let name = Some(fs("hddName")).filter(|s| !s.is_empty()).unwrap_or_else(|| format!("Disco {}", fs("id")).trim().to_string());
         if let Some(cap) = num(&fs("capacity")).filter(|c| *c != 0.0) {
@@ -393,7 +386,15 @@ pub fn interfaces(s: &mut dyn Walk, sid: Option<i64>, out: &mut Vec<M>, probs: &
             if t > pt {
                 let dt = t - pt;
                 // shortcut: con 32 bits solo se corrige una vuelta del contador; para enlaces rápidos hace falta ifHCInOctets (SNMP v2c/v3)
-                let d = |a: i128, b: i128| if a >= b { Some(a - b) } else if hc { None } else { Some(a + (1i128 << 32) - b) }; // None: contador reiniciado
+                let d = |a: i128, b: i128| {
+                    if a >= b {
+                        Some(a - b)
+                    } else if hc {
+                        None
+                    } else {
+                        Some(a + (1i128 << 32) - b)
+                    }
+                }; // None: contador reiniciado
                 if let (Some(din), Some(dout)) = (d(rin, pin), d(rout, pout)) {
                     let rx = round(din as f64 * 8.0 / dt / 1e6, 3);
                     let tx = round(dout as f64 * 8.0 / dt / 1e6, 3);
@@ -468,7 +469,15 @@ fn mac_txt(b: &[u8]) -> Option<String> {
 fn caps_icon(bits: &[u8], cdp: bool) -> Option<&'static str> {
     if cdp {
         let n = if bits.len() >= 4 { u32::from_be_bytes([bits[0], bits[1], bits[2], bits[3]]) } else { 0 };
-        return if n & 1 != 0 { Some("router") } else if n & 8 != 0 { Some("switch") } else if n & 0x80 != 0 { Some("phone") } else { None };
+        return if n & 1 != 0 {
+            Some("router")
+        } else if n & 8 != 0 {
+            Some("switch")
+        } else if n & 0x80 != 0 {
+            Some("phone")
+        } else {
+            None
+        };
     }
     let n = bits.first().copied().unwrap_or(0); // other, repeater, bridge, wlanAP, router, telephone, docsis, station
     [(0x08, "router"), (0x10, "ap"), (0x20, "switch"), (0x04, "phone"), (0x01, "pc")].iter().find(|(b, _)| n & b != 0).map(|x| x.1)
@@ -537,10 +546,7 @@ pub fn topology(s: &mut Snmp) -> Vec<Map<String, Value>> {
             continue;
         }
         let chassis = g(&r, "5").raw();
-        let name = Some(g(&r, "9").txt().trim().to_string())
-            .filter(|s| !s.is_empty())
-            .or_else(|| mac_txt(&chassis))
-            .unwrap_or_else(|| g(&r, "5").txt());
+        let name = Some(g(&r, "9").txt().trim().to_string()).filter(|s| !s.is_empty()).or_else(|| mac_txt(&chassis)).unwrap_or_else(|| g(&r, "5").txt());
         let rport = if g(&r, "8").truthy() { g(&r, "8").text() } else { g(&r, "7").txt() };
         add(
             &mut found,
@@ -609,9 +615,23 @@ pub fn topology(s: &mut Snmp) -> Vec<Map<String, Value>> {
 }
 
 const KIND_ICON: &[(&str, &str)] = &[
-    ("router", "router"), ("switch", "switch"), ("firewall", "firewall"), ("servidor", "server"), ("server", "server"), ("nas", "nas"),
-    ("port", "laptop"), ("impres", "printer"), ("printer", "printer"), ("tel", "phone"), ("cám", "camera"), ("cam", "camera"),
-    ("sai", "ups"), ("ups", "ups"), ("ap", "ap"), ("wifi", "ap"), ("pc", "pc"),
+    ("router", "router"),
+    ("switch", "switch"),
+    ("firewall", "firewall"),
+    ("servidor", "server"),
+    ("server", "server"),
+    ("nas", "nas"),
+    ("port", "laptop"),
+    ("impres", "printer"),
+    ("printer", "printer"),
+    ("tel", "phone"),
+    ("cám", "camera"),
+    ("cam", "camera"),
+    ("sai", "ups"),
+    ("ups", "ups"),
+    ("ap", "ap"),
+    ("wifi", "ap"),
+    ("pc", "pc"),
 ];
 
 /// Lee la topología del switch de una fuente de Salud y la dibuja en un esquema «Topología · switch» (lo rehace si existe).
@@ -639,11 +659,7 @@ pub fn auto_map(src: &Row) -> Result<(i64, String, Vec<Map<String, Value>>, bool
     let per_row = 9.max(nbrs.len().div_ceil(4)); // como mucho 4 filas: el lienzo mide 1200 x 800
     for (k, n) in nbrs.iter_mut().enumerate() {
         let name = n.s("name").to_string();
-        let it = by_ip
-            .get(n.s("ip"))
-            .or_else(|| by_name.get(&name.to_lowercase()))
-            .or_else(|| by_name.get(&name.split('.').next().unwrap_or("").to_lowercase()))
-            .copied();
+        let it = by_ip.get(n.s("ip")).or_else(|| by_name.get(&name.to_lowercase())).or_else(|| by_name.get(&name.split('.').next().unwrap_or("").to_lowercase())).copied();
         let kind = it.map(|i| i.s("kind").to_lowercase()).unwrap_or_default();
         let icon = KIND_ICON
             .iter()
@@ -756,11 +772,7 @@ pub fn kitty_read(name: &str, x: &Value) -> (Vec<M>, Map<String, Value>) {
             }
         }
     }
-    let ips: Vec<Value> = x
-        .get("ips")
-        .and_then(Value::as_array)
-        .map(|a| a.iter().take(16).filter_map(Value::as_str).map(|s| Value::from(trunc(s.trim(), 45))).collect())
-        .unwrap_or_default();
+    let ips: Vec<Value> = x.get("ips").and_then(Value::as_array).map(|a| a.iter().take(16).filter_map(Value::as_str).map(|s| Value::from(trunc(s.trim(), 45))).collect()).unwrap_or_default();
     let mut info = Map::new();
     info.insert("descr".into(), txt(x.get("osver"), 200).into());
     info.insert("name".into(), name.into());
@@ -790,11 +802,7 @@ pub fn parse_iso(s: &str, naive_local: bool) -> Option<DateTime<Utc>> {
         .iter()
         .find_map(|f| NaiveDateTime::parse_from_str(s, f).ok())
         .or_else(|| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok().and_then(|d| d.and_hms_opt(0, 0, 0)))?;
-    if naive_local {
-        naive.and_local_timezone(chrono::Local).single().map(|t| t.with_timezone(&Utc))
-    } else {
-        Some(naive.and_utc())
-    }
+    if naive_local { naive.and_local_timezone(chrono::Local).single().map(|t| t.with_timezone(&Utc)) } else { Some(naive.and_utc()) }
 }
 
 /// Eventos de Windows que envía Kitty, junto a los ya guardados -> (los de 7 días, máx. 30, el más nuevo primero; avisos).
@@ -973,10 +981,7 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        lock(&IF_PREV).insert(
-            99,
-            [("1".into(), (t0 - 60.0, 1_000_000_000_000, 1_000_000_000_000, 0)), ("2".into(), (t0 - 60.0, 200, 100, 0))].into_iter().collect(),
-        ); // Gi2: el contador bajó (reinicio)
+        lock(&IF_PREV).insert(99, [("1".into(), (t0 - 60.0, 1_000_000_000_000, 1_000_000_000_000, 0)), ("2".into(), (t0 - 60.0, 200, 100, 0))].into_iter().collect()); // Gi2: el contador bajó (reinicio)
         let (mut out, mut probs) = (vec![], vec![]);
         let ports = interfaces(&mut FakeIf(sw), Some(99), &mut out, &mut probs).unwrap();
         assert_eq!(ports.iter().map(|p| p.s("name")).collect::<Vec<_>>(), ["Gi1", "Gi2", "Gi4"]);

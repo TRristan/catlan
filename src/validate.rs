@@ -108,9 +108,7 @@ pub fn check_source(d: &Row, new: bool) -> Result<()> {
     if d.get("v3").is_some_and(|v| !(v.is_boolean() || v.as_f64().is_some_and(|f| f == 0.0 || f == 1.0))) {
         return bad("v3 no válido");
     }
-    if d.get("auth").is_some_and(|a| !a.as_str().is_some_and(|a| AUTHS.contains(&a)))
-        || d.get("priv").is_some_and(|a| !a.as_str().is_some_and(|a| a == "none" || a == "aes"))
-    {
+    if d.get("auth").is_some_and(|a| !a.as_str().is_some_and(|a| AUTHS.contains(&a))) || d.get("priv").is_some_and(|a| !a.as_str().is_some_and(|a| a == "none" || a == "aes")) {
         return bad("algoritmo SNMPv3 no admitido");
     }
     if d.t("v3") {
@@ -211,9 +209,7 @@ pub fn check_incident(d: &Row, rid: Option<i64>) -> Result<()> {
     if d.get("body").is_some_and(|b| !b.as_str().is_some_and(|b| b.chars().count() <= 20000)) {
         return bad("descripción demasiado larga");
     }
-    if d.get("status").is_some_and(|s| !s.as_str().is_some_and(|s| INC_STATUS.contains(&s)))
-        || d.get("priority").is_some_and(|s| !s.as_str().is_some_and(|s| INC_PRIO.contains(&s)))
-    {
+    if d.get("status").is_some_and(|s| !s.as_str().is_some_and(|s| INC_STATUS.contains(&s))) || d.get("priority").is_some_and(|s| !s.as_str().is_some_and(|s| INC_PRIO.contains(&s))) {
         return bad("estado o prioridad no válidos");
     }
     for (k, table, what) in [("assignee", "users", "la persona"), ("grp", "groups", "el grupo"), ("item", "items", "el equipo"), ("parent", "incidents", "la incidencia padre")] {

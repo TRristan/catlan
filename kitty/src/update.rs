@@ -9,22 +9,14 @@ use std::time::Duration;
 pub fn sha256(p: &Path) -> Option<String> {
     use sha2::Digest;
     let b = std::fs::read(p).ok()?;
-    Some(
-        sha2::Sha256::digest(&b)
-            .iter()
-            .map(|x| format!("{x:02x}"))
-            .collect(),
-    )
+    Some(sha2::Sha256::digest(&b).iter().map(|x| format!("{x:02x}")).collect())
 }
 
 /// El kitty.exe instalado (Archivos de programa\Kitty), si es este. Una copia de pruebas o descargada no se toca.
 pub fn installed() -> Option<PathBuf> {
     let me = std::env::current_exe().ok()?;
     let dir = PathBuf::from(std::env::var("ProgramFiles").ok()?).join("Kitty");
-    let same = me.parent().is_some_and(|p| {
-        p.to_string_lossy()
-            .eq_ignore_ascii_case(&dir.to_string_lossy())
-    });
+    let same = me.parent().is_some_and(|p| p.to_string_lossy().eq_ignore_ascii_case(&dir.to_string_lossy()));
     same.then_some(me)
 }
 

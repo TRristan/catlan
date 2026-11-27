@@ -258,8 +258,7 @@ fn one(st: &mut (impl Read + Write), peer: IpAddr, enc: bool, handler: fn(&Req) 
         let mut r = httparse::Request::new(&mut hs);
         match r.parse(&buf) {
             Ok(httparse::Status::Complete(len)) => {
-                let headers: Vec<(String, String)> =
-                    r.headers.iter().map(|h| (h.name.to_string(), String::from_utf8_lossy(h.value).into_owned())).collect();
+                let headers: Vec<(String, String)> = r.headers.iter().map(|h| (h.name.to_string(), String::from_utf8_lossy(h.value).into_owned())).collect();
                 break (len, r.method.unwrap_or("").to_string(), r.path.unwrap_or("/").to_string(), headers);
             }
             Ok(httparse::Status::Partial) if buf.len() < 64 * 1024 => continue,

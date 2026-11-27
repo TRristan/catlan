@@ -2,15 +2,15 @@
 //! está el equipo; sin argumentos, vive en la bandeja y abre una ventana para avisar a IT y ver el estado del PC.
 #![cfg_attr(windows, windows_subsystem = "windows")] // la ventana, sin consola detrás
 
+#[cfg(windows)]
+mod app;
 mod apps;
 mod conf;
 mod facts;
 mod net;
-mod update;
-#[cfg(windows)]
-mod app;
 #[cfg(windows)]
 mod remote;
+mod update;
 
 /// Un envío, con lo lento recién sacado o reaprovechado, y su resultado anotado para el instalador.
 fn send(ps: &serde_json::Value, fresh: bool) -> bool {

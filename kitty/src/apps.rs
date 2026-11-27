@@ -74,7 +74,8 @@ fn winget() -> Option<PathBuf> {
 fn one(wg: &PathBuf, id: &str) -> (bool, String) {
     const COMMON: [&str; 4] = ["--exact", "--accept-source-agreements", "--disable-interactivity", "--silent"];
     let installed = run(wg, &["list", "--id", id, "--exact", "--accept-source-agreements", "--disable-interactivity"], 120) == Ok(0);
-    let (verb, done): (&[&str], &str) = if installed { (&["upgrade", "--accept-package-agreements"], "al día") } else { (&["install", "--accept-package-agreements", "--scope", "machine"], "instalado") };
+    let (verb, done): (&[&str], &str) =
+        if installed { (&["upgrade", "--accept-package-agreements"], "al día") } else { (&["install", "--accept-package-agreements", "--scope", "machine"], "instalado") };
     let args: Vec<&str> = [verb[0], "--id", id].into_iter().chain(verb[1..].iter().copied()).chain(COMMON).collect();
     match run(wg, &args, 1800) {
         Ok(0) => (true, done.into()),
