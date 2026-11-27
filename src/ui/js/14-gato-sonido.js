@@ -82,6 +82,20 @@ const mute = async (res, x, name) => { // x silenciado: quita el silencio; si no
   if (m === null) return;
   await api(`${res}/${x.id}/mute`, 'POST', {minutes: m}); toast(m ? `${name}: avisos silenciados` : `${name}: avisos activados de nuevo`); await pollMonitor();
 };
+/** Avisos de novedades en `what` (p. ej. 'health') por un WebSocket: llama a `fn` con cada uno. Devuelve la función
+ * que la suelta (va en cleanup). El WebSocket sigue abierto entre vistas: cada repintado pasa por cleanup, y reabrirlo
+ * ahí traería otro aviso al momento (catlan avisa como mucho cada 5 s por conexión). */
+const lives = {};
+function live(what, fn) {
+  let L = lives[what];
+  if (!L) {
+    L = lives[what] = {};
+    const go = () => { const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/${what}/ws`); ws.onmessage = () => L.fn?.(); ws.onclose = () => setTimeout(go, 5000); };
+    go();
+  }
+  L.fn = fn;
+  return () => { if (L.fn === fn) L.fn = null; };
+}
 async function pollMonitor() {
   try { const r = await fetch('/api/monitor'); if (!r.ok) return; monData = await r.json(); } catch { return; }
   const md = monData.monitor, dead = md && md.age > 30; // late cada 2 s: medio minuto sin latido es que algo va mal

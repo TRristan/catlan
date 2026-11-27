@@ -1,4 +1,4 @@
-//! Une la web de src/web/ en una sola página: index.html con todo el CSS en su <style> y todo el JS en su <script>.
+//! Une la web de src/ui/ en una sola página: index.html con todo el CSS en su <style> y todo el JS en su <script>.
 //! Los archivos se pegan en orden de nombre (10-…, 20-…), así que el número decide el orden. Sale en $OUT_DIR/index.html.
 use std::{env, fs, path::Path};
 
@@ -14,10 +14,10 @@ fn join(dir: &Path, ext: &str) -> String {
 }
 
 fn main() {
-    let web = Path::new("src/web");
-    println!("cargo:rerun-if-changed=src/web");
+    let web = Path::new("src/ui");
+    println!("cargo:rerun-if-changed=src/ui");
     let page = read(&web.join("index.html"));
-    assert!(page.matches("/* @css */\n").count() == 1 && page.matches("/* @js */\n").count() == 1, "src/web/index.html necesita /* @css */ y /* @js */ una vez cada uno");
+    assert!(page.matches("/* @css */\n").count() == 1 && page.matches("/* @js */\n").count() == 1, "src/ui/index.html necesita /* @css */ y /* @js */ una vez cada uno");
     let page = page.replace("/* @css */\n", &join(&web.join("css"), "css")).replace("/* @js */\n", &join(&web.join("js"), "js"));
     fs::write(Path::new(&env::var("OUT_DIR").unwrap()).join("index.html"), page).unwrap();
 }

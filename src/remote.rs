@@ -6,7 +6,7 @@ use crate::p;
 use crate::util::J;
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::sync::{Condvar, LazyLock, Mutex, MutexGuard};
+use std::sync::{LazyLock, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 pub struct Sess {
@@ -28,8 +28,13 @@ pub struct Sess {
 }
 
 static SESS: LazyLock<Mutex<HashMap<String, Sess>>> = LazyLock::new(Default::default);
-/// Despierta a quien espera: una petición nueva para Kitty, un fotograma nuevo para la web, o el final.
-static CV: Condvar = Condvar::new();
+/// Cambia con cada novedad (una petición, un fotograma, ratón o teclado, el final): despierta a los WebSockets, que
+/// miran entonces si va con su sesión.
+pub static CHANGED: LazyLock<tokio::sync::watch::Sender<u64>> = LazyLock::new(|| tokio::sync::watch::channel(0).0);
+
+fn changed() {
+    CHANGED.send_modify(|v| *v = v.wrapping_add(1));
+}
 
 /// Sin respuesta del usuario del PC en este tiempo, se da por rechazada.
 const ASK: Duration = Duration::from_secs(60);
@@ -60,7 +65,7 @@ fn end(s: &mut Sess, state: &'static str, why: &str, who: &str) {
     s.frame.clear();
     let action = if state == "rechazada" { "control remoto rechazado" } else { "control remoto terminado" };
     log(who, action, s, json!({"técnico": s.who, "motivo": why, "minutos": mins}));
-    CV.notify_all();
+    changed();
 }
 
 /// Cierra lo que se ha quedado sin respuesta y olvida lo terminado hace rato.
@@ -116,7 +121,7 @@ pub fn ask(agent: &crate::util::Row, tech: i64, who: &str) -> Result<(String, Va
     let id = crate::crypto::token_urlsafe(18);
     let st = status(&s);
     m.insert(id.clone(), s);
-    CV.notify_all();
+    changed();
     Ok((id, st))
 }
 
@@ -136,26 +141,19 @@ pub fn get(id: &str, tech: i64) -> Option<Value> {
 /// (número y JPEG del fotograma, si hay uno nuevo; estado de la sesión)
 pub type Frame = (Option<(u64, Vec<u8>)>, Value);
 
-/// El siguiente fotograma después de `after`: espera hasta 15 s a que llegue.
+/// El fotograma si hay uno después de `after`, y el estado. No espera: el WebSocket vuelve a mirar con cada novedad.
 pub fn frame(id: &str, tech: i64, after: u64) -> Option<Frame> {
-    let deadline = Instant::now() + Duration::from_secs(15);
     let mut m = sessions();
-    loop {
-        sweep(&mut m);
-        let s = mine(&mut m, id, tech)?;
-        s.tech_seen = Instant::now();
-        if s.seq > after && !s.frame.is_empty() {
-            return Some((Some((s.seq, s.frame.clone())), status(s)));
-        }
-        if s.ended.is_some() {
-            return Some((None, status(s)));
-        }
-        let left = deadline.saturating_duration_since(Instant::now());
-        if left.is_zero() {
-            return Some((None, status(s)));
-        }
-        m = CV.wait_timeout(m, left.min(Duration::from_secs(5))).map(|(g, _)| g).unwrap_or_else(|e| e.into_inner().0);
-    }
+    sweep(&mut m);
+    let s = mine(&mut m, id, tech)?;
+    s.tech_seen = Instant::now();
+    let f = (s.seq > after && !s.frame.is_empty()).then(|| (s.seq, s.frame.clone()));
+    Some((f, status(s)))
+}
+
+/// Ya terminada (cerrada o rechazada).
+pub fn ended(st: &Value) -> bool {
+    matches!(st["state"].as_str(), Some("cerrada" | "rechazada"))
 }
 
 /// Ratón y teclado del técnico, para que Kitty los recoja con el siguiente fotograma.
@@ -166,6 +164,7 @@ pub fn input(id: &str, tech: i64, evs: Vec<Value>) -> Option<Value> {
     s.tech_seen = Instant::now();
     if s.state == "aceptada" && s.input.len() < 2000 {
         s.input.extend(evs);
+        changed();
     }
     Some(status(s))
 }
@@ -189,8 +188,8 @@ pub fn online(agent: i64) -> bool {
     crate::util::lock(&ONLINE).get(&agent).is_some_and(|t| t.elapsed() < POLL)
 }
 
-/// ¿Quiere IT conectarse a este PC? Responde al momento: Kitty pregunta cada pocos segundos, sin dejar conexiones
-/// abiertas (con cientos de PCs se acabarían los hilos del servidor).
+/// ¿Quiere IT conectarse a este PC? Responde al momento: Kitty pregunta cada pocos segundos, sin dejar una conexión
+/// abierta por PC (con miles de PCs se llenaría el servidor).
 pub fn pending(agent: i64) -> Value {
     crate::util::lock(&ONLINE).insert(agent, Instant::now());
     let mut m = sessions();
@@ -210,7 +209,7 @@ pub fn answer(agent: i64, id: &str, ok: bool) -> Option<Value> {
             s.started = Some(Instant::now());
             s.agent_seen = Instant::now();
             log(&who, "control remoto aceptado", s, json!({"técnico": s.who}));
-            CV.notify_all();
+            changed();
         }
         ("pedida", false) => end(s, "rechazada", "el usuario del PC no lo permitió", &who),
         ("aceptada", false) => end(s, "cerrada", "la cortó el usuario del PC", &who),
@@ -220,18 +219,20 @@ pub fn answer(agent: i64, id: &str, ok: bool) -> Option<Value> {
 }
 
 /// Un fotograma (vacío: la pantalla no ha cambiado) y, de vuelta, lo que ha hecho el técnico desde el anterior.
-pub fn push(agent: i64, id: &str, jpeg: Vec<u8>) -> Option<Value> {
+/// None en `jpeg`: Kitty no ha enviado nada, solo se recoge lo del técnico (no cuenta como señal de vida).
+pub fn push(agent: i64, id: &str, jpeg: Option<Vec<u8>>) -> Option<Value> {
     let mut m = sessions();
     sweep(&mut m);
     let s = m.get_mut(id).filter(|s| s.agent == agent)?;
     if s.state != "aceptada" {
         return Some(json!({"state": s.state, "why": s.why}));
     }
+    let Some(jpeg) = jpeg else { return Some(json!({"state": s.state, "input": std::mem::take(&mut s.input)})) };
     s.agent_seen = Instant::now();
     if !jpeg.is_empty() {
         s.frame = jpeg;
         s.seq += 1;
-        CV.notify_all();
+        changed();
     }
     Some(json!({"state": s.state, "input": std::mem::take(&mut s.input)}))
 }
@@ -259,12 +260,15 @@ mod tests {
         assert!(input(&id, 7, vec![json!({"t": "m"})]).is_some());
         assert_eq!(answer(990_001, &id, true).unwrap()["state"], "aceptada");
         input(&id, 7, vec![json!({"t": "m", "x": 0.5, "y": 0.5})]);
-        let r = push(990_001, &id, vec![0xFF, 0xD8, 1]).unwrap();
+        let r = push(990_001, &id, Some(vec![0xFF, 0xD8, 1])).unwrap();
         assert_eq!(r["input"].as_array().unwrap().len(), 1); // lo de antes de aceptar no cuenta
         let (f, _) = frame(&id, 7, 0).unwrap();
         assert_eq!(f.unwrap().0, 1);
+        assert!(frame(&id, 7, 1).unwrap().0.is_none()); // ya lo tiene: no se repite
+        input(&id, 7, vec![json!({"t": "k"})]);
+        assert_eq!(push(990_001, &id, None).unwrap()["input"].as_array().unwrap().len(), 1); // lo del técnico, sin esperar a un fotograma
         assert_eq!(answer(990_001, &id, false).unwrap()["state"], "cerrada");
-        assert_eq!(push(990_001, &id, vec![1]).unwrap()["state"], "cerrada");
+        assert_eq!(push(990_001, &id, Some(vec![1])).unwrap()["state"], "cerrada");
         assert!(ask(&row(990_001), 8, "luis").is_ok()); // ya se puede otra
     }
 }

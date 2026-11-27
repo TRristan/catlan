@@ -173,7 +173,7 @@ Object.assign(views, {
         : empty('thermo', 'Aún no lees ningún equipo', 'Activa SNMP en tu NAS o switch (o usa la API de tu grabador Hikvision) y catlan guardará sus temperaturas, discos y estado para dibujarlos y avisarte.'));
       $('#add').onclick = () => sourceDialog({}, items);
       if ($('#stab')) { seg($('#stab')); $('#stab').onclick = e => { const b = e.target.closest('[data-v]'); if (b) { saludTab = b.dataset.v; route(false); } }; }
-      const t = setInterval(() => route(false), 15000); cleanup = () => clearInterval(t);
+      cleanup = live('health', () => route(false));
       return;
     }
     let h, hours = healthRange, selPort = null, showAll = false;
@@ -277,7 +277,7 @@ Object.assign(views, {
       ['Leer ahora', async () => { await api('sources/' + h.id, 'PUT', {every: h.every}); toast('Leyendo…'); setTimeout(paint, 4000); }, {icon: 'signal'}],
       [isMuted(h) ? 'Quitar silencio' : 'Silenciar…', async () => { await mute('sources', h, srcName(h)); paint(); }, {icon: 'bell'}], '-',
       ['Dejar de leer', async () => { if (await ask('¿Dejar de leer este equipo?', `Se borrarán la configuración de «${esc(srcName(h))}» y sus avisos. El historial se limpia solo en 7 días.`, 'Dejar de leer')) { await api('sources/' + h.id, 'DELETE'); toast('Ya no se lee'); location.hash = '#/salud'; } }, {icon: 'trash', danger: true}]]);
-    const t = setInterval(paint, 15000); cleanup = () => clearInterval(t);
+    cleanup = live('health', paint);
   },
   async log() {
     const rows = await api('log');

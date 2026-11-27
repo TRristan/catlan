@@ -12,7 +12,7 @@ Object.assign(views, {
         <div class="rm-stage"><canvas id="rm-cv" tabindex="0" aria-label="Pantalla de ${esc(st0.pc)}: con el foco aquí, el teclado va al PC"></canvas>
           <div class="rm-wait" id="rm-wait"><span class="rm-pulse">${ui('screen', 30)}</span><h3 id="rm-w-t"></h3><p class="muted" id="rm-w-x"></p></div></div></div>`;
     const cv = $('#rm-cv'), cx = cv.getContext('2d');
-    let alive = true, done = false, seq = 0, ctl = true, q = [], lastMove = 0, since = null;
+    let alive = true, done = false, ctl = true, q = [], lastMove = 0, since = null;
     const show = st => {
       const [tone, txt] = {pedida: ['warn', 'Esperando permiso'], aceptada: ['ok', 'Conectado'], rechazada: ['bad', 'Rechazada'], cerrada: ['', 'Terminada']}[st.state] || ['', st.state];
       $('#rm-st').className = 'pill ' + tone; $('#rm-st span').textContent = txt;
@@ -29,23 +29,24 @@ Object.assign(views, {
     };
     show(st0); seg($('#rm-mode'));
     const clock = setInterval(() => { if (since && !done) { const s = Math.floor((Date.now() - since) / 1000); $('#rm-t').textContent = `· ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; } }, 1000);
-    // la pantalla: cada petición espera (hasta 15 s) al siguiente fotograma
-    (async () => {
-      while (alive && !done) {
-        let r;
-        try { r = await fetch(`/api/remote/${sid}/frame?after=${seq}`); } catch { await new Promise(ok => setTimeout(ok, 1000)); continue; }
-        if (r.status === 404) { show({state: 'cerrada', why: 'La sesión ya no existe.'}); break; }
-        if ((r.headers.get('content-type') || '').startsWith('image/')) {
-          seq = +r.headers.get('x-seq');
-          const bmp = await createImageBitmap(await r.blob()).catch(() => null); if (!bmp || !alive) continue;
+    // un WebSocket: la pantalla (binario) y el estado (texto) llegan en cuanto cambian; el ratón y el teclado van de vuelta
+    let ws, painting = Promise.resolve();
+    const connect = () => {
+      ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/remote/${sid}/ws`);
+      ws.onmessage = e => {
+        if (typeof e.data === 'string') { const m = JSON.parse(e.data); if (m.state) show(m); return; }
+        painting = painting.then(async () => { // en orden: un fotograma viejo no pisa a uno nuevo
+          const bmp = await createImageBitmap(e.data).catch(() => null); if (!bmp || !alive) return;
           if (cv.width !== bmp.width || cv.height !== bmp.height) { cv.width = bmp.width; cv.height = bmp.height; }
           cx.drawImage(bmp, 0, 0); bmp.close();
           if (!$('#rm-wait').hidden) { $('#rm-wait').hidden = true; show({state: 'aceptada', pc: st0.pc, secs: 0}); cv.focus(); }
-        } else show(await r.json());
-      }
-    })();
+        });
+      };
+      ws.onclose = () => { if (alive && !done) setTimeout(connect, 1000); }; // la red se ha cortado: la sesión sigue un rato, se vuelve a entrar
+    };
+    connect();
     // ratón y teclado: en tandas cada 50 ms
-    const flush = () => { if (!q.length || done) return; const evs = q.splice(0); fetch(`/api/remote/${sid}/input`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(evs)}).catch(() => {}); };
+    const flush = () => { if (!q.length || done || ws.readyState !== 1) return; ws.send(JSON.stringify(q.splice(0))); };
     const pump = setInterval(flush, 50);
     const at = e => { const r = cv.getBoundingClientRect(); return {x: +((e.clientX - r.left) / r.width).toFixed(4), y: +((e.clientY - r.top) / r.height).toFixed(4)}; };
     cv.onpointermove = e => { if (!ctl || performance.now() - lastMove < 30) return; lastMove = performance.now(); q.push({t: 'm', ...at(e)}); };
@@ -61,6 +62,6 @@ Object.assign(views, {
     const stop = () => { if (!done) { done = true; fetch('/api/remote/' + sid, {method: 'DELETE', keepalive: true}).catch(() => {}); } };
     $('#rm-end').onclick = async () => { stop(); show({state: 'cerrada', why: 'La has terminado tú.'}); };
     addEventListener('pagehide', stop);
-    cleanup = () => { stop(); alive = false; clearInterval(pump); clearInterval(clock); removeEventListener('pagehide', stop); if (document.fullscreenElement) document.exitFullscreen(); };
+    cleanup = () => { stop(); alive = false; ws.close(); clearInterval(pump); clearInterval(clock); removeEventListener('pagehide', stop); if (document.fullscreenElement) document.exitFullscreen(); };
   },
 });

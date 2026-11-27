@@ -1,13 +1,15 @@
-//! Servidor HTTP/1.1 mínimo: un hilo por conexión y una petición por conexión, como el ThreadingHTTPServer de antes.
+//! Servidor HTTP/1.1 con hyper sobre tokio: conexiones que se reutilizan (keep-alive) y WebSockets.
 //! HTTPS siempre, con rustls: el certificado del admin (CATLAN_CERT) o uno autofirmado que se crea en data/tls.pem.
 //! En el mismo puerto también responde HTTP plano (se distingue por el primer byte): para el propio equipo, los proxies
-//! y las Kitty antiguas; web.rs decide qué se sirve así.
-use crate::config::{CERT, DATA, KEY, MAX_BODY, PORT, PROXIES};
-use std::io::{self, Read, Write};
-use std::net::{IpAddr, TcpListener, TcpStream};
+//! y las Kitty antiguas; web decide qué se sirve así.
+use crate::config::{CERT, DATA, KEY, PORT, PROXIES};
+use std::io::{self, Write};
+use std::net::IpAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::TcpStream;
 
 pub struct Req {
     pub method: String,
@@ -49,24 +51,11 @@ impl Resp {
     }
 }
 
-fn reason(code: u16) -> &'static str {
-    match code {
-        200 => "OK",
-        201 => "Created",
-        204 => "No Content",
-        301 => "Moved Permanently",
-        304 => "Not Modified",
-        400 => "Bad Request",
-        401 => "Unauthorized",
-        403 => "Forbidden",
-        404 => "Not Found",
-        405 => "Method Not Allowed",
-        409 => "Conflict",
-        413 => "Payload Too Large",
-        429 => "Too Many Requests",
-        431 => "Request Header Fields Too Large",
-        _ => "Internal Server Error",
-    }
+/// La conexión de la que llega cada petición: quién está al otro lado del socket y si habla TLS con catlan.
+#[derive(Clone, Copy, Debug)]
+pub struct Conn {
+    pub peer: IpAddr,
+    pub enc: bool,
 }
 
 const MAX_CONNS: usize = 512;
@@ -76,14 +65,50 @@ static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 /// Conexiones rechazadas por estar lleno, para Salud de catlan.
 pub static REJECTED: AtomicUsize = AtomicUsize::new(0);
 static PER_IP: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<IpAddr, usize>>> = std::sync::LazyLock::new(Default::default);
-/// Lo que puede tardar en llegar la petición entera (sin cuerpo): una conexión que habla gota a gota no retiene su hilo.
-const HEAD_TIMEOUT: Duration = Duration::from_secs(10);
+/// Lo que puede tardar en llegar cada petición entera (sin cuerpo), y el saludo TLS: una conexión que habla gota a gota
+/// (o que se queda callada entre peticiones) se cierra.
+pub const HEAD_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// 503 sin leer nada: se escribe en el búfer del socket recién aceptado, no bloquea.
-fn busy(mut s: TcpStream) {
+/// 503 sin leer nada: se escribe en el búfer del socket recién aceptado, no espera.
+fn busy(s: TcpStream) {
     REJECTED.fetch_add(1, Ordering::Relaxed);
-    let _ = s.set_write_timeout(Some(Duration::from_millis(200)));
-    let _ = s.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nRetry-After: 5\r\nConnection: close\r\n\r\n");
+    let _ = s.try_write(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nRetry-After: 5\r\nConnection: close\r\n\r\n");
+}
+
+/// Un hueco ocupado: se suelta al cerrar la conexión, pase lo que pase.
+struct Slot(Option<IpAddr>);
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        ACTIVE.fetch_sub(1, Ordering::Relaxed);
+        if let Some(peer) = self.0 {
+            let mut m = crate::util::lock(&PER_IP);
+            if let Some(n) = m.get_mut(&peer) {
+                *n -= 1;
+                if *n == 0 {
+                    m.remove(&peer);
+                }
+            }
+        }
+    }
+}
+
+/// Reserva un hueco para esta IP, o None si está lleno (todo catlan, o lo de esa IP).
+fn take_slot(peer: IpAddr) -> Option<Slot> {
+    let limited = !PROXIES.contains(&peer);
+    if ACTIVE.load(Ordering::Relaxed) >= MAX_CONNS {
+        return None;
+    }
+    if limited {
+        let mut m = crate::util::lock(&PER_IP);
+        let n = m.entry(peer).or_insert(0);
+        if *n >= MAX_PER_IP {
+            return None;
+        }
+        *n += 1;
+    }
+    ACTIVE.fetch_add(1, Ordering::Relaxed);
+    Some(Slot(limited.then_some(peer)))
 }
 
 /// El certificado que sirve catlan. pin y spki solo si es el autofirmado (con uno del admin, la CA ya lo garantiza):
@@ -125,11 +150,12 @@ fn tls_config() -> anyhow::Result<Tls> {
         pin = crate::crypto::hex(&sha2::Sha256::digest(der)).to_uppercase();
         spki = data_encoding::BASE64.encode(&sha2::Sha256::digest(rcgen::PublicKeyData::subject_public_key_info(&kp)));
     }
-    let cfg = Arc::new(rustls::ServerConfig::builder().with_no_client_auth().with_single_cert(certs, key)?);
-    Ok(Tls { cfg, pin, spki })
+    let mut cfg = rustls::ServerConfig::builder().with_no_client_auth().with_single_cert(certs, key)?;
+    cfg.alpn_protocols = vec![b"http/1.1".to_vec()];
+    Ok(Tls { cfg: Arc::new(cfg), pin, spki })
 }
 
-pub fn serve(handler: fn(&Req) -> Resp) -> anyhow::Result<()> {
+pub fn serve(app: axum::Router) -> anyhow::Result<()> {
     let tls = TLS.get_or_init(|| {
         tls_config().unwrap_or_else(|e| {
             eprintln!("HTTPS: no puedo cargar el certificado ({e:#})");
@@ -139,150 +165,72 @@ pub fn serve(handler: fn(&Req) -> Resp) -> anyhow::Result<()> {
     if !tls.pin.is_empty() {
         println!("HTTPS autofirmado. Huella SHA-256 (compárala con la que enseña el navegador): {}", tls.pin);
     }
-    let listener = TcpListener::bind(("0.0.0.0", *PORT))?;
-    for s in listener.incoming() {
-        let Ok(s) = s else { continue };
-        let Ok(peer) = s.peer_addr().map(|a| a.ip().to_canonical()) else { continue };
-        let limited = !PROXIES.contains(&peer);
-        if ACTIVE.load(Ordering::Relaxed) >= MAX_CONNS {
-            busy(s);
-            continue;
-        }
-        if limited {
-            let mut m = crate::util::lock(&PER_IP);
-            let n = m.entry(peer).or_insert(0);
-            if *n >= MAX_PER_IP {
-                drop(m);
+    // los manejadores usan SQLite y esperan: van a hilos aparte (spawn_blocking), el resto es asíncrono
+    let rt = tokio::runtime::Builder::new_multi_thread().enable_all().max_blocking_threads(MAX_CONNS).build()?;
+    rt.block_on(async move {
+        let listener = tokio::net::TcpListener::bind(("0.0.0.0", *PORT)).await?;
+        let acceptor = tokio_rustls::TlsAcceptor::from(tls.cfg.clone());
+        loop {
+            let (s, addr) = match listener.accept().await {
+                Ok(x) => x,
+                Err(_) => {
+                    tokio::time::sleep(Duration::from_millis(50)).await; // sin descriptores libres: no dar vueltas en vacío
+                    continue;
+                }
+            };
+            let peer = addr.ip().to_canonical();
+            let Some(slot) = take_slot(peer) else {
                 busy(s);
                 continue;
-            }
-            *n += 1;
+            };
+            let (acceptor, app) = (acceptor.clone(), app.clone());
+            tokio::spawn(async move {
+                let _slot = slot;
+                let _ = conn(s, peer, acceptor, app).await; // escáneres y navegadores que rechazan el certificado: sin traza en la consola
+            });
         }
-        ACTIVE.fetch_add(1, Ordering::Relaxed);
-        let cfg = tls.cfg.clone();
-        std::thread::spawn(move || {
-            let _ = conn(s, cfg, handler); // escáneres y navegadores que rechazan el certificado: sin traza en la consola
-            ACTIVE.fetch_sub(1, Ordering::Relaxed);
-            if limited {
-                let mut m = crate::util::lock(&PER_IP);
-                if let Some(n) = m.get_mut(&peer) {
-                    *n -= 1;
-                    if *n == 0 {
-                        m.remove(&peer);
-                    }
-                }
-            }
-        });
-    }
-    Ok(())
+    })
 }
 
-fn conn(s: TcpStream, cfg: Arc<rustls::ServerConfig>, handler: fn(&Req) -> Resp) -> io::Result<()> {
-    // una conexión que no habla (ni termina el saludo TLS) suelta su hilo
-    s.set_read_timeout(Some(HEAD_TIMEOUT))?; // cada lectura; el total de las cabeceras, en one()
-    s.set_write_timeout(Some(Duration::from_secs(60)))?;
-    let peer = s.peer_addr()?.ip().to_canonical();
+async fn conn(s: TcpStream, peer: IpAddr, acceptor: tokio_rustls::TlsAcceptor, app: axum::Router) -> io::Result<()> {
+    let _ = s.set_nodelay(true);
+    // una conexión que no habla (ni termina el saludo TLS) se cierra
     let mut first = [0u8; 1];
-    if s.peek(&mut first)? == 1 && first[0] == 0x16 {
+    let n = tokio::time::timeout(HEAD_TIMEOUT, s.peek(&mut first)).await.map_err(io::Error::other)??;
+    if n == 1 && first[0] == 0x16 {
         // 0x16: empieza un saludo TLS
-        let c = rustls::ServerConnection::new(cfg).map_err(io::Error::other)?;
-        let mut st = rustls::StreamOwned::new(c, s);
-        one(&mut st, peer, true, handler)?;
-        st.conn.send_close_notify();
-        st.flush()
+        let st = tokio::time::timeout(HEAD_TIMEOUT, acceptor.accept(s)).await.map_err(io::Error::other)??;
+        http(st, Conn { peer, enc: true }, app).await
     } else {
-        let mut st = s;
-        one(&mut st, peer, false, handler)
+        http(s, Conn { peer, enc: false }, app).await
     }
 }
 
-/// En todas las respuestas: nada de meter catlan en un marco de otra web (clickjacking) ni cargar código de fuera.
-/// La página lleva su JS y su CSS dentro, de ahí 'unsafe-inline'.
-const CSP: &str = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; \
-                   object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
-
-fn write_resp(st: &mut impl Write, r: &Resp, hsts: bool) -> io::Result<()> {
-    let mut head = format!("HTTP/1.1 {} {}\r\n", r.code, reason(r.code));
-    for (k, v) in &r.headers {
-        head += &format!("{k}: {v}\r\n");
-    }
-    if !r.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-security-policy")) {
-        head += &format!("Content-Security-Policy: {CSP}\r\n");
-    }
-    head += "X-Frame-Options: DENY\r\nReferrer-Policy: same-origin\r\n";
-    if hsts {
-        // solo con el certificado del admin: con uno autofirmado, HSTS no deja al navegador aceptarlo
-        head += "Strict-Transport-Security: max-age=31536000\r\n";
-    }
-    if r.code != 304 {
-        head += &format!("Content-Length: {}\r\n", r.body.len());
-    }
-    head += "X-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n";
-    st.write_all(head.as_bytes())?;
-    if r.code != 304 {
-        st.write_all(&r.body)?;
-    }
-    st.flush()
-}
-
-fn json_err(code: u16, msg: &str) -> Resp {
-    Resp::new(code, serde_json::json!({"error": msg}).to_string().into_bytes(), "application/json")
+async fn http(io: impl AsyncRead + AsyncWrite + Unpin + Send + 'static, c: Conn, app: axum::Router) -> io::Result<()> {
+    use tower::ServiceExt;
+    let svc = hyper::service::service_fn(move |mut req: hyper::Request<hyper::body::Incoming>| {
+        req.extensions_mut().insert(c);
+        app.clone().oneshot(req.map(axum::body::Body::new))
+    });
+    hyper::server::conn::http1::Builder::new()
+        .timer(hyper_util::rt::TokioTimer::new())
+        .header_read_timeout(HEAD_TIMEOUT)
+        .max_buf_size(64 * 1024) // cabeceras más grandes: 431 (hyper corta tras la lectura que pasa de aquí: unos 100 KB como mucho)
+        .serve_connection(hyper_util::rt::TokioIo::new(io), svc)
+        .with_upgrades()
+        .await
+        .map_err(io::Error::other)
 }
 
 /// Quién es el cliente y si la conexión va cifrada hasta él. Solo se cree a un proxy de la lista CATLAN_PROXIES, y de
 /// X-Forwarded-For solo la última entrada (la que puso el proxy; las anteriores las puede inventar el cliente).
-fn client(peer: IpAddr, enc: bool, headers: &[(String, String)]) -> (String, bool, bool, bool) {
+pub fn client(peer: IpAddr, enc: bool, headers: &[(String, String)]) -> (String, bool, bool, bool) {
     let h = |k: &str| headers.iter().find(|(n, _)| n.eq_ignore_ascii_case(k)).map(|(_, v)| v.trim());
     let fwd = if PROXIES.contains(&peer) { h("x-forwarded-for").and_then(|v| v.rsplit(',').next()?.trim().parse::<IpAddr>().ok()) } else { None };
     let proxied = fwd.is_some();
     let tls = enc || proxied && h("x-forwarded-proto").is_some_and(|v| v.eq_ignore_ascii_case("https"));
     let secure = tls || !proxied && peer.is_loopback();
     (fwd.map_or(peer, |f| f.to_canonical()).to_string(), tls, proxied, secure)
-}
-
-fn one(st: &mut (impl Read + Write), peer: IpAddr, enc: bool, handler: fn(&Req) -> Resp) -> io::Result<()> {
-    let hsts = enc && TLS.get().is_some_and(|t| t.pin.is_empty());
-    let mut buf = Vec::with_capacity(8192);
-    let mut tmp = [0u8; 8192];
-    let t0 = std::time::Instant::now();
-    let (len, method, path, headers) = loop {
-        if t0.elapsed() > HEAD_TIMEOUT {
-            return Ok(()); // cabeceras gota a gota: fuera
-        }
-        let n = st.read(&mut tmp)?;
-        if n == 0 {
-            return Ok(());
-        }
-        buf.extend_from_slice(&tmp[..n]);
-        let mut hs = [httparse::EMPTY_HEADER; 100];
-        let mut r = httparse::Request::new(&mut hs);
-        match r.parse(&buf) {
-            Ok(httparse::Status::Complete(len)) => {
-                let headers: Vec<(String, String)> = r.headers.iter().map(|h| (h.name.to_string(), String::from_utf8_lossy(h.value).into_owned())).collect();
-                break (len, r.method.unwrap_or("").to_string(), r.path.unwrap_or("/").to_string(), headers);
-            }
-            Ok(httparse::Status::Partial) if buf.len() < 64 * 1024 => continue,
-            Ok(httparse::Status::Partial) => return write_resp(st, &json_err(431, "cabeceras demasiado grandes"), hsts),
-            Err(_) => return write_resp(st, &json_err(400, "petición no válida"), hsts),
-        }
-    };
-    let n: usize = headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("content-length")).and_then(|(_, v)| v.trim().parse().ok()).unwrap_or(0);
-    if n > MAX_BODY {
-        return write_resp(st, &json_err(400, "demasiado grande"), hsts);
-    }
-    let mut body = buf.split_off(len);
-    body.truncate(n);
-    if body.len() < n {
-        let missing = n - body.len();
-        st.take(missing as u64).read_to_end(&mut body)?;
-        if body.len() < n {
-            return Ok(()); // el cliente se fue a medias
-        }
-    }
-    let (ip, tls, proxied, secure) = client(peer, enc, &headers);
-    let req = Req { method, path, headers, body, ip, tls, proxied, secure };
-    let resp = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(&req))).unwrap_or_else(|_| json_err(500, "error interno"));
-    write_resp(st, &resp, hsts)
 }
 
 #[test]
