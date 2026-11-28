@@ -33,6 +33,27 @@ pub fn routes() -> Vec<Route> {
         r("POST", "/api/sources/{id}/mute", Perm::User, Ctx::mute),
         r("POST", "/api/sources/{id}/topology", Perm::User, Ctx::topology),
         r("POST", "/api/sources/test", Perm::User, Ctx::source_test),
+        // copias de la configuración: la lista, todos; el texto y el diff, solo administradores (llevan contraseñas)
+        r("GET", "/api/sources/{id}/configs", Perm::User, |c| Ok(js(200, crate::configs::versions(c.id())?))),
+        r("POST", "/api/sources/{id}/configs", Perm::User, Ctx::config_now),
+        r("DELETE", "/api/sources/{id}/hostkey", Perm::User, |c| {
+            let n = q("UPDATE sources SET ssh_key=NULL, cfg_last=NULL WHERE id=?", p![c.id()])?.rowcount;
+            if n == 0 {
+                return Ok(err(404, "no existe"));
+            }
+            c.log("olvidar clave SSH", "source", c.id(), val("SELECT host FROM sources WHERE id=?", p![c.id()])?, &json!({}))?;
+            Ok(no_content())
+        }),
+        r("GET", "/api/configs/{id}", Perm::Admin, |c| {
+            Ok(match q("SELECT c.text, c.ts, s.host FROM configs c LEFT JOIN sources s ON s.id = c.source WHERE c.id=?", p![c.id()])?.one() {
+                Some(r) => {
+                    let file = format!("{}-{}.txt", r.s("host"), r.s("ts").replace([' ', ':'], "-"));
+                    Resp::new(200, r.s("text").as_bytes().to_vec(), "text/plain; charset=utf-8").header("Content-Disposition", format!("attachment; filename*=UTF-8''{}", crate::util::quote(&file))).header("X-Content-Type-Options", "nosniff")
+                }
+                None => err(404, "no existe"),
+            })
+        }),
+        r("GET", "/api/configs/{id}/diff", Perm::Admin, |c| Ok(crate::configs::diff_view(c.id())?.map_or_else(|| err(404, "no existe"), |v| js(200, v)))),
         r("GET", "/api/monitor", Perm::User, |_| Ok(js(200, monitor::monitor_state()?))),
         r("POST", "/api/monitor/test", Perm::User, |_| {
             if monitor::channels().is_empty() {
@@ -160,6 +181,23 @@ impl Ctx {
         }
         self.log(if new { "crear" } else { "editar" }, "map", mid, &name, &json!({"auto": true, "vecinos": nbrs.len()}))?;
         Ok(js(200, json!({"map": mid, "name": name, "neighbors": nbrs})))
+    }
+
+    /// Copiar ya la configuración de un equipo (lo mismo que hace el monitor una vez al día).
+    fn config_now(&mut self) -> Result<Resp> {
+        let Some(src) = q(&format!("{} WHERE s.id=?", monitor::SOURCES), p![self.id()])?.one() else { return Ok(err(404, "no existe")) };
+        if !crate::configs::KINDS.contains(&src.s("kind")) || src.s("ssh_user").is_empty() {
+            return Ok(err(400, "pon un usuario SSH en el equipo (solo Cisco, HP/Aruba y MikroTik)"));
+        }
+        Ok(match crate::configs::backup(&src) {
+            Ok(new) => {
+                if let Some(v) = new {
+                    self.log("copiar configuración", "source", &src["id"], &src["host"], &json!({"version": v}))?;
+                }
+                js(200, json!({"new": new}))
+            }
+            Err(e) => err(400, &e.to_string()),
+        })
     }
 
     /// Probar un equipo de Salud sin guardarlo.

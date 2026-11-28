@@ -65,7 +65,7 @@ pub fn table_cols(t: &str) -> Option<&'static [&'static str]> {
         "pages" => &["title", "body", "kitty"],
         "items" => &["name", "kind", "ip", "serial", "location", "status", "notes", "warranty"],
         "checks" => &["host", "label", "item", "every", "kind", "port", "url", "expect", "warn_days", "sound"],
-        "sources" => &["host", "label", "item", "kind", "community", "port", "user", "pass", "every", "temp_max", "disk_max", "v3", "auth", "priv", "priv_pass"],
+        "sources" => &["host", "label", "item", "kind", "community", "port", "user", "pass", "every", "temp_max", "disk_max", "v3", "auth", "priv", "priv_pass", "ssh_user", "ssh_pass", "ssh_port"],
         "expiries" => &["name", "kind", "date", "item", "notes"],
         "subnets" => &["name", "cidr", "vlan", "notes"],
         "apps" => &["name", "winget", "notes"],
@@ -195,6 +195,14 @@ impl Ctx {
                 }
                 check_source(&d, false)?;
                 d.insert("last".into(), Value::Null); // leer ya con la configuración nueva
+                let old = q("SELECT host, ssh_port, ssh_user FROM sources WHERE id=?", p![rid])?.one().unwrap_or_default();
+                let [host, port, user] = ["host", "ssh_port", "ssh_user"].map(|k| d.get(k).is_some_and(|v| db::jv(v) != db::jv(&old[k])));
+                if host || port {
+                    d.insert("ssh_key".into(), Value::Null); // otro equipo: su clave se fija de nuevo
+                }
+                if host || port || user || d.contains_key("ssh_pass") {
+                    d.insert("cfg_last".into(), Value::Null); // copiar ya con lo nuevo
+                }
             }
             _ => {}
         }
@@ -233,6 +241,9 @@ impl Ctx {
             let (t, col) = if res == "checks" { ("pings", "check_id") } else { ("metrics", "source_id") };
             q(&format!("DELETE FROM {t} WHERE {col}=?"), p![rid])?;
             q(&format!("DELETE FROM {t}_h WHERE {col}=?"), p![rid])?;
+        }
+        if res == "sources" {
+            q("DELETE FROM configs WHERE source=?", p![rid])?; // las copias de su configuración también
         }
         if res == "items" {
             q("DELETE FROM software WHERE item=?", p![rid])?; // si su Kitty sigue, los manda otra vez con la ficha nueva

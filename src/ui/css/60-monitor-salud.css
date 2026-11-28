@@ -90,4 +90,9 @@ input[type=range]{flex:1;max-width:190px;accent-color:var(--acc)}
 .data-t th{text-align:left;font-weight:560;color:var(--tx3);padding:6px 8px 6px 0;border-bottom:1px solid var(--line)}
 .data-t td{padding:6px 8px 6px 0;border-bottom:1px solid var(--line)}.data-t td:last-child{text-align:right;font-variant-numeric:tabular-nums}
 @media (max-width:760px){.src-card .kpis{grid-template-columns:1fr 1fr}}
-
+/* Diff de configuraciones: el signo dice lo mismo que el color */
+.diff{max-height:60vh;overflow:auto;border:1px solid var(--line);border-radius:12px;font-size:12.5px;line-height:1.55;padding:6px 0;background:var(--s2)}
+.diff>div{white-space:pre;padding:0 12px 0 0}.diff b{display:inline-block;width:2em;text-align:center;color:var(--tx3);font-weight:600}
+.df-add{background:color-mix(in srgb,var(--ok) 15%,transparent)}.df-add b{color:var(--ok)}
+.df-del{background:color-mix(in srgb,var(--bad) 15%,transparent)}.df-del b{color:var(--bad)}
+.df-gap{color:var(--tx3);font-style:italic;padding:2px 12px!important;font-family:var(--font)}

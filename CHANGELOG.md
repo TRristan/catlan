@@ -3,6 +3,16 @@
 Cada versión, lo que cambia para quien usa catlan. Sigue [SemVer](https://semver.org/lang/es/): el primer número sube
 cuando hay que hacer algo a mano al actualizar.
 
+## Sin publicar
+
+### Nuevo
+- **Copia de la configuración de switches y routers** (Cisco, HP/Aruba y MikroTik). En el equipo de Hardware, pon un
+  usuario SSH en **Editar**: catlan guarda su configuración una vez al día y solo crea una versión nueva cuando algo
+  cambia. En la tarjeta **Configuración** se ven las versiones, los cambios línea a línea y **Copiar ahora**. Si cambia,
+  avisa por tus canales, pero solo de cuántas líneas cambiaron: el texto lleva contraseñas. La clave SSH del equipo se
+  fija la primera vez, y si otro equipo se hace pasar por él, no se le manda la contraseña. Ver y descargar las copias
+  es solo para administradores.
+
 ## 2.2.2
 
 ### Arreglado

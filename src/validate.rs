@@ -99,7 +99,10 @@ pub fn check_source(d: &Row, new: bool) -> Result<()> {
             return bad("los umbrales deben ser números entre 1 y 200");
         }
     }
-    for k in ["community", "user", "pass", "label", "priv_pass"] {
+    if d.get("ssh_port").is_some_and(|p| !int_in(p, 1, 65535)) {
+        return bad("puerto SSH no válido");
+    }
+    for k in ["community", "user", "pass", "label", "priv_pass", "ssh_user", "ssh_pass"] {
         if d.get(k).is_some_and(|v| !v.as_str().is_some_and(|s| s.chars().count() <= 200)) {
             return bad(format!("{k} no válido"));
         }
