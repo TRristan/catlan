@@ -171,7 +171,10 @@ pub fn run(start_hidden: bool, updated: bool) {
         return;
     };
     let p = proxy.clone();
-    let Ok(webview) = wry::WebViewBuilder::new()
+    // los datos de WebView2, en la carpeta de cada usuario: junto al .exe (Program Files) no puede escribir y la ventana no abre
+    let data = std::env::var_os("LOCALAPPDATA").map(|d| std::path::PathBuf::from(d).join("Kitty")).unwrap_or_else(|| std::env::temp_dir().join("Kitty"));
+    let mut ctx = wry::WebContext::new(Some(data));
+    let Ok(webview) = wry::WebViewBuilder::new_with_web_context(&mut ctx)
         .with_html(UI)
         .with_ipc_handler(move |r: wry::http::Request<String>| {
             let _ = p.send_event(Ev::Ipc(r.into_body()));

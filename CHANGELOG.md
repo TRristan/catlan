@@ -3,6 +3,13 @@
 Cada versión, lo que cambia para quien usa catlan. Sigue [SemVer](https://semver.org/lang/es/): el primer número sube
 cuando hay que hacer algo a mano al actualizar.
 
+## 2.1.1
+
+### Arreglado
+- **La ventana de Kitty no se abría al iniciar sesión** (el gato no salía en la bandeja; abriéndola a mano, Edge decía
+  que no podía escribir en su directorio de datos). WebView2 guardaba sus datos junto a `kitty.exe`, en Program Files,
+  donde el usuario no puede escribir. Ahora van en `%LOCALAPPDATA%\Kitty`. Los PCs se actualizan solos.
+
 ## 2.1.0
 
 ### Nuevo
