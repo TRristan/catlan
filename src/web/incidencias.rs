@@ -125,6 +125,10 @@ impl Ctx {
         let t = b.get("text").and_then(Value::as_str).map(str::trim).filter(|t| (1..=5000).contains(&t.chars().count()));
         let Some(t) = t else { return bad("la nota va de 1 a 5000 caracteres") };
         self.note(id, t, false)?;
+        if b.get("public").and_then(Value::as_bool) == Some(true) {
+            // la ve también el usuario del PC en Kitty
+            q("UPDATE notes SET public=1 WHERE id = (SELECT max(id) FROM notes WHERE incident=?)", p![id])?;
+        }
         Ok(js(201, q("SELECT * FROM notes WHERE id = (SELECT max(id) FROM notes WHERE incident=?)", p![id])?.one()))
     }
 

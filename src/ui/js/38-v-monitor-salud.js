@@ -191,7 +191,7 @@ Object.assign(views, {
         + (pc ? tabs(TABS.pcs) + kittyWaiting(agents) : '')
         + (shown.length ? `<div class="grid hgrid stagger">${shown.map((h, i) => { const t = top(h, 'temp:'), d = top(h, 'disk:'), c = h.latest.find(m => m.key === 'cpu'), m = h.latest.find(x => x.key === 'mem'), kit = h.kind === 'kitty';
             return `<a class="src-card ${h.state || ''}" style="--i:${Math.min(i, 14)}" href="#/salud/${h.id}">
-              <header><span class="mdot ${h.state === 'ok' ? 'up' : h.state ? 'down' : ''}"></span><b>${esc(srcName(h))}</b><small>${esc(kit ? osShort(h.info?.descr) : SRC_KIND[h.kind] || h.kind)}</small></header>
+              <header><span class="mdot ${h.state === 'ok' ? 'up' : h.state ? 'down' : ''}"></span><b>${esc(srcName(h))}</b><small>${esc(kit ? osShort(h.info?.descr) : SRC_KIND[h.kind] || h.kind)}</small>${kit ? secPill(h.info) : ''}</header>
               <div class="kpis">${kit ? kpi('Memoria', m ? fmtV(m.value, '%') : '—', h.info?.mem_total ? 'de ' + gb(h.info.mem_total) : '') : kpi('Temp. máx.', t ? fmtV(t.value, '°C') : '—', t?.label, t?.value > h.temp_max)}${kpi('Disco más lleno', d ? fmtV(d.value, '%') : '—', d?.label, d?.value > h.disk_max)}${kpi('CPU', c ? fmtV(c.value, '%') : '—')}</div>
               ${h.state === 'error' ? `<p class="hc-err">${ui('alert', 14)}${esc(h.error)}</p>`
                 : h.problems.length ? `<ul class="probs">${h.problems.slice(0, 3).map(p => `<li>${ui('alert', 14)}${esc(p)}</li>`).join('')}${h.problems.length > 3 ? `<li class="dim">y ${h.problems.length - 3} más</li>` : ''}</ul>`
@@ -229,7 +229,9 @@ Object.assign(views, {
       $('#kit-card').hidden = !kit;
       if (kit) $('#kit-info').innerHTML = `<table class="data-t"><tbody>${[['Sistema', inf.descr], ['Modelo', inf.model], ['Procesador', inf.cpu && `${inf.cpu}${inf.cores ? ` · ${inf.cores} hilos` : ''}`],
           ['Memoria', inf.mem_total && gb(inf.mem_total)], ['Discos', (inf.disks || []).map(x => `${x.name} ${gb(x.free)} libres de ${gb(x.total)}`).join(' · ')],
-          ['IPs', (inf.ips || []).join(' · ')], ['Nº de serie', inf.serial]].filter(r => r[1]).map(([k, v]) => `<tr><td class="dim">${k}</td><td>${esc(v)}</td></tr>`).join('')}</tbody></table>`;
+          ['IPs', (inf.ips || []).join(' · ')], ['MAC', (inf.macs || []).join(' · ')], ['Nº de serie', inf.serial]].filter(r => r[1]).map(([k, v]) => `<tr><td class="dim">${k}</td><td>${esc(v)}</td></tr>`).join('')}
+          ${inf.patch ? `<tr><td class="dim">Parches</td><td>${patchTxt(inf.patch)}</td></tr>` : ''}
+          ${inf.seclight ? `<tr><td class="dim">Seguridad</td><td>${secPill(inf)} ${inf.secwhy?.length ? esc(inf.secwhy.join(' · ')) : 'antivirus, firewall, BitLocker y cuentas en orden'}</td></tr>` : ''}</tbody></table>`;
       const aps = Object.entries(kit && inf.apps || {});
       $('#app-card').hidden = !aps.length;
       if (aps.length) $('#app-list').innerHTML = `<table class="data-t"><tbody>${aps.map(([id, r]) => `<tr><td class="mono">${esc(id)}</td><td style="text-align:left"><span class="pill ${r.ok ? 'ok' : 'bad'}"><i></i>${esc(r.msg)}</span></td></tr>`).join('')}</tbody></table>`;
@@ -280,7 +282,7 @@ Object.assign(views, {
         `<button data-v="${v}" class="${v === hours ? 'on' : ''}">${t}</button>`).join('')}</div><button class="btn pri" id="rmt" hidden>${ui('screen', 16)}Control remoto</button><button class="btn" id="edit">${ui('edit', 16)}Editar</button>${moreBtn}`)
       + `<div id="h-state"></div><div class="kpi-row" id="kpis"></div>
       <section class="card pad" id="kit-card" hidden style="margin-bottom:16px"><h3 class="card-t">Equipo</h3><div id="kit-info"></div>
-        <p class="dim small" style="margin:8px 0 0">Lo envía Kitty. Solo lo justo para ver fallos: nada de usuarios, archivos ni más programas que los que IT pide instalar.</p></section>
+        <p class="dim small" style="margin:8px 0 0">Lo envía Kitty. Solo lo justo para ver fallos: nada de usuarios ni archivos.</p></section>
       <section class="card pad" id="app-card" hidden style="margin-bottom:16px"><h3 class="card-t">Programas <span class="dim small" style="font-weight:400">· los que IT instala y mantiene al día en los PCs (<a href="#/apps">PCs → Programas</a>)</span></h3><div id="app-list"></div></section>
       <section class="card pad" id="ev-card" hidden style="margin-bottom:16px"><h3 class="card-t">Visor de eventos <span class="dim small" style="font-weight:400">· críticos y errores de los últimos 7 días</span></h3><div id="ev-list"></div></section>
       <div class="charts stagger"><section class="card pad" style="--i:0" id="temp-card"><h3 class="card-t">Temperatura</h3><div id="c-temp"></div></section>

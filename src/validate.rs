@@ -162,6 +162,28 @@ pub fn check_expiry(d: &Row, new: bool) -> Result<()> {
 }
 
 /// Un programa para los PCs: su id de winget (va como argumento de winget.exe, sin shell) y un nombre.
+pub fn check_script(d: &Row, new: bool) -> Result<()> {
+    if (new || d.contains_key("name")) && !d.get("name").and_then(Value::as_str).is_some_and(|n| (1..=100).contains(&n.trim().chars().count())) {
+        return bad("el nombre va de 1 a 100 caracteres");
+    }
+    if (new || d.contains_key("body")) && !d.get("body").and_then(Value::as_str).is_some_and(|b| (1..=100_000).contains(&b.trim().len())) {
+        return bad("el script va de 1 a 100.000 caracteres");
+    }
+    if d.get("notes").is_some_and(|n| !n.as_str().is_some_and(|s| s.chars().count() <= 2000)) {
+        return bad("notas no válidas");
+    }
+    Ok(())
+}
+
+/// Un interruptor guardado como 0 o 1 (true/false también valen).
+pub fn check_flag(d: &Row, k: &str) -> Result<()> {
+    match d.get(k) {
+        None | Some(Value::Bool(_)) => Ok(()),
+        Some(v) if v.as_i64().is_some_and(|n| n == 0 || n == 1) => Ok(()),
+        _ => bad(format!("{k}: true o false")),
+    }
+}
+
 pub fn check_app(d: &Row, new: bool) -> Result<()> {
     if (new || d.contains_key("winget")) && !d.get("winget").and_then(Value::as_str).is_some_and(|w| re!(r"^[A-Za-z0-9][A-Za-z0-9.+_\-]{1,127}$").is_match(w)) {
         return bad("id de winget no válido: algo como Google.Chrome o 7zip.7zip");

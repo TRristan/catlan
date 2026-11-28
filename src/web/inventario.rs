@@ -44,6 +44,12 @@ pub fn routes() -> Vec<Route> {
         r("GET", "/api/apps/{id}", Perm::User, Ctx::crud_get),
         r("PUT", "/api/apps/{id}", Perm::Admin, Ctx::crud_put),
         r("DELETE", "/api/apps/{id}", Perm::Admin, Ctx::crud_delete),
+        // scripts de PowerShell que Kitty ejecuta como SYSTEM: solo administradores, también para verlos
+        r("GET", "/api/scripts", Perm::Admin, Ctx::crud_list),
+        r("POST", "/api/scripts", Perm::Admin, Ctx::crud_create),
+        r("GET", "/api/scripts/{id}", Perm::Admin, Ctx::crud_get),
+        r("PUT", "/api/scripts/{id}", Perm::Admin, Ctx::crud_put),
+        r("DELETE", "/api/scripts/{id}", Perm::Admin, Ctx::crud_delete),
         r("GET", "/api/maps", Perm::User, Ctx::maps_list),
         r("POST", "/api/maps", Perm::User, Ctx::map_create),
         r("GET", "/api/maps/{id}", Perm::User, Ctx::map_get),
@@ -56,13 +62,14 @@ pub fn routes() -> Vec<Route> {
 /// Columnas editables por tabla: lista blanca contra inyección SQL.
 pub fn table_cols(t: &str) -> Option<&'static [&'static str]> {
     Some(match t {
-        "pages" => &["title", "body"],
+        "pages" => &["title", "body", "kitty"],
         "items" => &["name", "kind", "ip", "serial", "location", "status", "notes", "warranty"],
         "checks" => &["host", "label", "item", "every", "kind", "port", "url", "expect", "warn_days", "sound"],
         "sources" => &["host", "label", "item", "kind", "community", "port", "user", "pass", "every", "temp_max", "disk_max", "v3", "auth", "priv", "priv_pass"],
         "expiries" => &["name", "kind", "date", "item", "notes"],
         "subnets" => &["name", "cidr", "vlan", "notes"],
         "apps" => &["name", "winget", "notes"],
+        "scripts" => &["name", "body", "notes"],
         _ => return None,
     })
 }
@@ -75,6 +82,7 @@ pub fn kind_of(t: &str) -> &'static str {
         "sources" => "source",
         "expiries" => "expiry",
         "apps" => "app",
+        "scripts" => "script",
         _ => "subnet",
     }
 }
@@ -107,7 +115,7 @@ impl Ctx {
             "items" => "name",
             "expiries" => "date",
             "subnets" => "cidr",
-            "apps" => "name",
+            "apps" | "scripts" => "name",
             _ => "id",
         };
         Ok(js(200, q(&format!("SELECT * FROM {res} ORDER BY {order} COLLATE NOCASE"), p![])?.into_iter().map(public).collect::<Vec<_>>()))
@@ -131,6 +139,8 @@ impl Ctx {
                 "expiries" => check_expiry(b, true)?,
                 "subnets" => check_subnet(b, true)?,
                 "apps" => check_app(&only, true)?,
+                "scripts" => check_script(&only, true)?,
+                "pages" => check_flag(&only, "kitty")?,
                 "checks" => check_host(&only, true)?,
                 "sources" => check_source(&only, true)?,
                 _ => {}
@@ -168,6 +178,8 @@ impl Ctx {
             "expiries" => check_expiry(&d, false)?,
             "subnets" => check_subnet(&mut d, false)?,
             "apps" => check_app(&d, false)?,
+            "scripts" => check_script(&d, false)?,
+            "pages" => check_flag(&d, "kitty")?,
             "checks" => {
                 check_host(&d, false)?;
                 if d.contains_key("host") {
@@ -221,6 +233,9 @@ impl Ctx {
             let (t, col) = if res == "checks" { ("pings", "check_id") } else { ("metrics", "source_id") };
             q(&format!("DELETE FROM {t} WHERE {col}=?"), p![rid])?;
             q(&format!("DELETE FROM {t}_h WHERE {col}=?"), p![rid])?;
+        }
+        if res == "items" {
+            q("DELETE FROM software WHERE item=?", p![rid])?; // si su Kitty sigue, los manda otra vez con la ficha nueva
         }
         if let Some(row) = row {
             // la foto del borrado queda en el historial por si hay que recuperarlo

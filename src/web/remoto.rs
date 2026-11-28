@@ -18,6 +18,11 @@ pub fn routes() -> Vec<Route> {
         r("POST", "/api/remote", Perm::User, Ctx::remote_ask),
         r("GET", "/api/remote/{id}", Perm::User, Ctx::remote_get),
         r("DELETE", "/api/remote/{id}", Perm::User, Ctx::remote_stop),
+        // archivos durante la sesión: el cuerpo es el archivo, el nombre va en la cabecera x-nombre (codificado como URL)
+        r("POST", "/api/remote/{id}/files", Perm::User, Ctx::remote_file_put),
+        r("GET", "/api/remote/{id}/files/{fid}", Perm::User, Ctx::remote_file_get),
+        r("POST", "/api/agent/remote/file", Perm::Free, Ctx::agent_file_get),
+        r("POST", "/api/agent/remote/upload", Perm::Free, Ctx::agent_file_put),
         Route { method: "GET", path: "/api/remote/{id}/ws", perm: Perm::User, h: H::Ws(tech_ws) },
         // lo de Kitty: con la clave de incidencias (la ventana de Kitty corre como el usuario del PC y no puede leer la del equipo)
         r("POST", "/api/agent/remote", Perm::Free, Ctx::agent_pending),
@@ -44,7 +49,63 @@ fn events(b: &[u8]) -> Result<Vec<Value>> {
     }
 }
 
+/// El nombre de un archivo de la cabecera x-nombre (codificado como URL, para que valgan tildes y espacios).
+fn file_name(h: &str) -> String {
+    form_urlencoded::parse(format!("n={h}").as_bytes()).next().map(|(_, v)| v.into_owned()).unwrap_or_default()
+}
+
+/// Para descargar con su nombre, sin que el navegador lo abra ni lo interprete.
+fn attachment(name: &str, data: Vec<u8>) -> Resp {
+    Resp::new(200, data, "application/octet-stream").header("Content-Disposition", format!("attachment; filename*=UTF-8''{}", crate::util::quote(name))).header("X-Content-Type-Options", "nosniff")
+}
+
 impl Ctx {
+    /// El técnico manda un archivo al PC durante la sesión (hasta 20 MB, lo que admite catlan por petición).
+    fn remote_file_put(&mut self) -> Result<Resp> {
+        let name = file_name(self.req.header("x-nombre"));
+        let data = self.req.body.to_vec();
+        if data.is_empty() {
+            return bad("el archivo está vacío");
+        }
+        Ok(match remote::tech_file(self.param("id").unwrap_or(""), self.uid(), &name, data) {
+            None => gone(),
+            Some(Ok(fid)) => js(201, json!({"id": fid})),
+            Some(Err(e)) => err(409, &e),
+        })
+    }
+
+    /// El técnico descarga un archivo que mandó el PC.
+    fn remote_file_get(&mut self) -> Result<Resp> {
+        let fid = self.param("fid").and_then(|f| f.parse().ok()).unwrap_or(0);
+        Ok(remote::take_file(self.param("id").unwrap_or(""), Ok(self.uid()), fid).map_or_else(gone, |(n, d)| attachment(&n, d)))
+    }
+
+    /// Kitty recoge un archivo que le manda el técnico: {ukey, sesion, id}.
+    fn agent_file_get(&mut self) -> Result<Resp> {
+        let b = self.body()?;
+        let a = match agent_by_ukey(ukey(&b))? {
+            Ok(a) => a,
+            Err(r) => return Ok(r),
+        };
+        let (sid, fid) = (b.get("sesion").and_then(Value::as_str).unwrap_or(""), b.get("id").and_then(Value::as_u64).unwrap_or(0));
+        Ok(remote::take_file(sid, Err(a.i("id").unwrap_or(0)), fid).map_or_else(gone, |(n, d)| attachment(&n, d)))
+    }
+
+    /// Kitty manda el archivo que pidió el técnico. Cuerpo: el archivo; cabeceras: x-kitty, x-sesion, x-nombre y, si no pudo, x-error.
+    fn agent_file_put(&mut self) -> Result<Resp> {
+        let a = match agent_by_ukey(self.req.header("x-kitty"))? {
+            Ok(a) => a,
+            Err(r) => return Ok(r),
+        };
+        let (name, error) = (file_name(self.req.header("x-nombre")), file_name(self.req.header("x-error")));
+        let data = self.req.body.to_vec();
+        Ok(match remote::agent_file(a.i("id").unwrap_or(0), self.req.header("x-sesion"), &name, data, &crate::util::trunc(&error, 300)) {
+            None => gone(),
+            Some(Ok(fid)) => js(201, json!({"id": fid})),
+            Some(Err(e)) => err(409, &e),
+        })
+    }
+
     /// Pedir el control remoto de un equipo. Cada sesión es solo de quien la pidió; el usuario del PC tiene que aceptarla.
     fn remote_ask(&mut self) -> Result<Resp> {
         let b = self.body()?;
@@ -126,7 +187,7 @@ fn tech_ws(w: Ws) -> Future {
 async fn tech_loop(mut ws: WebSocket, id: String, uid: i64) {
     let mut rx = remote::CHANGED.subscribe();
     let mut tick = tokio::time::interval(TICK);
-    let (mut seq, mut state) = (0u64, String::new());
+    let (mut seq, mut state) = (0u64, String::new()); // «state»: el estado y los archivos que vienen del PC, tal como se mandaron
     loop {
         let Some((f, st)) = remote::frame(&id, uid, seq) else {
             let _ = ws.send(Message::Text(json!({"state": "cerrada", "why": "La sesión ya no existe."}).to_string().into())).await;
@@ -138,8 +199,9 @@ async fn tech_loop(mut ws: WebSocket, id: String, uid: i64) {
                 break;
             }
         }
-        if st["state"].as_str() != Some(state.as_str()) {
-            state = st["state"].as_str().unwrap_or("").to_string();
+        let now = format!("{}{}", st["state"], st["files"]);
+        if now != state {
+            state = now;
             if ws.send(Message::Text(st.to_string().into())).await.is_err() || remote::ended(&st) {
                 break;
             }

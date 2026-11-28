@@ -87,6 +87,17 @@ main{flex:1;position:relative;overflow:hidden}
 
 /* Formulario */
 .fields{display:grid;gap:16px;margin-top:20px}
+.notice{display:flex;gap:10px;align-items:flex-start;margin:8px 16px 0;padding:11px 13px;border-radius:var(--r2);background:color-mix(in oklab,var(--warn) 14%,var(--s1));border:1px solid color-mix(in oklab,var(--warn) 35%,transparent);font-size:13.5px;line-height:1.45;user-select:text}
+.notice svg{flex:none;margin-top:1px;color:var(--warn)}.notice small{display:block;color:var(--tx3);font-size:11.5px;margin-top:2px}
+.help{display:grid;gap:6px;margin-top:8px}.help>b{font-size:12px;color:var(--tx2);font-weight:560}
+.help details{border:1px solid var(--line);border-radius:10px;background:var(--s1);padding:8px 11px;font-size:13px}
+.help summary{cursor:pointer;font-weight:560}.help .art{white-space:pre-wrap;margin-top:8px;color:var(--tx2);max-height:220px;overflow:auto;user-select:text}
+.chk{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--tx2)}.chk input{width:auto;height:auto;margin:0;flex:none;accent-color:var(--acc)}
+.inc{cursor:pointer}.inc:hover{border-color:color-mix(in oklab,var(--acc) 40%,var(--line))}
+.msgs{display:grid;gap:8px;margin-top:14px}
+.msg{max-width:88%;padding:9px 12px;border-radius:14px;background:var(--s2);font-size:13.5px;line-height:1.45;white-space:pre-wrap;user-select:text;justify-self:start}
+.msg.me{justify-self:end;background:var(--acc-soft)}.msg small{display:block;font-size:11px;color:var(--tx3);margin-bottom:3px}
+.back{background:none;border:0;color:var(--tx2);font:inherit;font-size:13px;cursor:pointer;padding:0;margin-bottom:8px}
 .field label{display:flex;align-items:baseline;gap:6px;font-size:12.5px;font-weight:560;color:var(--tx2);margin:0 0 6px}
 .field label .dim{font-weight:500}
 input,textarea{width:100%;font:inherit;color:var(--tx);background:var(--s1);border:1px solid var(--line2);border-radius:var(--r);outline:none;user-select:text;
@@ -222,6 +233,8 @@ kbd{font:11px var(--mono);color:var(--tx3);border:1px solid var(--line2);border-
   </div>
 </nav>
 
+<div id="notices" aria-live="polite"></div>
+<div id="rnotes" aria-live="polite"></div>
 <main>
   <section class="view in" id="v-avisar">
     <div id="form-box" class="st">
@@ -229,7 +242,8 @@ kbd{font:11px var(--mono);color:var(--tx3);border:1px solid var(--line2);border-
       <div id="gate" style="--i:1"></div>
       <form id="form" class="fields" style="--i:2" autocomplete="off">
         <div class="field"><label for="title">En una frase</label>
-          <input id="title" maxlength="200" placeholder="No imprime la impresora de la planta 2" required></div>
+          <input id="title" maxlength="200" placeholder="No imprime la impresora de la planta 2" required>
+          <div class="help" id="help" aria-live="polite"></div></div>
         <div class="field"><label for="body">Detalles <span class="dim">opcional</span></label>
           <textarea id="body" maxlength="5000" placeholder="Qué estabas haciendo, desde cuándo pasa, el mensaje de error…"></textarea></div>
         <div class="field"><label>¿Cuánto te afecta?</label>
@@ -239,6 +253,7 @@ kbd{font:11px var(--mono);color:var(--tx3);border:1px solid var(--line2);border-
             <button type="button" data-p="alta" role="radio">Bastante</button>
             <button type="button" data-p="crítica" role="radio">No puedo trabajar</button>
           </div></div>
+        <label class="chk"><input type="checkbox" id="shot"> Adjuntar una captura de la pantalla</label>
         <div id="ferr"></div>
         <div class="send-row">
           <button class="btn pri wide" id="send" type="submit"><svg class="ic" width="17" height="17"><use href="#u-send"/></svg><span>Enviar a IT</span></button>
@@ -384,9 +399,21 @@ $('#form').onsubmit = e => {
   S.sending = true; setConn();
   $('#send').innerHTML = '<span class="spin"></span><span>Enviando…</span>';
   $('#ferr').innerHTML = '';
-  toRust({op: 'send', title, body: $('#body').value.trim(), priority: S.prio});
+  toRust({op: 'send', title, body: $('#body').value.trim(), priority: S.prio, shot: $('#shot').checked});
 };
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && S.view === 'avisar' && !$('#send').disabled) $('#form').requestSubmit(); });
+// Autoayuda: mientras escribe, las páginas de la wiki que IT ha preparado para esto
+let helpT;
+$('#title').addEventListener('input', () => {
+  clearTimeout(helpT);
+  const q = $('#title').value.trim();
+  if (q.length < 4 || !S.configured) { $('#help').innerHTML = ''; return; }
+  helpT = setTimeout(() => toRust({op: 'help', q}), 500);
+});
+function help(r) {
+  const ps = r.status === 200 && r.body.pages || [];
+  $('#help').innerHTML = ps.length ? `<b>Quizá lo arregla esto:</b>${ps.map(p => `<details><summary>${esc(p.title)}</summary><div class="art">${esc(p.body)}</div></details>`).join('')}` : '';
+}
 function showErr(msg) {
   $('#ferr').innerHTML = `<div class="err shake">${ui('alert', 16)}<span>${esc(msg)}</span></div>`;
 }
@@ -411,7 +438,7 @@ function sent(r) {
       <div class="acts"><button class="btn" id="d-again">Avisar de otra cosa</button><button class="btn pri" id="d-mine">${ui('ticket', 16)}Ver mis avisos</button></div></div>`;
   $('#form-box').hidden = true; $('#done-box').hidden = false;
   $('#d-again').onclick = () => {
-    $('#form').reset(); pick($('#urg'), $('#urg [data-p="media"]')); S.prio = 'media';
+    $('#form').reset(); $('#help').innerHTML = ''; pick($('#urg'), $('#urg [data-p="media"]')); S.prio = 'media';
     $('#done-box').hidden = true; $('#form-box').hidden = false;
     const v = $('#v-avisar'); v.classList.remove('in'); void v.offsetWidth; v.classList.add('in');
     $('#title').focus();
@@ -439,8 +466,8 @@ function loadMine() {
 function mine(r) {
   S.mineAt = Date.now();
   S.state = stateFrom(r); setConn();
-  if (r.status === 200) S.mine = r.body.incidents || [];
-  renderMine(r);
+  if (r.status === 200) { S.mine = r.body.incidents || []; renderNotices(r.body.notices || []); }
+  if (!S.thread) renderMine(r);
 }
 function renderMine(r) {
   const box = $('#mine');
@@ -461,10 +488,53 @@ function renderMine(r) {
     const [cls, label] = STATUS[i.status] || ['', i.status];
     const fin = ['resuelta', 'cerrada'].includes(i.status);
     const notes = i.notes ? ` · ${i.notes} ${i.notes === 1 ? 'respuesta' : 'respuestas'}` : '';
-    return `<div class="inc${fin ? ' done-st' : ''}" style="--i:${n}"><span class="ico">${ui(fin ? 'check' : 'ticket', 17)}</span>
+    return `<div class="inc${fin ? ' done-st' : ''}" style="--i:${n}" data-id="${+i.id}" tabindex="0" role="button"><span class="ico">${ui(fin ? 'check' : 'ticket', 17)}</span>
       <div><div class="t">${esc(i.title)}</div><div class="m"><span class="mono">INC-${esc(i.id)}</span> · ${esc(ago(i.updated))}${notes}</div></div>
       <span class="pill ${cls}"><i></i>${esc(label)}</span></div>`;
   }).join('')}</div><div class="upd">Actualizado ${esc(ago(new Date().toISOString().slice(0, 19).replace('T', ' ')))}</div>`;
+  box.querySelectorAll('.inc[data-id]').forEach(el => {
+    el.onclick = () => openThread(+el.dataset.id);
+    el.onkeydown = e => e.key === 'Enter' && el.onclick();
+  });
+}
+
+// ── Avisos de IT para todos («El correo estará caído de 14 a 15 h») ──
+function renderNotices(list) {
+  $('#notices').innerHTML = list.map(n => `<div class="notice" role="status">${ui('bell', 17)}<div>${esc(n.text)}<small>Aviso de IT · ${esc(ago(n.created))}</small></div></div>`).join('');
+}
+
+// ── Una incidencia: lo hablado con IT y contestar ──
+function openThread(id) {
+  S.thread = id;
+  $('#mine').innerHTML = '<div class="list"><div class="skel"></div><div class="skel"></div></div>';
+  toRust({op: 'thread', id});
+}
+function thread(r) {
+  if (!S.thread) return;
+  if (r.status !== 200) { S.thread = null; renderMine(r); return; }
+  const i = r.body.incident, me = n => n.who.startsWith('Kitty · ');
+  const [cls, label] = STATUS[i.status] || ['', i.status];
+  $('#mine').innerHTML = `<button class="back" id="th-back">‹ Mis avisos</button>
+    <div class="inc" style="cursor:default"><span class="ico">${ui('ticket', 17)}</span><div><div class="t">${esc(i.title)}</div><div class="m"><span class="mono">INC-${+i.id}</span> · ${esc(ago(i.created))}</div></div><span class="pill ${cls}"><i></i>${esc(label)}</span></div>
+    <div class="msgs">${i.body ? `<div class="msg me"><small>Tú</small>${esc(i.body)}</div>` : ''}${r.body.notes.map(n =>
+      `<div class="msg${me(n) ? ' me' : ''}"><small>${me(n) ? 'Tú' : esc(n.who) + ' (IT)'} · ${esc(ago(n.ts))}</small>${esc(n.text)}</div>`).join('')}</div>
+    <form class="fields" id="th-f"><div class="field"><label for="th-t">Responder a IT</label><textarea id="th-t" maxlength="5000" required placeholder="Escribe aquí…"></textarea></div>
+      <div id="th-e"></div><button class="btn pri wide" id="th-send">${ui('send', 16)}<span>Enviar</span></button></form>`;
+  $('#th-back').onclick = () => { S.thread = null; renderMine(); };
+  $('#th-f').onsubmit = e => {
+    e.preventDefault();
+    const text = $('#th-t').value.trim(); if (!text) return;
+    $('#th-send').disabled = true;
+    toRust({op: 'reply', id: S.thread, text});
+  };
+}
+function replied(r) {
+  if (r.status !== 201) {
+    $('#th-send').disabled = false;
+    $('#th-e').innerHTML = `<div class="err">${ui('alert', 16)}<span>${esc(r.body && r.body.error || 'No se ha podido enviar.')}</span></div>`;
+    return;
+  }
+  toRust({op: 'thread', id: S.thread});
 }
 
 // ── Este PC: números que cuentan hasta su valor y barras que se deslizan ──
@@ -523,6 +593,13 @@ function remoteAnswer(ok) {
   toRust({op: 'remote-answer', id: rAsk, ok});
   if (!ok) rAsk = null;
 }
+// Archivos durante el control remoto: lo que IT manda o copia, a la vista
+function remoteNote(r) {
+  const el = document.createElement('div');
+  el.className = 'notice'; el.setAttribute('role', 'status');
+  el.innerHTML = `${ui('layers', 17)}<div>${esc(r.text)}<small>Control remoto · ${esc(new Date().toLocaleTimeString())}</small></div>`;
+  $('#rnotes').prepend(el);
+}
 function remoteOn(r) { S.remote = true; $('#rmt-on-t').textContent = `${r.who} (IT) está viendo y usando este equipo`; $('#rmt-on').hidden = false; }
 function remoteOff(r) {
   S.remote = false; rAsk = null; $('#rmt').hidden = true;
@@ -564,7 +641,7 @@ window.kitty = {
     if (S.state === 'ok' && was !== 'ok') loadMine(); // vuelve la conexión o lo acaban de aceptar: al día ya
   },
   askQuit() { quitClose(); $('#qt-cf').hidden = true; $('#qt-ok').disabled = false; $('#qt').hidden = false; setTimeout(() => $('#qt-n').focus(), 60); },
-  quitErr, stats, mine, sent, remoteAsk, remoteOn, remoteOff, found, joined,
+  quitErr, stats, mine, sent, remoteAsk, remoteOn, remoteOff, found, joined, help, thread, replied, remoteNote,
   shown() {
     const v = $('#v-' + S.view); v.classList.remove('in'); void v.offsetWidth; v.classList.add('in');
     if (S.configured) loadMine();

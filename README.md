@@ -173,7 +173,13 @@ El comando de **Inventario → Añadir con Kitty** (Windows PowerShell como admi
 - **Cada 15 segundos**, `kitty servicio` (una tarea programada que arranca con el PC, como SYSTEM) envía **solo** nombre, sistema,
   modelo, CPU, memoria, discos, IPs, tiempo encendido, nº de serie y, cada 5 minutos, los **errores y críticos del Visor de
   eventos** (Sistema y Aplicación, con las rutas de usuario tapadas), que se ven en su ficha de PCs (Kitty); un crítico, como un apagado
-  inesperado, avisa. Nada de usuarios, programas, procesos ni archivos.
+  inesperado, avisa. También el **estado de parches** (último instalado, pendientes cada 6 horas y reinicio pendiente:
+  avisa si un PC pasa 30 días sin parchear) y un **semáforo de seguridad** (antivirus y sus firmas, firewall,
+  BitLocker y la cuenta Administrador de serie). Nada de usuarios, procesos ni archivos.
+- **Programas instalados, solo si lo activas** en **PCs (Kitty) → Programas → Inventario de programas** (apagado de
+  serie): nombre, versión y editor de lo que sale en «Aplicaciones instaladas», enviado cuando cambia. Se ven en la
+  ficha de cada PC y se buscan con **Alt+C** («¿quién tiene AnyDesk?»). Al apagarlo se borra lo recogido. Los
+  portables y las apps de la Tienda no salen; Kitty para Linux y la de PowerShell no lo envían.
 - **Un gato en la bandeja** de cada usuario: una ventana con el diseño de catlan para **avisar a IT** («¿Qué está
   fallando?»), seguir **sus avisos** (recibido, en curso, resuelto) y ver **cómo va el PC** en vivo. Cada aviso llega
   a catlan como una incidencia enlazada a la ficha del equipo; si es urgente, avisa por correo, Telegram o webhook.
@@ -186,6 +192,17 @@ El comando de **Inventario → Añadir con Kitty** (Windows PowerShell como admi
 - **Instala y actualiza programas** que IT elige en **PCs (Kitty) → Programas**, con winget (incluido en
   Windows 10 y 11). Los instala para todo el equipo y busca actualizaciones cada hora. Quitar uno de la lista no lo
   desinstala.
+- **Avisos de IT** en **PCs (Kitty) → Avisos**: «El correo estará caído de 14 a 15 h» a todos los PCs o a unos
+  cuantos. La ventana de Kitty se abre sola para enseñarlo.
+- **Habla con IT** desde «Mis avisos»: el usuario ve las notas que IT marca como visibles en la incidencia y contesta.
+  Si IT responde, Kitty se abre sola. Al avisar puede **adjuntar una captura de pantalla**, y mientras escribe Kitty le
+  sugiere las **páginas de la wiki marcadas para autoayuda** («Sugerir en Kitty» al editarla).
+- **Scripts de PowerShell** en **PCs (Kitty) → Scripts** (solo administradores): se lanzan en uno o varios PCs, Kitty
+  los ejecuta como SYSTEM (solo por https, hasta 10 minutos) y la salida queda en la ficha del equipo y en Actividad.
+- **Archivos en el control remoto**: el técnico envía un archivo a Descargas del usuario o pide uno por su ruta (hasta
+  20 MB, con los permisos del usuario, que ve un aviso de cada uno).
+- **Encender el PC** desde su ficha (Wake-on-LAN, con la MAC que manda Kitty): llega a la red de catlan y a la /24 del
+  PC si el router deja pasar la difusión.
 - **Arranca solo** al iniciar sesión (clave `Run` de Windows) y **solo un administrador de catlan puede cerrarlo**
   desde «Salir de Kitty». Sin conexión con catlan, no se puede cerrar desde el menú. La X de la ventana solo la esconde.
 

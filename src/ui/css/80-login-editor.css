@@ -150,6 +150,10 @@ button.inc-tg{cursor:pointer;transition:background .2s,color .2s}button.inc-tg:h
 .rm-stage{position:relative;flex:1;display:grid;place-items:center;min-height:320px;border:1px solid var(--line);border-radius:14px;background:#0b0b0a;overflow:hidden}
 .rm-stage canvas{display:block;max-width:100%;max-height:calc(100vh - 170px);cursor:default;outline:none}
 .rm:fullscreen .rm-stage canvas{max-height:calc(100vh - 80px)}
+.rm-files{position:absolute;top:10px;right:10px;z-index:2;display:grid;gap:6px;max-width:320px;padding:10px 12px;border-radius:12px;background:var(--s1);border:1px solid var(--line);box-shadow:var(--sh2,0 6px 24px rgba(0,0,0,.3))}
+.rm-files a,.rm-files span{display:flex;gap:6px;align-items:center;overflow-wrap:anywhere}
+details.run{border-top:1px solid var(--line);padding:9px 2px}details.run:first-child{border-top:0}
+details.run summary{display:flex;gap:8px;align-items:center;flex-wrap:wrap;cursor:pointer;list-style:none}
 .rm-stage canvas.view{cursor:not-allowed}.rm-stage canvas:focus-visible{box-shadow:0 0 0 2px var(--acc)}
 .rm-wait{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:6px;padding:20px;text-align:center;color:#eee;background:color-mix(in oklab,#0b0b0a 88%,transparent)}
 .rm-wait[hidden]{display:none}.rm-wait h3{margin:10px 0 0;font-size:17px}.rm-wait p{max-width:420px;margin:0;color:#aaa}

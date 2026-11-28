@@ -27,11 +27,17 @@ pub fn routes() -> Vec<Route> {
         r("POST", "/api/agent/incident", Perm::Free, Ctx::agent_incident),
         r("POST", "/api/agent/mine", Perm::Free, Ctx::agent_mine),
         r("POST", "/api/agent/quit", Perm::Free, Ctx::agent_quit),
+        r("POST", "/api/agent/thread", Perm::Free, Ctx::agent_thread),
+        r("POST", "/api/agent/reply", Perm::Free, Ctx::agent_reply),
+        r("POST", "/api/agent/help", Perm::Free, Ctx::agent_help),
         r("POST", "/api/agent/{other}", Perm::Free, |_| Ok(err(404, "no existe"))),
         // aceptar un Kitty es dejar entrar un equipo
         r("GET", "/api/agents", Perm::Admin, Ctx::agents_list),
         r("PUT", "/api/agents/{id}", Perm::Admin, Ctx::agent_state),
         r("DELETE", "/api/agents/{id}", Perm::Admin, Ctx::agent_forget),
+        r("POST", "/api/items/{id}/wake", Perm::User, Ctx::item_wake),
+        r("GET", "/api/software", Perm::User, Ctx::software_list),
+        r("PUT", "/api/software", Perm::Admin, Ctx::software_policy),
     ]
 }
 
@@ -65,6 +71,37 @@ pub fn agent_by_ukey(u: &str) -> Result<std::result::Result<Row, Resp>> {
         None => Err(js(404, json!({"error": "este equipo aún no se ha presentado a catlan: espera unos minutos", "state": null}))),
     })
 }
+
+/// Paquete mágico de Wake-on-LAN: 6 × FF y 16 veces la MAC. None si la MAC no es válida.
+fn magic(mac: &str) -> Option<Vec<u8>> {
+    let b: Vec<u8> = mac.split([':', '-']).map(|h| u8::from_str_radix(h, 16)).collect::<std::result::Result<_, _>>().ok()?;
+    (b.len() == 6).then(|| [vec![0xFF; 6], b.repeat(16)].concat())
+}
+
+/// Política: ¿Kitty cuenta los programas instalados? Apagado si nadie lo activa.
+fn software_on() -> bool {
+    val("SELECT v FROM meta WHERE k='software'", p![]).ok().and_then(|v| v.as_str().map(|s| s == "1")).unwrap_or(false)
+}
+
+/// Lo que manda Kitty: [{name, version, publisher}], sin vacíos ni repetidos. None si no tiene esa forma.
+fn software_rows(v: &Value) -> Option<Vec<(String, String, String)>> {
+    let a = v.as_array().filter(|a| a.len() <= 5000)?;
+    let mut out: Vec<(String, String, String)> = a
+        .iter()
+        .filter_map(|x| {
+            let s = |k: &str| trunc(x.get(k).and_then(Value::as_str).unwrap_or("").trim(), 200);
+            Some((s("name"), s("version"), s("publisher"))).filter(|r| !r.0.is_empty())
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    Some(out)
+}
+
+/// Las incidencias de «Mis avisos»: las abiertas desde la Kitty de este equipo (?1 el equipo, ?2 el nombre del PC).
+const MINE: &str = "EXISTS (SELECT 1 FROM notes o WHERE o.incident = n.id AND o.change = 1 AND o.text = 'abrió la incidencia' AND o.who = 'Kitty · ' || ?2)";
+/// Las notas que ve el usuario del PC: las públicas (las suyas lo son siempre).
+const SEEN: &str = "change = 0 AND public = 1";
 
 /// La clave de incidencias del cuerpo (la ventana de Kitty corre como el usuario del PC y no puede leer la del equipo).
 pub fn ukey(b: &Value) -> &str {
@@ -178,13 +215,90 @@ impl Ctx {
         let prev: Value = serde_json::from_str::<Value>(src.s("info")).ok().and_then(|i| i.get("events").cloned()).unwrap_or(Value::Null);
         let (events, mut probs) = crate::health::kitty_events(b.get("events").unwrap_or(&Value::Null), &prev);
         info.insert("events".into(), events.into());
+        probs.extend(crate::health::kitty_patch_problem(&info));
+        let (light, why) = crate::health::kitty_security(&info);
+        info.insert("seclight".into(), light.into());
+        info.insert("secwhy".into(), why.into());
         if let Some(a) = b.get("apps").filter(|a| a.is_object() && a.to_string().len() <= 64 * 1024) {
             info.insert("apps".into(), a.clone()); // cómo le fue a winget con cada programa
         }
+        let on = software_on();
+        if on && let Some(rows) = b.get("software").and_then(software_rows) {
+            let mut c = lock(db::writer());
+            let tx = c.transaction()?;
+            tx.execute("DELETE FROM software WHERE item=?", [item])?;
+            for r in &rows {
+                tx.execute("INSERT INTO software(item, name, version, publisher) VALUES(?, ?, ?, ?)", rusqlite::params![item, r.0, r.1, r.2])?;
+            }
+            tx.commit()?;
+        }
+        // «software»: null si la política no lo pide; si no, cuántos tiene catlan de este PC (Kitty los reenvía si no cuadra)
+        let have = if on { val("SELECT COUNT(*) FROM software WHERE item=?", p![item])? } else { Value::Null };
         let out = crate::health::limits(&src, out, &mut probs);
         monitor::save_health(&src, &out, &probs, Some(&info), None)?;
         let apps: Vec<Value> = q("SELECT winget FROM apps ORDER BY id", p![])?.into_iter().map(|r| r["winget"].clone()).collect();
-        Ok(js(200, json!({"state": "adoptado", "item": item, "catlan": instance, "apps": apps})))
+        let run = super::pcs::agent_runs(&a["id"], b.get("runs"))?;
+        Ok(js(200, json!({"state": "adoptado", "item": item, "catlan": instance, "apps": apps, "software": have, "run": run})))
+    }
+
+    /// Encender un PC apagado: el paquete mágico a cada MAC que mandó su Kitty, por difusión general y a la de su /24.
+    /// shortcut: solo llega a la red de catlan (o a la /24 del PC si el router reenvía difusiones dirigidas); para otras redes haría falta un relé.
+    fn item_wake(&mut self) -> Result<Resp> {
+        let Some(it) = q("SELECT id, name, ip FROM items WHERE id=?", p![self.id()])?.one() else { return Ok(err(404, "no existe")) };
+        let info = q("SELECT s.info FROM agents a JOIN sources s ON s.id = a.source WHERE a.item=? ORDER BY a.id DESC LIMIT 1", p![&it["id"]])?.one();
+        let macs: Vec<String> = info
+            .and_then(|r| serde_json::from_str::<Value>(r.s("info")).ok())
+            .and_then(|i| i.get("macs").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(String::from).collect()))
+            .unwrap_or_default();
+        let packets: Vec<Vec<u8>> = macs.iter().filter_map(|m| magic(m)).collect();
+        if packets.is_empty() {
+            return bad("no se sabe la MAC de este equipo: hace falta que Kitty la haya enviado al menos una vez");
+        }
+        let sock = std::net::UdpSocket::bind("0.0.0.0:0")?;
+        sock.set_broadcast(true)?;
+        let mut to = vec!["255.255.255.255:9".to_string()];
+        if let Ok(std::net::IpAddr::V4(ip)) = it.s("ip").parse::<std::net::IpAddr>() {
+            let o = ip.octets();
+            to.push(format!("{}.{}.{}.255:9", o[0], o[1], o[2]));
+        }
+        for pk in &packets {
+            for t in &to {
+                let _ = sock.send_to(pk, t); // una red sin ruta no impide probar la otra
+            }
+        }
+        self.log("encender", "item", &it["id"], &it["name"], &json!({"macs": macs}))?;
+        Ok(js(200, json!({"macs": macs})))
+    }
+
+    /// Programas instalados: ?item=N los de un PC; ?q=texto, quién tiene un programa (hasta 300). «on»: la política.
+    fn software_list(&mut self) -> Result<Resp> {
+        let arg = |k: &str| self.qs.get(k).map(|v| v[0].trim().to_string()).unwrap_or_default();
+        let (item, text) = (arg("item"), arg("q"));
+        let rows = if !item.is_empty() {
+            q("SELECT name, version, publisher FROM software WHERE item=? ORDER BY name COLLATE NOCASE", p![item.parse::<i64>().unwrap_or(-1)])?.rows
+        } else if text.chars().count() >= 2 {
+            let like = format!("%{}%", text.replace('!', "!!").replace('%', "!%").replace('_', "!_"));
+            q(
+                "SELECT s.item, i.name AS item_name, s.name, s.version FROM software s JOIN items i ON i.id = s.item \
+                 WHERE s.name LIKE ? ESCAPE '!' ORDER BY s.name COLLATE NOCASE, i.name COLLATE NOCASE LIMIT 300",
+                p![like],
+            )?
+            .rows
+        } else {
+            vec![]
+        };
+        Ok(js(200, json!({"on": software_on(), "rows": rows})))
+    }
+
+    /// Activar o apagar el inventario de programas. Al apagarlo se borra lo que había: no se guarda lo que no se pide.
+    fn software_policy(&mut self) -> Result<Resp> {
+        let on = self.body()?.get("on").and_then(Value::as_bool).ok_or(crate::util::Bad("on: true o false".into()))?;
+        q("INSERT OR REPLACE INTO meta(k, v) VALUES('software', ?)", p![if on { "1" } else { "0" }])?;
+        if !on {
+            q("DELETE FROM software", p![])?;
+        }
+        self.log(if on { "activar" } else { "desactivar" }, "software", 0, "Inventario de programas", &json!({}))?;
+        Ok(js(200, json!({"on": on})))
     }
 
     /// Las incidencias que se abrieron desde la ventana de Kitty de este equipo, con su estado.
@@ -194,11 +308,75 @@ impl Ctx {
             Ok(a) => a,
             Err(r) => return Ok(r),
         };
+        // «notes»: las que ve el usuario; «last_it»: la última de IT (Kitty avisa si no la ha visto)
         let rows = q(
-            "SELECT n.id, n.title, n.status, n.priority, n.created, n.updated, (SELECT count(*) FROM notes WHERE incident = n.id AND change = 0) AS notes              FROM incidents n WHERE n.item=? AND EXISTS (SELECT 1 FROM notes o WHERE o.incident = n.id AND o.change = 1 AND o.text = 'abrió la incidencia'              AND o.who = 'Kitty · ' || ?) ORDER BY n.status IN ('resuelta', 'cerrada'), n.updated DESC LIMIT 30",
+            &format!(
+                "SELECT n.id, n.title, n.status, n.priority, n.created, n.updated, (SELECT count(*) FROM notes WHERE incident = n.id AND {SEEN}) AS notes, \
+                 (SELECT max(id) FROM notes WHERE incident = n.id AND {SEEN} AND who != 'Kitty · ' || ?2) AS last_it \
+                 FROM incidents n WHERE n.item=?1 AND {MINE} ORDER BY n.status IN ('resuelta', 'cerrada'), n.updated DESC LIMIT 30"
+            ),
             p![&a["item"], &a["name"]],
         )?;
-        Ok(js(200, json!({"state": a["state"], "name": a["name"], "item": a["item"], "incidents": rows.rows})))
+        let notices = q(
+            "SELECT id, text, until, created FROM notices WHERE until > CURRENT_TIMESTAMP AND (items = '[]' OR EXISTS (SELECT 1 FROM json_each(items) WHERE value = ?)) ORDER BY id DESC LIMIT 5",
+            p![&a["item"]],
+        )?;
+        Ok(js(200, json!({"state": a["state"], "name": a["name"], "item": a["item"], "incidents": rows.rows, "notices": notices.rows})))
+    }
+
+    /// Una incidencia de «Mis avisos» con lo que ve el usuario: su descripción y las notas públicas (las suyas y las que IT marca).
+    fn agent_thread(&mut self) -> Result<Resp> {
+        let b = self.body()?;
+        let a = match self.agent_of(&b)? {
+            Ok(a) => a,
+            Err(r) => return Ok(r),
+        };
+        let Some(inc) = Self::mine_incident(&a, &b)? else { return Ok(err(404, "esa incidencia no es de este equipo")) };
+        let notes = q(&format!("SELECT id, who, ts, text FROM notes WHERE incident=? AND {SEEN} ORDER BY id"), p![&inc["id"]])?;
+        Ok(js(200, json!({"incident": inc, "notes": notes.rows})))
+    }
+
+    /// El usuario del PC contesta desde Kitty: una nota pública en su incidencia (como mucho 30 por hora desde cada equipo).
+    fn agent_reply(&mut self) -> Result<Resp> {
+        let b = self.body()?;
+        let a = match self.agent_of(&b)? {
+            Ok(a) => a,
+            Err(r) => return Ok(r),
+        };
+        let Some(inc) = Self::mine_incident(&a, &b)? else { return Ok(err(404, "esa incidencia no es de este equipo")) };
+        let text = b.get("text").and_then(Value::as_str).map(str::trim).filter(|t| (1..=5000).contains(&t.chars().count()));
+        let Some(text) = text else { return bad("escribe la respuesta (hasta 5000 caracteres)") };
+        self.user = format!("Kitty · {}", a.s("name"));
+        if val("SELECT COUNT(*) FROM notes WHERE who=? AND change = 0 AND ts > datetime('now', '-1 hour')", p![&self.user])?.as_i64().unwrap_or(0) >= 30 {
+            return Ok(err(429, "demasiados mensajes seguidos: espera un rato"));
+        }
+        q("INSERT INTO notes(incident, who, text, change, public) VALUES(?, ?, ?, 0, 1)", p![&inc["id"], &self.user, text])?;
+        q("UPDATE incidents SET updated=CURRENT_TIMESTAMP WHERE id=?", p![&inc["id"]])?;
+        Ok(js(201, json!({"ok": true})))
+    }
+
+    /// Autoayuda: las páginas de la wiki marcadas para Kitty que hablan de lo que escribe el usuario (hasta 3).
+    fn agent_help(&mut self) -> Result<Resp> {
+        let b = self.body()?;
+        if let Err(r) = self.agent_of(&b)? {
+            return Ok(r);
+        }
+        let text = b.get("q").and_then(Value::as_str).unwrap_or("").to_lowercase();
+        let words: Vec<String> = text.split(|c: char| !c.is_alphanumeric()).filter(|w| w.chars().count() >= 4).take(8).map(String::from).collect();
+        if words.is_empty() {
+            return Ok(js(200, json!({"pages": []})));
+        }
+        // cada palabra en el título cuenta 3; en el texto, 1
+        let score: Vec<&str> = words.iter().map(|_| "(instr(lower(title), ?) > 0) * 3 + (instr(lower(body), ?) > 0)").collect();
+        let args: Vec<SqlV> = words.iter().flat_map(|w| [SqlV::Text(w.clone()), SqlV::Text(w.clone())]).collect();
+        let sql = format!("SELECT id, title, substr(body, 1, 4000) AS body, {} AS score FROM pages WHERE kitty = 1 AND score > 0 ORDER BY score DESC, title LIMIT 3", score.join(" + "));
+        Ok(js(200, json!({"pages": q(&sql, args)?.rows})))
+    }
+
+    /// La incidencia del cuerpo («id»), si se abrió desde la Kitty de este equipo.
+    fn mine_incident(a: &Row, b: &Value) -> Result<Option<Row>> {
+        let id = b.get("id").filter(|v| is_int(v)).and_then(Value::as_i64).unwrap_or(-1);
+        Ok(q(&format!("SELECT n.id, n.title, n.body, n.status, n.created, n.updated FROM incidents n WHERE n.id=?3 AND n.item=?1 AND {MINE}"), p![&a["item"], &a["name"], id])?.one())
     }
 
     /// Cerrar la Kitty de un PC: solo con un administrador de catlan (el usuario del PC no puede quitarla).
@@ -255,8 +433,20 @@ impl Ctx {
         if recent.as_i64().unwrap_or(0) >= 10 {
             return Ok(err(429, "demasiados avisos seguidos desde este equipo: espera un rato o llama a IT"));
         }
+        // captura de pantalla opcional: un JPEG en base64 (hasta 6 MB)
+        let shot = match b.get("shot").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+            None => None,
+            Some(s) => match data_encoding::BASE64.decode(s.as_bytes()).ok().filter(|j| j.len() <= 6 << 20 && j.starts_with(&[0xFF, 0xD8, 0xFF])) {
+                Some(j) => Some(j),
+                None => return bad("la captura no es un JPEG válido o pasa de 6 MB"),
+            },
+        };
         let id = q("INSERT INTO incidents(title, body, priority, item) VALUES(?, ?, ?, ?)", p![title, body, prio, &a["item"]])?.lastrowid;
         self.note(id, "abrió la incidencia", true)?;
+        if let Some(j) = shot {
+            let fid = q("INSERT INTO files(incident, name, mime, data, who) VALUES(?, ?, 'image/jpeg', ?, ?)", p![id, format!("captura-INC-{id}.jpg"), j, &self.user])?.lastrowid;
+            q("INSERT INTO notes(incident, who, text, change, public) VALUES(?, ?, ?, 0, 1)", p![id, &self.user, format!("Captura de pantalla adjunta: [ver captura](/api/files/{fid})")])?;
+        }
         self.log("crear", "incident", id, title, &json!({"title": title, "body": body, "priority": prio, "item": a["item"], "desde": "Kitty"}))?;
         if prio == "crítica" {
             monitor::notify(&format!("catlan: incidencia crítica INC-{id}: {title}"), &format!("Abierta desde Kitty en {}.\n\n-- catlan", a.s("name")));
@@ -362,4 +552,11 @@ impl Ctx {
         self.log("olvidar", "agent", &a["id"], &a["name"], &json!({"ip": a["ip"], "code": code}))?;
         Ok(no_content())
     }
+}
+
+#[test]
+fn paquete_magico() {
+    let m = magic("00:1A:2b:3C:4d:5E").unwrap();
+    assert_eq!((m.len(), &m[..6], &m[6..12], &m[96..]), (102, &[0xFF; 6][..], &[0, 0x1A, 0x2B, 0x3C, 0x4D, 0x5E][..], &[0, 0x1A, 0x2B, 0x3C, 0x4D, 0x5E][..]));
+    assert!(magic("00-1A-2B-3C-4D-5E").is_some() && magic("zz:1A:2B:3C:4D:5E").is_none() && magic("00:1A").is_none());
 }

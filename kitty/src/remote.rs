@@ -56,6 +56,12 @@ fn capture() -> Option<(Vec<u8>, i32, i32)> {
     }
 }
 
+/// Una captura de la pantalla principal en JPEG, para adjuntarla a un aviso. None si no se puede.
+pub fn screenshot() -> Option<Vec<u8>> {
+    let (px, w, h) = capture()?;
+    Some(jpeg(&px, w, h)).filter(|j| !j.is_empty())
+}
+
 fn jpeg(px: &[u8], w: i32, h: i32) -> Vec<u8> {
     let mut out = Vec::with_capacity(px.len() / 12);
     let enc = jpeg_encoder::Encoder::new(&mut out, 60);
@@ -257,17 +263,99 @@ const ALIVE: Duration = Duration::from_secs(2);
 
 /// La sesión aceptada: pantalla hacia catlan y ratón y teclado de vuelta, hasta que alguien la corte.
 /// Devuelve por qué acabó, para enseñárselo al usuario.
-pub fn session(url: &str, ukey: &str, id: &str, stop: &Arc<AtomicBool>) -> String {
+/// `note`: avisos para la ventana mientras dura («IT te ha enviado informe.pdf»).
+pub fn session(url: &str, ukey: &str, id: &str, stop: &Arc<AtomicBool>, note: Note) -> String {
     let mut held = Held::default();
     let why = match connect(url, ukey, id) {
-        Ok(ws) => run(ws, url, ukey, id, stop, &mut held),
+        Ok(ws) => run(ws, url, ukey, id, stop, &mut held, note),
         Err(e) => format!("No se pudo conectar con catlan: {e}."),
     };
     held.release();
     why
 }
 
-fn run(mut ws: Ws, url: &str, ukey: &str, id: &str, stop: &Arc<AtomicBool>, held: &mut Held) -> String {
+pub type Note = Arc<dyn Fn(String) + Send + Sync>;
+
+/// Como mucho esto por archivo: lo que admite catlan por petición.
+const FILE_MAX: u64 = 20 << 20;
+
+/// Lo que llega del técnico y no es ratón ni teclado: un archivo para este PC o uno que pide. En otro hilo, como el
+/// usuario del PC (con sus permisos): la pantalla no se para mientras va y viene.
+fn file_event(e: &Value, url: &str, ukey: &str, id: &str, note: &Note) -> bool {
+    let (url, ukey, id, note) = (url.to_string(), ukey.to_string(), id.to_string(), note.clone());
+    match e.get("t").and_then(Value::as_str) {
+        Some("file") => {
+            let (fid, name) = (e["id"].as_u64().unwrap_or(0), e["name"].as_str().unwrap_or("archivo").to_string());
+            std::thread::spawn(move || {
+                note(match receive(&url, &ukey, &id, fid, &name) {
+                    Ok(p) => format!("IT te ha enviado {name}: está en {}", p.display()),
+                    Err(e) => format!("No se pudo recibir {name}: {e}"),
+                })
+            });
+        }
+        Some("get") => {
+            let path = e["path"].as_str().unwrap_or("").to_string();
+            std::thread::spawn(move || {
+                let p = std::path::Path::new(&path);
+                let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "archivo".into());
+                let r = match std::fs::metadata(p) {
+                    Ok(m) if m.is_file() && m.len() <= FILE_MAX => std::fs::read(p).map_err(|e| e.to_string()),
+                    Ok(m) if m.is_file() => Err("pasa de 20 MB".into()),
+                    Ok(_) => Err("es una carpeta, no un archivo".into()),
+                    Err(e) => Err(e.to_string()),
+                };
+                let (data, error) = match r {
+                    Ok(d) => (d, String::new()),
+                    Err(e) => (vec![], e),
+                };
+                let q = |s: &str| s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"._-~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect::<String>();
+                let sent = crate::net::agent()
+                    .post(&format!("{url}/api/agent/remote/upload"))
+                    .timeout(Duration::from_secs(300))
+                    .set("x-kitty", &ukey)
+                    .set("x-sesion", &id)
+                    .set("x-nombre", &q(&name))
+                    .set("x-error", &q(&error))
+                    .send_bytes(&data)
+                    .is_ok();
+                if error.is_empty() && sent {
+                    note(format!("IT ha copiado {path}"));
+                }
+            });
+        }
+        _ => return false,
+    }
+    true
+}
+
+/// Descarga el archivo del técnico en la carpeta Descargas del usuario, sin pisar otro con el mismo nombre.
+fn receive(url: &str, ukey: &str, id: &str, fid: u64, name: &str) -> Result<std::path::PathBuf, String> {
+    let r = crate::net::agent()
+        .post(&format!("{url}/api/agent/remote/file"))
+        .timeout(Duration::from_secs(300))
+        .set("Content-Type", "application/json; charset=utf-8")
+        .send_string(&json!({"ukey": ukey, "sesion": id, "id": fid}).to_string())
+        .map_err(|e| e.to_string())?;
+    let mut data = Vec::new();
+    r.into_reader().take(FILE_MAX + 1).read_to_end(&mut data).map_err(|e| e.to_string())?;
+    let dir = std::env::var_os("USERPROFILE").map(|h| std::path::PathBuf::from(h).join("Downloads")).filter(|d| d.is_dir()).unwrap_or_else(std::env::temp_dir);
+    let name: String = name.chars().filter(|c| !c.is_control() && !"<>:\"/\\|?*".contains(*c)).collect();
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s.to_string(), format!(".{e}")),
+        _ => (name.clone(), String::new()),
+    };
+    let mut p = dir.join(&name);
+    for n in 1..1000 {
+        if !p.exists() {
+            break;
+        }
+        p = dir.join(format!("{stem} ({n}){ext}"));
+    }
+    std::fs::write(&p, data).map_err(|e| e.to_string())?;
+    Ok(p)
+}
+
+fn run(mut ws: Ws, url: &str, ukey: &str, id: &str, stop: &Arc<AtomicBool>, held: &mut Held, note: Note) -> String {
     let (mut last, mut sent) = (0u64, Instant::now() - ALIVE);
     let lost = |e: tungstenite::Error| format!("Se perdió la conexión con catlan: {e}.");
     loop {
@@ -307,7 +395,9 @@ fn run(mut ws: Ws, url: &str, ukey: &str, id: &str, stop: &Arc<AtomicBool>, held
                         return if w.is_empty() { "La sesión ha terminado.".into() } else { format!("La sesión ha terminado: {w}.") };
                     }
                     for e in r.get("input").and_then(Value::as_array).into_iter().flatten() {
-                        apply(e, held);
+                        if !file_event(e, url, ukey, id, &note) {
+                            apply(e, held);
+                        }
                     }
                 }
                 Ok(Message::Close(_)) => return "La sesión ha terminado.".into(),

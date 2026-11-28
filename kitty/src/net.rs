@@ -9,6 +9,11 @@ use std::time::Duration;
 pub const EVERY: Duration = Duration::from_secs(15);
 pub const SLOW_EVERY: Duration = Duration::from_secs(300);
 
+/// Programas instalados: lo último que dijo catlan (None: la política no los pide; Some(n): cuántos tiene de este PC)
+/// y la última lista enviada. Se mandan solo si cambian o si catlan no tiene los mismos.
+static SOFT_HAVE: Mutex<Option<u64>> = Mutex::new(None);
+static SOFT_SENT: Mutex<Option<Vec<Value>>> = Mutex::new(None);
+
 /// Acepta solo el certificado con esta huella (sha256 en hex); con `want` vacío, cualquiera, y apunta cuál era (para
 /// descubrir catlan en la red antes de instalar). Los nombres no cuentan: el autofirmado no sabe con qué IP lo llamarán.
 #[derive(Debug)]
@@ -158,8 +163,17 @@ pub fn send(ps: &Value, fresh: bool) -> Result<String, String> {
     // ip vacía: catlan pone la dirección desde la que llega
     let body = json!({"key": key, "ukey": c.ukey, "name": facts::name(), "ip": "", "serial": serial, "os": format!("{}/{arch}", std::env::consts::OS),
                       "kind": "pc", "every": EVERY.as_secs().div_ceil(60), "secs": EVERY.as_secs(), "facts": facts, "events": events, "apps": crate::apps::report()});
+    let have = *SOFT_HAVE.lock().unwrap_or_else(|e| e.into_inner());
+    let soft = have.filter(|_| fresh).map(|_| facts::software()).filter(|l| have != Some(l.len() as u64) || SOFT_SENT.lock().unwrap_or_else(|e| e.into_inner()).as_ref() != Some(l));
+    let mut body = body;
+    if let Some(l) = &soft {
+        body["software"] = json!(l);
+    }
+    let runs = crate::scripts::results();
+    body["runs"] = json!(runs);
     let (code, res) = post(&format!("{}/api/agent", c.url), &body);
     if code != 200 {
+        crate::scripts::keep(runs); // van en el próximo envío
         return Err(res.get("error").and_then(Value::as_str).map(String::from).unwrap_or_else(|| format!("catlan respondió {code}")));
     }
     if res.get("catlan").and_then(Value::as_str) != Some(c.catlan.as_str()) {
@@ -167,6 +181,14 @@ pub fn send(ps: &Value, fresh: bool) -> Result<String, String> {
     }
     let state = res.get("state").and_then(Value::as_str).unwrap_or("").to_string();
     crate::apps::want(res.get("apps"));
+    // scripts de IT, solo por https con el certificado anclado: se ejecutan como SYSTEM
+    if c.url.starts_with("https://") {
+        crate::scripts::take(res.get("run"));
+    }
+    *SOFT_HAVE.lock().unwrap_or_else(|e| e.into_inner()) = res.get("software").and_then(Value::as_u64);
+    if soft.is_some() {
+        *SOFT_SENT.lock().unwrap_or_else(|e| e.into_inner()) = soft;
+    }
     if state == "adoptado"
         && let Some(n) = now
     {

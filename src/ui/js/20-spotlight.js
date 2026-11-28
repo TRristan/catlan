@@ -32,14 +32,27 @@ async function spotlight() {
     ...incs.map(x => ({k: 'incident', ic: 'ticket', t: `${incId(x.id)} ${x.title}`, sub: [x.status, x.priority, x.assignee_name, x.item_name].filter(Boolean).join(' · '), more: x.body, go: '#/inc/' + x.id, done: !incOpen(x)})),
     ...maps.map(x => ({k: x.type === 'rack' ? 'rack' : 'map', ic: x.type === 'rack' ? 'rack' : 'nodes', t: x.name, sub: x.type === 'rack' ? 'Rack' : 'Esquema', more: '', go: `#/${x.type === 'rack' ? 'racks' : 'maps'}/${x.id}`})),
     ...(monData?.checks || []).map(x => ({k: 'check', ic: 'signal', t: monName(x), sub: `Monitor · ${x.host}`, more: x.host, go: '#/monitor'}))];
-  const GROUP = {page: 'Wiki', item: 'Equipos', incident: 'Incidencias', map: 'Esquemas', rack: 'Racks', check: 'Monitor'};
-  let res = [], act = 0, mode = '';
+  const GROUP = {page: 'Wiki', item: 'Equipos', incident: 'Incidencias', map: 'Esquemas', rack: 'Racks', check: 'Monitor', soft: 'Programas instalados'};
+  let res = [], act = 0, mode = '', soft = [], softQ = '', softT;
+  // «¿quién tiene AnyDesk?»: los programas se buscan en catlan (son demasiados para traerlos todos)
+  const findSoft = q => {
+    clearTimeout(softT);
+    if (q.length < 2) { soft = []; softQ = q; return; }
+    if (q === softQ) return;
+    softT = setTimeout(async () => {
+      const r = await api('software?q=' + encodeURIComponent(q)).catch(() => null);
+      if (!r || !spotEl || inp.value.toLowerCase().trim() !== q) return;
+      softQ = q; soft = r.rows.map(x => ({k: 'soft', ic: 'box', t: x.name + (x.version ? ' ' + x.version : ''), sub: x.item_name, more: '', go: '#/inv/' + x.item}));
+      paint();
+    }, 250);
+  };
   const mark = (t, q) => { const i = q ? t.toLowerCase().indexOf(q) : -1; return i < 0 ? esc(t) : esc(t.slice(0, i)) + `<mark>${esc(t.slice(i, i + q.length))}</mark>` + esc(t.slice(i + q.length)); };
   const paint = () => {
     const m = /^\s*([wut])\s*:\s*/i.exec(inp.value), q = inp.value.slice(m ? m[0].length : 0).toLowerCase().trim();
     mode = m ? m[1].toLowerCase() : '';
     chip.hidden = !mode; chip.textContent = mode ? SPOT_F[mode][0] : '';
-    const pool = mode ? all.filter(x => x.k === SPOT_F[mode][1]) : all;
+    if (!mode) findSoft(q);
+    const pool = mode ? all.filter(x => x.k === SPOT_F[mode][1]) : q && q === softQ ? all.concat(soft) : all;
     res = q ? pool.map(x => { const t = x.t.toLowerCase(), r = t.startsWith(q) ? 0 : t.includes(q) ? 1 : (x.sub + ' ' + (x.more || '')).toLowerCase().includes(q) ? 2 : -1; return [r, x]; })
         .filter(([r]) => r >= 0).sort((a, b) => a[0] - b[0] || a[1].done - b[1].done).map(([, x]) => x).slice(0, 40)
       : pool.filter(x => mode || x.k !== 'check').slice(0, mode ? 40 : 12);

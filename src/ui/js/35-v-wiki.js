@@ -18,7 +18,7 @@ Object.assign(views, {
     if (mode !== 'edit') {
       const [n, log] = await Promise.all([names(), api(`log?kind=page&ref=${p.id}`)]);
       crumbs([['Wiki', '#/wiki'], [p.title || 'Sin título']]);
-      app.innerHTML = `<div class="read">${head(esc(p.title) || 'Sin título', `<span title="${esc(when(p.updated))}">Actualizada ${esc(ago(p.updated))}</span>`,
+      app.innerHTML = `<div class="read">${head(esc(p.title) || 'Sin título', `<span title="${esc(when(p.updated))}">Actualizada ${esc(ago(p.updated))}</span>${p.kitty ? ' · <span class="pill ok" title="Kitty la sugiere a los usuarios de los PCs"><i></i>autoayuda en Kitty</span>' : ''}`,
           `<a class="btn" href="#/wiki/${p.id}/edit">${ui('edit', 16)}Editar</a>${moreBtn}`)}
         <article class="prose">${md(p.body, n) || `<p class="muted">Página vacía. <a href="#/wiki/${p.id}/edit">Empieza a escribir</a>.</p>`}</article>
         <div class="read-foot">${collapsible(`${ui('clock', 16)}Historial <span class="count">${log.length}</span>`, timeline(log))}</div></div>`;
@@ -31,10 +31,10 @@ Object.assign(views, {
     app.innerHTML = `<div class="read"><input id="t" class="title-in big" value="${esc(p.title)}" placeholder="Título" aria-label="Título">
       <div class="ed-bar"><span class="dim small">Escribe como en un procesador de textos · <kbd>Ctrl</kbd> <kbd>S</kbd> guarda</span></div>
       <textarea id="b" class="mdin" aria-label="Contenido" placeholder="Escribe aquí…">${esc(p.body)}</textarea>
-      <div class="actionbar"><a class="btn ghost" href="#/wiki/${p.id}">Cancelar</a><button class="btn pri" id="save">${ui('check', 16)}Guardar</button></div></div>`;
+      <div class="actionbar"><label class="small" style="display:flex;gap:8px;align-items:center;margin-right:auto" title="Kitty la sugiere al usuario del PC antes de abrir un aviso, si encaja con lo que escribe. Mejor sin datos internos: la verá cualquiera."><input type="checkbox" id="kt"${p.kitty ? ' checked' : ''}> Sugerir en Kitty como autoayuda</label><a class="btn ghost" href="#/wiki/${p.id}">Cancelar</a><button class="btn pri" id="save">${ui('check', 16)}Guardar</button></div></div>`;
     const b = $('#b');
     richEditor(b, await names()).focus();
-    onSave = async () => { try { await putFresh('pages/' + p.id, {title: $('#t').value, body: b.value}, p.updated); } catch { return; } toast('Página guardada'); location.hash = '#/wiki/' + p.id; };
+    onSave = async () => { try { await putFresh('pages/' + p.id, {title: $('#t').value, body: b.value, kitty: $('#kt').checked}, p.updated); } catch { return; } toast('Página guardada'); location.hash = '#/wiki/' + p.id; };
     $('#save').onclick = onSave;
   },
   async p(t) { // abrir o crear página por título

@@ -37,6 +37,11 @@ const WIPE: &[&str] = &[
     "subnets",
     "tasks",
     "apps",
+    "software",
+    "notices",
+    "files",
+    "scripts",
+    "runs",
 ];
 
 pub fn routes() -> Vec<Route> {

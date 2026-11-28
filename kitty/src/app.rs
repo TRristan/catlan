@@ -25,6 +25,8 @@ enum Ev {
     Remote(Result<String, String>),
     /// Un administrador de catlan ha dado permiso para cerrar Kitty
     Quit,
+    /// Hay algo que el usuario tiene que ver: un aviso de IT o una respuesta en una incidencia
+    Show,
 }
 
 /// El logo de Kitty en naranja (docs/logo/kitty/kit/kitty-symbol-small.svg): n x n píxeles RGBA, con suavizado.
@@ -231,6 +233,32 @@ pub fn run(start_hidden: bool, updated: bool) {
         });
     }
 
+    // Avisos de IT y respuestas en «Mis avisos», también con la ventana escondida: cada minuto. Lo nuevo la abre.
+    if let Ok(c) = &conf {
+        let (url, ukey, p) = (c.url.clone(), c.ukey.clone(), proxy.clone());
+        std::thread::spawn(move || {
+            let (mut seen_notices, mut seen_it): (std::collections::HashSet<i64>, Option<i64>) = (Default::default(), None);
+            loop {
+                let (code, r) = net::post(&format!("{url}/api/agent/mine"), &json!({"ukey": ukey}));
+                if code == 200 {
+                    let ids = |k: &str, f: &str| -> Vec<i64> { r[k].as_array().map(|a| a.iter().filter_map(|x| x[f].as_i64()).collect()).unwrap_or_default() };
+                    // las respuestas de antes de abrir Kitty no la abren: solo las que llegan después
+                    let last_it = ids("incidents", "last_it").into_iter().max();
+                    let new_reply = seen_it.is_some_and(|s| last_it.is_some_and(|l| l > s));
+                    seen_it = Some(last_it.unwrap_or(0).max(seen_it.unwrap_or(0)));
+                    let new_notice = ids("notices", "id").into_iter().any(|i| seen_notices.insert(i));
+                    if p.send_event(Ev::Js(js_call("mine", &json!({"status": code, "body": r})))).is_err() {
+                        break;
+                    }
+                    if (new_notice || new_reply) && p.send_event(Ev::Show).is_err() {
+                        break;
+                    }
+                }
+                std::thread::sleep(Duration::from_secs(60));
+            }
+        });
+    }
+
     // ¿el servicio ha instalado un Kitty nuevo? Esta ventana se reabre con él
     if let Some(me) = crate::update::installed() {
         let p = proxy.clone();
@@ -274,6 +302,7 @@ pub fn run(start_hidden: bool, updated: bool) {
                 let _ = webview.evaluate_script("kitty.askQuit()");
             }
             Event::UserEvent(Ev::Quit) => *flow = ControlFlow::Exit,
+            Event::UserEvent(Ev::Show) => show(&window, &webview),
             Event::UserEvent(Ev::Ask(r)) => {
                 show(&window, &webview);
                 let _ = webview.evaluate_script(&js_call("remoteAsk", &r));
@@ -333,7 +362,11 @@ pub fn run(start_hidden: bool, updated: bool) {
                                 return;
                             }
                             let _ = p.send_event(Ev::Remote(Ok(r["who"].as_str().unwrap_or("IT").to_string())));
-                            let why = remote::session(&url, &ukey, &id, &stop);
+                            let pn = p.clone();
+                            let note: remote::Note = Arc::new(move |t: String| {
+                                let _ = pn.send_event(Ev::Js(js_call("remoteNote", &json!({"text": t}))));
+                            });
+                            let why = remote::session(&url, &ukey, &id, &stop, note);
                             let _ = p.send_event(Ev::Remote(Err(why)));
                         });
                     }
@@ -375,11 +408,36 @@ pub fn run(start_hidden: bool, updated: bool) {
                             }
                         });
                     }
+                    // la conversación de una incidencia, contestar y la autoayuda de la wiki
+                    op @ ("thread" | "reply" | "help") => {
+                        let Ok(c) = &conf else { return };
+                        let (f, body) = match op {
+                            "thread" => ("thread", json!({"ukey": c.ukey, "id": m["id"]})),
+                            "reply" => ("replied", json!({"ukey": c.ukey, "id": m["id"], "text": m["text"]})),
+                            _ => ("help", json!({"ukey": c.ukey, "q": m["q"]})),
+                        };
+                        ask(&proxy, f, format!("{}/api/agent/{op}", c.url), body);
+                    }
                     op @ ("mine" | "send") => match &conf {
                         Ok(c) if op == "mine" => ask(&proxy, "mine", format!("{}/api/agent/mine", c.url), json!({"ukey": c.ukey})),
                         Ok(c) => {
-                            let body = json!({"ukey": c.ukey, "title": m["title"], "body": m["body"], "priority": m["priority"]});
-                            ask(&proxy, "sent", format!("{}/api/agent/incident", c.url), body);
+                            let mut body = json!({"ukey": c.ukey, "title": m["title"], "body": m["body"], "priority": m["priority"]});
+                            let url = format!("{}/api/agent/incident", c.url);
+                            if m["shot"].as_bool() != Some(true) {
+                                ask(&proxy, "sent", url, body);
+                                return;
+                            }
+                            // la captura sin Kitty delante: se esconde, captura y vuelve
+                            window.set_visible(false);
+                            let p = proxy.clone();
+                            std::thread::spawn(move || {
+                                std::thread::sleep(Duration::from_millis(400));
+                                let shot = remote::screenshot();
+                                let _ = p.send_event(Ev::Show);
+                                body["shot"] = shot.map(|j| facts::b64(&j)).into();
+                                let (status, r) = net::post(&url, &body);
+                                let _ = p.send_event(Ev::Js(js_call("sent", &json!({"status": status, "body": r}))));
+                            });
                         }
                         // sin instalar: la página tiene que saberlo, o el botón se queda esperando
                         Err(e) => {
