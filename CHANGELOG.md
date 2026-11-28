@@ -3,6 +3,12 @@
 Cada versión, lo que cambia para quien usa catlan. Sigue [SemVer](https://semver.org/lang/es/): el primer número sube
 cuando hay que hacer algo a mano al actualizar.
 
+## 2.2.1
+
+### Cambia
+- **catlan.exe y kitty.exe tienen icono**: el gato de catlan y el de Kitty, en el Explorador, la barra de tareas y el
+  Administrador de tareas. Los PCs reciben la Kitty nueva solos.
+
 ## 2.2.0
 
 ### Nuevo
