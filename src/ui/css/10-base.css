@@ -66,6 +66,7 @@ select{appearance:none;padding-right:34px;background-image:url("data:image/svg+x
 .fields.two{grid-template-columns:1fr 1fr;column-gap:16px}
 .field label{display:block;font-size:12.5px;font-weight:560;color:var(--tx2);margin:0 0 6px}
 .field input,.field select,.field textarea{width:100%}
+.field input[type=checkbox],.field input[type=radio]{width:auto;flex:none;margin:0;accent-color:var(--acc)} /* las casillas, de su tamaño: no a todo el ancho */
 .field.full{grid-column:1/-1}
 .title-in{font-size:24px;font-weight:680;letter-spacing:-.022em;border-color:transparent!important;background:transparent;box-shadow:none!important;padding:4px 10px!important;margin-left:-10px;height:auto!important;border-radius:10px;min-width:0;flex:1 1 220px}
 .title-in:hover{background:var(--s2)}.title-in:focus{background:var(--s1);border-color:var(--line2)!important}
