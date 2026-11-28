@@ -8,7 +8,7 @@ HERE = Path(__file__).parent.parent  # la raíz del repositorio
 BIN = os.environ.get("CATLAN_BIN") or str(HERE / "target" / "release" / ("catlan.exe" if os.name == "nt" else "catlan"))
 if not Path(BIN).exists():
     sys.exit(f"No encuentro {BIN}: compila con «cargo build --release» o indica la ruta en CATLAN_BIN")
-MIGRATIONS = 34  # migraciones numeradas de src/db.rs
+MIGRATIONS = 35  # migraciones numeradas de src/db.rs
 SECRET = ("community", "pass", "priv_pass")
 SEAL = b"CATLAN-CIFRADO-1"
 sha = lambda t: hashlib.sha256(t.encode()).hexdigest()
@@ -355,7 +355,7 @@ try:
             return e.code, "", json.loads(e.read() or b"null")
 
     st, adm, me = raw("/api/login", "POST", {"name": "admin", "pass": "miau"})
-    assert st == 200 and adm.startswith(f"catlan_{sha(str(Path(env['CATLAN_DATA']).resolve()))[:10]}=") and me == {"id": 1, "name": "admin", "admin": 1, "must_change": 0, "totp": 0, "ext": "", "readonly": False, "groups": []}
+    assert st == 200 and adm.startswith(f"catlan_{sha(str(Path(env['CATLAN_DATA']).resolve()))[:10]}=") and me == {"id": 1, "name": "admin", "admin": 1, "must_change": 0, "totp": 0, "ext": "", "photo_v": 0, "readonly": False, "groups": []}
     assert raw("/api/pages", cookie=adm)[0] == 200 and raw("/api/login", "POST", {"name": "admin", "pass": "mal"})[0] == 401
     # Instalación nueva: la wiki trae la «Guía de catlan» (uso, funciones y qué hace con los datos), una sola vez
     guia = call("/api/pages")[1]
@@ -809,6 +809,23 @@ try:
     note = [h for h in call(f"/api/incidents/{k2['id']}")[1]["history"] if not h["change"]][0]
     fid = int(note["text"].split("/api/files/")[1].rstrip(")"))
     assert st == 201 and call(f"/api/files/{fid}") == (200, b"\xff\xd8\xffcaptura") and call(f"/api/files/{fid}", auth="")[0] == 401
+    # imágenes de la wiki y fotos de perfil: solo imágenes de verdad (un SVG lleva scripts)
+    def put_raw(path, data, method="POST", auth=AUTH, headers={}):
+        req = urllib.request.Request(f"http://127.0.0.1:{PORT}{path}", data, method=method, headers={"Authorization": auth, **headers})
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, None
+    PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 40
+    assert put_raw("/api/files", b"<svg onload=alert(1)>")[0] == 400 and put_raw("/api/files", PNG, auth="")[0] == 401
+    st, img = put_raw("/api/files", PNG, headers={"x-nombre": urllib.parse.quote("esquema red ñ.png")})
+    assert st == 201 and img["name"] == "esquema red ñ.png" and call(img["url"]) == (200, PNG), img
+    assert put_raw("/api/me/photo", b"no es imagen", "PUT")[0] == 400 and put_raw("/api/me/photo", PNG, "PUT", auth="")[0] == 401
+    st, me1 = put_raw("/api/me/photo", PNG, "PUT")
+    assert st == 200 and me1["photo_v"] == 1 and call(f"/api/users/{me1['id']}/photo") == (200, PNG)
+    assert next(u for u in call("/api/users")[1] if u["id"] == me1["id"])["photo_v"] == 1
+    assert call("/api/me/photo", "DELETE")[1]["photo_v"] == 2 and call(f"/api/users/{me1['id']}/photo")[0] == 404
     # chat: el usuario ve su aviso y las notas públicas de IT, y contesta
     call(f"/api/incidents/{ki['id']}/notes", "POST", {"text": "nota interna"})
     call(f"/api/incidents/{ki['id']}/notes", "POST", {"text": "¿Has probado a reiniciarla?", "public": True})

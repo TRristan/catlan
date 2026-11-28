@@ -58,6 +58,7 @@ async function boot() {
   $('[data-v="cuenta"]').title = `Mi cuenta · ${ME.name}${ME.readonly ? ' · solo vista' : ''}`;
   document.body.classList.toggle('ro', !!ME.readonly);
   $('#nav-opts').hidden = !ME.admin;
+  await loadPeople();
   if (booted) return route();
   booted = true; route(); pollMonitor(); setInterval(pollMonitor, 10000);
   if (!tourSeen()) setTimeout(() => tour(), 700); // primera vez de este usuario: el paseo
@@ -97,6 +98,9 @@ Object.assign(views, {
           <div class="set"><span>Sonidos de alerta<small>Están en Monitor, junto a lo que vigilas</small></span><a class="btn sm" href="#/monitor">Abrir Monitor</a></div>
           <div class="set"><span class="small muted">Se guardan en este navegador</span><button class="btn ghost sm" id="reset-settings">Restablecer</button></div></section></div>
         <aside class="side-col">
+          <section class="card pad" style="--i:1"><h3 class="card-t">${ui('user', 15)}Foto de perfil</h3>
+            <div class="me-ph"><span id="me-av">${avatar(ME.name)}</span><div><button class="btn sm" id="ph-up">${ui('image', 15)}${ME.photo_v ? 'Cambiar' : 'Subir foto'}</button>
+              ${ME.photo_v ? '<button class="btn ghost sm" id="ph-del">Quitar</button>' : ''}<small class="dim">Sale junto a lo que haces en Actividad e historiales.</small></div></div></section>
           <section class="card pad" style="--i:1"><h3 class="card-t">${ui('key', 15)}Acceso</h3>
             ${ME.ext ? '<p class="small muted" style="margin:0">Tu usuario es del dominio: la contraseña y la verificación en dos pasos se cambian allí.</p>'
               : `<div class="set"><span>Contraseña</span><button class="btn sm" id="pw">Cambiar</button></div>
@@ -114,6 +118,22 @@ Object.assign(views, {
     };
     $('#reset-settings').onclick = () => { S = {...DEF}; applySettings(); toast('Ajustes restablecidos'); };
     $('#tour-again').onclick = () => tour();
+    // la foto, recortada al centro en un cuadrado de 256 px: ligera y sin datos de la cámara (EXIF, GPS…)
+    $('#ph-up').onclick = () => {
+      const inp = Object.assign(document.createElement('input'), {type: 'file', accept: 'image/*'});
+      inp.onchange = async () => {
+        const f = inp.files[0]; if (!f) return;
+        const bmp = await createImageBitmap(f).catch(() => null);
+        if (!bmp) return toast('Esa imagen no se puede abrir', 'bad');
+        const s = Math.min(bmp.width, bmp.height), cv = Object.assign(document.createElement('canvas'), {width: 256, height: 256});
+        cv.getContext('2d').drawImage(bmp, (bmp.width - s) / 2, (bmp.height - s) / 2, s, s, 0, 0, 256, 256);
+        const blob = await new Promise(ok => cv.toBlob(ok, 'image/jpeg', .88));
+        try { ME = await api('me/photo', 'PUT', blob, 'image/jpeg'); } catch { return; }
+        await loadPeople(); toast('Foto de perfil cambiada'); route(false);
+      };
+      inp.click();
+    };
+    $('#ph-del') && ($('#ph-del').onclick = async () => { try { ME = await api('me/photo', 'DELETE'); } catch { return; } await loadPeople(); toast('Foto quitada'); route(false); });
     $('#logout').onclick = async () => { await api('logout', 'POST'); location.reload(); };
     if (!ME.ext) { $('#pw').onclick = () => passDialog(false); $('#totp').onclick = async () => { await totpDialog(); route(false); }; }
   },

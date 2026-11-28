@@ -51,6 +51,10 @@ pub fn routes() -> Vec<Route> {
         r("GET", "/api/me", Perm::Pending, Ctx::me_get),
         r("POST", "/api/me/password", Perm::Pending, Ctx::me_password),
         r("POST", "/api/me/totp", Perm::User, Ctx::me_totp),
+        // la foto de perfil: cada uno la suya (también los de solo vista); la ven todos los que entran
+        r("PUT", "/api/me/photo", Perm::Own, Ctx::me_photo),
+        r("DELETE", "/api/me/photo", Perm::Own, Ctx::me_photo),
+        r("GET", "/api/users/{id}/photo", Perm::User, Ctx::user_photo),
         // inicio de sesión con el dominio: lo que necesita la página de login, sin sesión; la configuración, administradores
         r("GET", "/api/sso", Perm::Free, |c| Ok(js(200, sso::public(c.qs.get("e").map_or("", |v| v[0].as_str()))))),
         r("GET", "/api/sso/start", Perm::Free, Ctx::sso_start),
@@ -83,7 +87,7 @@ pub fn routes() -> Vec<Route> {
 }
 
 pub fn me(uid: i64) -> Result<Value> {
-    let mut u = q("SELECT id, name, admin, must_change, totp != '' AS totp, substr(ext, 1, 4) AS ext FROM users WHERE id=?", p![uid])?.one().unwrap_or_default();
+    let mut u = q("SELECT id, name, admin, must_change, totp != '' AS totp, substr(ext, 1, 4) AS ext, photo_v FROM users WHERE id=?", p![uid])?.one().unwrap_or_default();
     u.insert("readonly".into(), readonly(uid)?.into());
     u.insert("groups".into(), q("SELECT group_id FROM members WHERE user_id=?", p![uid])?.into_iter().map(|r| r["group_id"].clone()).collect::<Vec<_>>().into());
     Ok(u.into())
@@ -216,6 +220,27 @@ impl Ctx {
         Ok(no_content().header("Set-Cookie", format!("{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0", *COOKIE)))
     }
 
+    /// PUT: el cuerpo es la imagen (JPEG, PNG, GIF o WebP, hasta 1 MB; la web la manda ya recortada a 256 px). DELETE: quitarla.
+    fn me_photo(&mut self) -> Result<Resp> {
+        if self.req.method == "DELETE" {
+            q("UPDATE users SET photo=NULL, photo_v=photo_v+1 WHERE id=?", p![self.uid()])?;
+        } else {
+            let img = self.req.body.to_vec();
+            if crate::util::image_mime(&img).is_none() || img.len() > 1 << 20 {
+                return bad("la foto tiene que ser una imagen JPEG, PNG, GIF o WebP de hasta 1 MB");
+            }
+            q("UPDATE users SET photo=?, photo_v=photo_v+1 WHERE id=?", p![img, self.uid()])?;
+        }
+        Ok(js(200, me(self.uid())?))
+    }
+
+    fn user_photo(&mut self) -> Result<Resp> {
+        let Some((_, img)) = db::blob("SELECT '', photo FROM users WHERE id=?", p![self.id()])?.filter(|(_, i)| !i.is_empty()) else { return Ok(err(404, "sin foto")) };
+        let mime = crate::util::image_mime(&img).unwrap_or("application/octet-stream");
+        // la URL lleva ?v=photo_v: con cada foto nueva cambia, así que se puede guardar sin miedo
+        Ok(Resp::new(200, img, mime).header("Cache-Control", "private, max-age=31536000, immutable").header("X-Content-Type-Options", "nosniff"))
+    }
+
     fn me_get(&mut self) -> Result<Resp> {
         Ok(js(200, me(self.uid())?))
     }
@@ -270,7 +295,7 @@ impl Ctx {
             // para asignar incidencias: solo nombres
             return Ok(js(200, q("SELECT id, name FROM users ORDER BY name COLLATE NOCASE", p![])?.rows));
         }
-        Ok(js(200, q("SELECT id, name, admin, must_change, totp != '' AS totp, substr(ext, 1, 4) AS ext, created FROM users ORDER BY name COLLATE NOCASE", p![])?.rows))
+        Ok(js(200, q("SELECT id, name, admin, must_change, totp != '' AS totp, substr(ext, 1, 4) AS ext, created, photo_v FROM users ORDER BY name COLLATE NOCASE", p![])?.rows))
     }
 
     /// Uno o muchos (lista). Todo se valida antes de guardar nada. Sin contraseña se genera una provisional,
