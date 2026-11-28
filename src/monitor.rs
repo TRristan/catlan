@@ -835,7 +835,7 @@ pub fn monitor_state() -> Result<Value> {
         .map(|r| {
             let name = [r.s("label"), r.s("item_name"), r.s("host")].into_iter().find(|s| !s.is_empty()).unwrap_or("").to_string();
             let problems: Value = serde_json::from_str(r.s("problems")).unwrap_or(json!([]));
-            json!({"id": r["id"], "name": name, "state": r["state"], "problems": problems, "error": r["error"],
+            json!({"id": r["id"], "name": name, "kind": r["kind"], "state": r["state"], "problems": problems, "error": r["error"],
                    "mute_until": r["mute_until"], "mute_from": r["mute_from"]})
         })
         .collect();

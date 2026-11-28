@@ -79,6 +79,6 @@ $code = try { $h = [Security.Cryptography.SHA256]::Create().ComputeHash([Text.En
 Write-Host "Kitty instalado en $env:COMPUTERNAME (código $code)." -ForegroundColor Green
 for ($i = 0; $i -lt 30 -and -not (Get-ItemProperty $r -Name when -ErrorAction SilentlyContinue); $i++) { Start-Sleep 1 }
 $st = Get-ItemProperty $r
-if ($st.state -eq 'pendiente') { Write-Host "Acéptalo en catlan: Inventario → Kitty pide entrar (código $code)." }
+if ($st.state -eq 'pendiente') { Write-Host "Acéptalo en catlan: PCs (Kitty) → Kitty pide entrar (código $code)." }
 elseif ($st.state -eq 'error') { Write-Host "Primer envío con error: $($st.error)" -ForegroundColor Yellow }
 elseif ($st.state) { Write-Host "Primer envío: $($st.state)." }

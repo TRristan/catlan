@@ -65,7 +65,7 @@ const isMuted = x => !!x.mute_until && date(x.mute_until) > Date.now() && (!x.mu
 const isPlanned = x => !!x.mute_from && date(x.mute_from) > Date.now() && date(x.mute_until) > Date.now(); // mantenimiento que aún no ha empezado
 const whenTxt = t => date(t).toLocaleString('es', {weekday: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'});
 const muteTxt = x => isPlanned(x) ? `mantenimiento ${whenTxt(x.mute_from)} – ${whenTxt(x.mute_until)}` : (x.mute_from ? 'en mantenimiento hasta ' : 'silenciado hasta ') + whenTxt(x.mute_until);
-async function testAlerts() { // Opciones → Avisos y Monitor: el mismo aviso de prueba
+async function testAlerts() { // Administración → General y Monitor: el mismo aviso de prueba
   try {
     const r = await api('monitor/test', 'POST'), bad = Object.entries(r).filter(([, err]) => err);
     toast(bad.length ? `Falló: ${bad.map(([ch, err]) => `${ch} (${err})`).join(' · ')}` : `Aviso de prueba enviado por ${Object.keys(r).join(', ')}`, bad.length ? 'bad' : undefined);
@@ -111,8 +111,8 @@ async function pollMonitor() {
   }
   monPrev = Object.fromEntries(monData.checks.map(c => [c.id, c.state]));
   // Salud: avisos por temperatura, disco, RAID… con el mismo sonido
-  const srcs = monData.sources || [], sick = srcs.filter(x => x.state === 'warn' || x.state === 'error'), hb = $('#hl-badge');
-  hb.hidden = !sick.length; hb.textContent = sick.length;
+  const srcs = monData.sources || [], sick = srcs.filter(x => x.state === 'warn' || x.state === 'error');
+  for (const [b, n] of [[$('#hl-badge'), sick.filter(x => x.kind !== 'kitty').length], [$('#pc-badge'), sick.filter(x => x.kind === 'kitty').length]]) { b.hidden = !n; b.textContent = n; } // Hardware y PCs, cada uno lo suyo
   if (srcPrev) for (const x of srcs) {
     if (isMuted(x)) continue;
     if ((x.state === 'warn' || x.state === 'error') && srcPrev[x.id] !== x.state) { toast(`${x.name}: ${x.problems[0] || x.error}`, 'bad'); if (S.soundOn) playSound(); }

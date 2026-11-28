@@ -4,7 +4,7 @@ Object.assign(views, {
     crumbs([['Inventario', '#/inv'], ['Descubrir red']]);
     const kinds = Object.entries(ICONS).filter(([k]) => !['cloud', 'user', 'rack'].includes(k));
     app.innerHTML = head('Descubrir red', 'Busca equipos por ping y SNMP, y añádelos al inventario y al monitor de una vez')
-      + `<form class="card pad" id="d-form" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
+      + tabs(TABS.inv) + `<form class="card pad" id="d-form" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
         <div class="field" style="flex:2 1 200px;margin:0"><label for="d-net">Red</label><input id="d-net" name="net" class="mono" required placeholder="10.0.0.0/24" value="${esc(S.lastNet || '')}" spellcheck="false"></div>
         <div class="field" style="flex:1 1 150px;margin:0"><label for="d-c">Comunidad SNMP <span class="dim">· opcional</span></label><input id="d-c" name="community" type="password" placeholder="public" autocomplete="off"></div>
         <button class="btn pri" id="d-go">${ui('search', 16)}Escanear</button></form><div id="d-out" class="mt"></div>`;
@@ -58,25 +58,17 @@ Object.assign(views, {
   // Usuarios y grupos: altas de uno o de muchos (pegando una lista) y acciones sobre varios a la vez
   async opts() {
     const [us, gs] = await Promise.all([api('users'), api('groups')]); // sin sesión, esto ya lleva al login
-    crumbs([['Opciones']]);
+    crumbs([['Administración']]);
     if (!ME.admin) {
       app.innerHTML = empty('cog', 'Solo para administradores', 'Aquí están los usuarios, los grupos y lo que afecta a todo catlan.');
       return;
     }
-    app.innerHTML = head('Opciones', 'Lo que afecta a todo catlan · solo administradores', '')
-      + `<div class="rows stagger">
-          <a class="rowlink" href="#/users" style="--i:0"><span class="badge-ic">${ui('users', 18)}</span><div class="grow"><b>Usuarios y grupos</b>
-            <span class="ex">${us.length} ${us.length === 1 ? 'usuario' : 'usuarios'} · ${gs.length} ${gs.length === 1 ? 'grupo' : 'grupos'} · quién entra y quién puede editar</span></div><span style="display:flex;transform:rotate(-90deg)" class="dim">${ui('chev', 16)}</span></a>
-          <a class="rowlink" href="#/inv" style="--i:1"><span class="badge-ic">${ui('signal', 18)}</span><div class="grow"><b>Kitty en los PCs</b>
-            <span class="ex">En Inventario: «Añadir con Kitty» y aceptar los que piden entrar</span></div><span style="display:flex;transform:rotate(-90deg)" class="dim">${ui('chev', 16)}</span></a>
-          <a class="rowlink" href="#/apps" style="--i:2"><span class="badge-ic">${ui('box', 18)}</span><div class="grow"><b>Programas en los PCs</b>
-            <span class="ex">Lo que Kitty instala y mantiene actualizado en todos los PCs con winget</span></div><span style="display:flex;transform:rotate(-90deg)" class="dim">${ui('chev', 16)}</span></a>
-          <a class="rowlink" href="#/sistema" style="--i:2"><span class="badge-ic">${ui('pulse', 18)}</span><div class="grow"><b>Salud de catlan</b>
-            <span class="ex">Tamaño de la base de datos, copias diarias, estado del monitor y comprobaciones atrasadas</span></div><span style="display:flex;transform:rotate(-90deg)" class="dim">${ui('chev', 16)}</span></a>
-          <a class="rowlink" href="/api/backup" id="bk" style="--i:3"><span class="badge-ic">${ui('layers', 18)}</span><div class="grow"><b>Descargar copia de seguridad</b>
+    app.innerHTML = head('Administración', 'Lo que afecta a todo catlan · solo administradores', '')
+      + tabs(TABS.admin) + `<div class="rows stagger">
+          <a class="rowlink" href="/api/backup" id="bk" style="--i:0"><span class="badge-ic">${ui('layers', 18)}</span><div class="grow"><b>Descargar copia de seguridad</b>
             <span class="ex">Toda la base de datos, cifrada con una contraseña (lleva las credenciales de SNMP y avisos). Para restaurarla: <code>catlan descifrar copia.catlan data/catlan.db</code> con catlan parado.</span></div>${ui('redo', 16)}</a></div>
         <section class="card pad mt" aria-labelledby="al-t"><h3 class="card-t" id="al-t">${ui('bell', 16)}Avisos fuera de catlan <span class="dim small" id="al-ch" style="font-weight:400"></span></h3>
-          <p class="small muted" style="margin:0 0 12px">Cuando algo cae y cuando vuelve, avisos de Salud, incidencias críticas y garantías. Las contraseñas y tokens guardados no se vuelven a mostrar: déjalos en blanco para conservarlos.</p>
+          <p class="small muted" style="margin:0 0 12px">Cuando algo cae y cuando vuelve, avisos de Hardware y de los PCs, incidencias críticas y garantías. Las contraseñas y tokens guardados no se vuelven a mostrar: déjalos en blanco para conservarlos.</p>
           <form id="al-f" class="fields two" autocomplete="off">
             <div class="field full"><b class="small">Correo</b></div>
             <div class="field"><label for="al-h">Servidor SMTP</label><input id="al-h" name="SMTP_HOST" class="mono" placeholder="smtp.empresa.com"></div>
@@ -177,13 +169,13 @@ Object.assign(views, {
     };
   },
   async users() {
-    crumbs([['Opciones', '#/opts'], ['Usuarios']]);
+    crumbs([['Administración', '#/opts'], ['Usuarios y grupos']]);
     const [us, gs] = await Promise.all([api('users'), api('groups')]);
     const gname = Object.fromEntries(gs.map(g => [g.id, g.name])), groupsOf = id => gs.filter(g => g.members.includes(id));
     const sel = new Set();
-    app.innerHTML = head('Usuarios', `${us.length} ${us.length === 1 ? 'usuario' : 'usuarios'} · ${gs.length} ${gs.length === 1 ? 'grupo' : 'grupos'}`,
+    app.innerHTML = head('Usuarios y grupos', `${us.length} ${us.length === 1 ? 'usuario' : 'usuarios'} · ${gs.length} ${gs.length === 1 ? 'grupo' : 'grupos'}`,
         `<button class="btn" id="gadd">${ui('users', 16)}Añadir grupos</button><button class="btn pri" id="add">${ui('plus', 16)}Añadir usuarios</button>`)
-      + `<div class="ufil"><input id="ufil" type="search" placeholder="Filtrar usuarios…" aria-label="Filtrar usuarios" autocomplete="off"></div>
+      + tabs(TABS.admin) + `<div class="ufil"><input id="ufil" type="search" placeholder="Filtrar usuarios…" aria-label="Filtrar usuarios" autocomplete="off"></div>
       <div class="card tbl-wrap"><table class="tbl utbl"><thead><tr><th style="width:36px"><input type="checkbox" id="uall" aria-label="Seleccionar todos"></th><th>Usuario</th><th>Grupos</th><th class="hide-m">Estado</th><th style="width:44px"></th></tr></thead>
         <tbody>${us.map(u => `<tr data-id="${u.id}" data-n="${esc(u.name.toLowerCase())}"><td><input type="checkbox" class="usel" value="${u.id}" aria-label="Seleccionar ${esc(u.name)}"></td>
           <td><b>${esc(u.name)}</b>${u.id === ME.id ? ' <span class="dim">(tú)</span>' : ''}<div class="dim small">Desde ${esc(date(u.created).toLocaleDateString('es'))}</div></td>

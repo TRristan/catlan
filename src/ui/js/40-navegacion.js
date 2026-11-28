@@ -1,10 +1,30 @@
 // ── Navegación ──────────────────────────────────────────
 let redraw = null, onSave = null, cleanup = null; // redraw: la vista abierta se refiltra en sitio para no perder cambios sin guardar
 function moveInd() {
-  const a = $('#nav a.on'), ind = $('#nav .ind');
-  ind.style.opacity = a ? 1 : 0;
-  if (a) ind.style.transform = `translateY(${a.offsetTop}px)`;
+  const a = $('#nav a.on'), ind = $('#nav .ind'), shown = a && a.closest('.ngl')?.clientHeight !== 0; // en un grupo plegado no se ve
+  ind.style.opacity = shown ? 1 : 0;
+  if (shown) ind.style.transform = `translateY(${a.offsetTop}px)`;
 }
+// Sección encendida en la barra; las subpantallas encienden la suya (#/sla → Monitor…)
+const NAV_OF = {p: 'wiki', discover: 'inv', sla: 'monitor', mant: 'monitor', users: 'opts', sistema: 'opts', apps: 'pcs', remoto: 'pcs'};
+function navOn(v) {
+  document.querySelectorAll('#nav a').forEach(a => { a.classList.toggle('on', a.dataset.v === (NAV_OF[v] || v)); a.toggleAttribute('aria-current', a.classList.contains('on')); });
+  foldNav(true); moveInd();
+}
+// Grupos plegables: se recuerdan en S.fold; al llegar a una sección, su grupo se abre (sin guardarlo)
+function foldNav(arrive = false) {
+  document.querySelectorAll('#nav .ngrp').forEach(g => {
+    const fold = !!S.fold?.[g.dataset.g] && !(arrive && g.querySelector('a.on'));
+    g.classList.toggle('fold', fold); g.querySelector('.ngt').setAttribute('aria-expanded', !fold);
+  });
+}
+$('#nav').addEventListener('click', e => {
+  const t = e.target.closest('.ngt'); if (!t) return;
+  const g = t.closest('.ngrp').dataset.g, fold = !t.closest('.ngrp').classList.contains('fold');
+  S.fold = {...S.fold, [g]: fold}; applySettings(); foldNav();
+});
+$('#nav').addEventListener('transitionend', e => e.target.classList.contains('ngl') && moveInd());
+let addNext = false; // «Nuevo» de algo que se crea en su sección: al abrirla, su botón #add
 async function route(animate = true) {
   cleanup?.(); redraw = onSave = cleanup = null; closeMenu(); hideCard();
   for (const k in cards) delete cards[k]; // al cambiar de vista, las fichas flotantes se vuelven a pedir: pueden haber cambiado
@@ -12,26 +32,32 @@ async function route(animate = true) {
   document.body.classList.remove('nav-open');
   const [, view = 'home', ...rest] = location.hash.split('/');
   const v = views[view] ? view : 'home';
-  document.querySelectorAll('#nav a').forEach(a => { a.classList.toggle('on', a.dataset.v === ({p: 'wiki', discover: 'inv', cad: 'inv', sla: 'monitor', users: 'opts', sistema: 'opts', apps: 'opts', tablero: 'inc', remoto: 'salud'}[v] || v)); a.toggleAttribute('aria-current', a.classList.contains('on')); });
-  moveInd();
+  navOn(v);
   delete app.dataset.w;
-  try { await views[v](rest.join('/') || null); }
+  try { await views[v](rest.join('/') || null); app.querySelectorAll('.tabs').forEach(seg); if (addNext) $('#add')?.click(); }
   catch (e) { console.error(e); app.innerHTML = empty('alert', 'No se ha podido abrir', 'Puede que se haya borrado o que el servidor no responda.', `<a class="btn" href="#/${v === 'p' ? 'wiki' : v}">Volver</a>`); }
+  addNext = false;
   app.classList.remove('in');
   if (animate) { void app.offsetWidth; app.classList.add('in'); scrollTo({top: 0}); }
 }
 addEventListener('hashchange', () => route());
 $('#spot-btn').onclick = spotlight;
-$('#new').onclick = e => menu(e.currentTarget, [['Página de wiki', create.page, {icon: 'book'}], ['Equipo', create.item, {icon: 'box'}], ['Equipos en serie…', itemSeries, {icon: 'layers'}], ['Esquema', create.map, {icon: 'nodes'}], ['Rack', create.rack, {icon: 'rack'}], ['Incidencia', () => incidentDialog(), {icon: 'ticket'}]]);
+// «Nuevo», agrupado como la barra lateral
+const goAdd = h => () => { addNext = true; location.hash === h ? route(false) : location.hash = h; };
+$('#new').onclick = e => menu(e.currentTarget, [['Comprobación…', goAdd('#/monitor'), {icon: 'signal'}], ['Equipo por SNMP…', goAdd('#/salud'), {icon: 'thermo'}], ['Caducidad…', goAdd('#/cad'), {icon: 'clock'}], '-',
+  ['Incidencia', () => incidentDialog(), {icon: 'ticket'}], ...(ME?.admin ? [['PC con Kitty…', kittyAdd, {icon: 'screen'}]] : []), '-',
+  ['Equipo', create.item, {icon: 'box'}], ['Equipos en serie…', itemSeries, {icon: 'layers'}], ['Red…', goAdd('#/redes'), {icon: 'net'}], ['Rack', create.rack, {icon: 'rack'}], ['Esquema', create.map, {icon: 'nodes'}], '-',
+  ['Página de wiki', create.page, {icon: 'book'}]]);
 // Rueda del ratón sobre la barra lateral: sección anterior / siguiente
 let wheelAcc = 0, wheelLock = 0;
 $('#side').addEventListener('wheel', e => {
-  if (matchMedia('(max-width:760px)').matches) return;
+  const nav = $('#nav');
+  if (matchMedia('(max-width:760px)').matches || nav.scrollHeight > nav.clientHeight + 1) return; // si la barra no cabe, la rueda la desplaza
   e.preventDefault();
   if (Date.now() < wheelLock) return;
   wheelAcc += e.deltaY;
   if (Math.abs(wheelAcc) < 40) return;
-  const links = [...document.querySelectorAll('#nav a')], i = links.findIndex(a => a.classList.contains('on'));
+  const links = [...document.querySelectorAll('#nav a:not([hidden])')].filter(a => a.closest('.ngl')?.clientHeight !== 0), i = links.findIndex(a => a.classList.contains('on'));
   const next = links[Math.max(0, Math.min(links.length - 1, i + Math.sign(wheelAcc)))];
   wheelAcc = 0; wheelLock = Date.now() + 420; // un paso por gesto, también con trackpad
   if (next && !next.classList.contains('on')) location.hash = next.getAttribute('href');
@@ -81,22 +107,18 @@ document.addEventListener('focusin', e => { const a = refOf(e); if (a) showCard(
 document.addEventListener('focusout', e => { if (refOf(e)) hideCard(); });
 addEventListener('scroll', () => $('#top').classList.toggle('scrolled', scrollY > 4), {passive: true});
 // Cajones: ajustes y menú móvil
-// Tutorial: la primera vez de cada usuario en este navegador; se repite desde Ajustes → Ver el tutorial
+// Tutorial: la primera vez de cada usuario en este navegador; se repite desde Mi cuenta → Ver el tutorial
 const TOUR = [
-  [null, '¡Bienvenido a catlan!', 'En un minuto te enseño dónde está cada cosa. Puedes saltarlo y volver a verlo cuando quieras desde Ajustes.'],
+  [null, '¡Bienvenido a catlan!', 'En un minuto te enseño dónde está cada cosa. Puedes saltarlo y volver a verlo cuando quieras desde Mi cuenta.'],
   ['[data-v="dash"]', 'Dashboard', 'Tu tablero: elige las tarjetas en «Personalizar», arrástralas y agrándalas. Es lo primero que ve todo el equipo.'],
-  ['[data-v="wiki"]', 'Wiki', 'Procedimientos y documentación. Enlaza un equipo con [[#id]], una incidencia con [[INC-n]] y otra página con [[Nombre]]. Aquí tienes también la «Guía de catlan».'],
-  ['[data-v="inv"]', 'Inventario', 'Todos tus equipos con IP, nº de serie, ubicación y garantía. Altas a mano, en serie o descubriendo la red; y «Añadir con Kitty» para los PCs.'],
-  ['[data-v="maps"]', 'Esquemas', 'Diagramas de red con iconos. «Topología automática» lo dibuja solo leyendo LLDP, CDP y la tabla MAC de un switch.'],
-  ['[data-v="racks"]', 'Racks', 'Tus armarios montados U a U, con bocas de switch, patch panel y PDU.'],
-  ['[data-v="monitor"]', 'Monitor', 'Ping, puertos, webs, certificados y DNS cada pocos segundos. Si algo cae, avisa en pantalla, con su sonido y por tus canales.'],
-  ['[data-v="salud"]', 'Salud', 'Temperaturas, discos, ventiladores y puertos de NAS y switches por SNMP, y los PCs con Kitty en «Kittens».'],
-  ['[data-v="inc"]', 'Incidencias', 'Tickets con prioridad, estado y persona o grupo asignado. Los críticos avisan por tus canales. En la vista «Tablero» los cambias de estado arrastrándolos y llevas tus tareas y notas.'],
-  ['[data-v="log"]', 'Actividad', 'Quién cambió qué y cuándo, con una foto de cada versión.'],
-  ['#nav-opts', 'Opciones', 'Usuarios y grupos, avisos por correo, Telegram o webhook, copia de seguridad y la zona de peligro. Solo la ven los administradores.', 'admin'],
+  ['[data-g="vig"]', 'Vigilancia', 'Monitor (ping, puertos, webs, certificados y DNS, con su disponibilidad y los mantenimientos), Hardware por SNMP, el syslog de tus equipos y las caducidades de licencias, dominios y garantías.'],
+  ['[data-g="srv"]', 'Servicio', 'Incidencias con prioridad, estado y persona o grupo asignado; Mis tareas, un tablero con tus incidencias, tareas y notas; y los PCs con Kitty, con su control remoto.'],
+  ['[data-g="inf"]', 'Infraestructura', 'El inventario (y «Descubrir red»), las redes con sus IPs, los racks U a U y los esquemas de red, que se pueden dibujar solos leyendo un switch.'],
+  ['[data-g="con"]', 'Conocimiento', 'La wiki: enlaza un equipo con [[#id]], una incidencia con [[INC-n]] y otra página con [[Nombre]]. La guía de catlan y la actividad: quién cambió qué y cuándo.'],
+  ['[data-v="cuenta"]', 'Mi cuenta', 'Tema, color, densidad, tu contraseña y la verificación en dos pasos. Y si se te olvida algo, aquí puedes volver a ver este tutorial.'],
+  ['#nav-opts', 'Administración', 'Avisos por correo, Telegram o webhook, usuarios y grupos, copia de seguridad y el estado de catlan. Solo la ven los administradores.', 'admin'],
   ['#spot-btn', 'Buscar en todo', 'Alt+C o / desde cualquier sitio. Empieza por W: para la wiki, U: para equipos o T: para incidencias.'],
-  ['#new', 'Nuevo', 'Crea cualquier cosa desde aquí: página, equipo, esquema, rack o incidencia. Lo que vigila el monitor se añade en Monitor → Vigilar.'],
-  ['#open-settings', 'Ajustes', 'Tema, color y densidad (los sonidos de alerta están en Monitor). Y si se te olvida algo, aquí puedes volver a ver este tutorial.'],
+  ['#new', 'Nuevo', 'Crea cualquier cosa desde aquí, en el mismo orden que la barra lateral.'],
   [null, 'Listo', 'Todo es local: catlan no envía tus datos a nadie que no configures tú. En la Wiki tienes la «Guía de catlan» con todos los detalles.', 'end'],
 ];
 const tourKey = () => 'catlan-tour-' + (ME?.id || 0);
@@ -105,7 +127,9 @@ function tour(i = 0) {
   const steps = TOUR.filter(t => t[3] !== 'admin' || ME?.admin);
   document.querySelector('#tour')?.remove();
   if (i >= steps.length) { try { localStorage.setItem(tourKey(), '1'); } catch {} return; }
-  const [sel, title, text, extra] = steps[i], el = sel && document.querySelector(sel), r = el?.getBoundingClientRect();
+  const [sel, title, text, extra] = steps[i], el = sel && document.querySelector(sel);
+  if (el?.closest('#nav')) el.scrollIntoView({block: 'nearest'}); // la barra puede no caber en pantalla
+  const r = el?.getBoundingClientRect();
   const shown = r && r.width > 0 && r.right > 0 && r.left < innerWidth && !el.closest('[hidden]'); // en el móvil el menú está plegado: tarjeta al centro
   const t = document.createElement('div');
   t.id = 'tour';
@@ -141,35 +165,14 @@ function tour(i = 0) {
   };
   card.querySelector('[data-t="next"]').focus();
 }
-async function openGuide() {
-  const g = (await api('pages').catch(() => [])).find(x => x.title === 'Guía de catlan');
-  if (g) location.hash = '#/wiki/' + g.id;
-  else toast('No encuentro la «Guía de catlan» en la Wiki: se crea al instalar catlan, y quizá se borró', 'bad');
-}
+const openGuide = () => { location.hash = '#/guia'; };
 addEventListener('resize', () => { const t = document.querySelector('#tour'); if (t) tour(+t.querySelector('.tstep').textContent.split(' ')[0] - 1); });
-function drawer(open) {
-  document.body.classList.toggle('drawer-open', open);
-  $('#settings').inert = !open;
-  if (open) { requestAnimationFrame(() => document.querySelectorAll('#settings .seg').forEach(seg)); setTimeout(() => $('#close-settings').focus(), 50); }
-}
-$('#open-settings').onclick = () => drawer(true);
-$('#tour-again').onclick = () => { drawer(false); setTimeout(() => tour(), 250); };
-$('#guide-open').onclick = () => { drawer(false); openGuide(); };
-$('#close-settings').onclick = () => drawer(false);
 $('#open-nav').onclick = () => document.body.classList.add('nav-open');
-$('#scrim').onclick = () => { drawer(false); document.body.classList.remove('nav-open'); };
+$('#scrim').onclick = () => document.body.classList.remove('nav-open');
 $('#toggle-rail').onclick = () => { S.rail = !S.rail; applySettings(); };
-$('#settings .swatches').innerHTML = ACCENTS.map(([n, c]) => `<button data-v="${c}" style="--c:${c}" title="${n}" aria-label="Acento ${n}"></button>`).join('');
-$('#settings').onclick = e => {
-  const sw = e.target.closest('.switch');
-  if (sw) { S[sw.dataset.k] = !S[sw.dataset.k]; return applySettings(); }
-  const b = e.target.closest('[data-v]'), g = b?.closest('[data-k]');
-  if (g) { S[g.dataset.k] = b.dataset.v; applySettings(); }
-};
-$('#reset-settings').onclick = () => { S = {...DEF}; applySettings(); toast('Ajustes restablecidos'); };
 addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); onSave?.(); return; }
-  if (e.key === 'Escape') { closeMenu(); drawer(false); document.body.classList.remove('nav-open'); }
+  if (e.key === 'Escape') { closeMenu(); document.body.classList.remove('nav-open'); }
   if (e.altKey && e.code === 'KeyC' || e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) && !document.activeElement.isContentEditable) { e.preventDefault(); spotlight(); } // Alt+C (o /): Spotlight
 });
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => document.querySelectorAll('.seg').forEach(seg));

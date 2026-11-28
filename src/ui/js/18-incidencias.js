@@ -34,14 +34,4 @@ async function groupDialog(g = {}, users) {
   await (g.id ? api('groups/' + g.id, 'PUT', b) : api('groups', 'POST', b)); toast('Grupo guardado'); return true;
 }
 let incFilter = 'open';
-const incViews = cur => `<div class="seg" id="iv" role="group" aria-label="Vista">${[['list', 'Lista', 'ul'], ['board', 'Tablero', 'kanban']]
-  .map(([k, t, ic]) => `<button data-v="${k}" class="${k === cur ? 'on' : ''}" aria-pressed="${k === cur}">${ui(ic, 15)}${t}</button>`).join('')}</div>`;
-const incViewsBind = () => {
-  seg($('#iv'));
-  $('#iv').onclick = e => {
-    const b = e.target.closest('[data-v]'); if (!b || S.incView === b.dataset.v) return;
-    S.incView = b.dataset.v; applySettings();
-    location.hash === '#/inc' ? route() : location.hash = '#/inc';
-  };
-};
 const incOpenTree = new Set(); // padres desplegadas: se recuerdan al volver a la lista

@@ -1,8 +1,8 @@
 Object.assign(views, {
   async remoto(sid) {
     const st0 = sid && await api('remote/' + sid).catch(() => null);
-    if (!st0) { app.innerHTML = empty('alert', 'Esta sesión ya no existe', 'Pide otra desde la ficha del equipo o desde Salud.'); return crumbs([['Control remoto']]); }
-    crumbs([['Salud', '#/salud'], [st0.pc], ['Control remoto']]);
+    if (!st0) { app.innerHTML = empty('alert', 'Esta sesión ya no existe', 'Pide otra desde la ficha del equipo o desde PCs (Kitty).'); return crumbs([['Control remoto']]); }
+    crumbs([['PCs (Kitty)', '#/pcs'], [st0.pc], ['Control remoto']]);
     app.dataset.w = 'wide';
     app.innerHTML = `<div class="rm" id="rm">
         <header class="rm-bar"><span class="pill" id="rm-st"><i></i><span></span></span><b>${esc(st0.pc)}</b><span class="dim small" id="rm-t"></span><span class="grow"></span>

@@ -3,7 +3,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 
 // ── Ajustes (por navegador) ─────────────────────────────
 const ACCENTS = [['Mandarina', '#e8772e'], ['Cobalto', '#4f6ef7'], ['Jade', '#1f9d6a'], ['Lavanda', '#8b6cf0'], ['Coral', '#e5566b'], ['Grafito', '#7d828c']];
-const DEF = {theme: 'auto', accent: '#e8772e', density: 'comfy', motion: 'auto', rail: false, dock: true, incView: 'list', sound: 'bell', soundOn: true, vol: .7};
+const DEF = {theme: 'auto', accent: '#e8772e', density: 'comfy', motion: 'auto', rail: false, dock: true, fold: {}, sound: 'bell', soundOn: true, vol: .7};
 let S = {...DEF};
 try { S = {...DEF, ...JSON.parse(localStorage.getItem('catlan') || '{}')}; } catch {}
 function applySettings() {

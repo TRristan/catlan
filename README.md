@@ -34,7 +34,7 @@
 - **2.0: HTTPS siempre y Kitty anclado a catlan.** catlan crea su propio certificado si no le das uno, y el comando de
   instalación de Kitty lleva su huella: nadie en la red puede colar otro instalador ni ver la pantalla del control remoto.
   **Hay que reinstalar Kitty** (mismo comando) para el control remoto y las actualizaciones.
-- **Cuánto se guarda**, ahora en Opciones → Salud de catlan; y probado con 3.000 PCs con Kitty.
+- **Cuánto se guarda**, ahora en Administración → Sistema; y probado con 3.000 PCs con Kitty.
 
 Todos los cambios, versión a versión, en [CHANGELOG.md](CHANGELOG.md). Seguridad y cómo avisar de un fallo:
 [SECURITY.md](SECURITY.md).
@@ -77,17 +77,17 @@ van sus discos y qué incidencias tiene abiertas. Con historial de cada cambio.
 | | **Caducidades** · licencias, dominios, certificados y contratos con aviso 30 días antes y el mismo día, como las garantías. |
 | | **Syslog** · catlan escucha en UDP 514 y lo que envía cada equipo del inventario sale en su ficha (30 días). |
 | <img src="docs/screenshots/monitor.png" alt="Monitor"> | **Monitor** · ping, puertos TCP, webs, certificados SSL y DNS cada pocos segundos. Avisa en pantalla, con el **sonido de cada dispositivo** y por correo, Telegram o webhook. Si cae un switch, avisa de él y no de todo lo que cuelga de él. Informe mensual de disponibilidad. |
-| <img src="docs/screenshots/salud-kittens.png" alt="Salud"> | **Salud** · temperaturas, discos, ventiladores, RAID y puertos por **SNMP v2c y v3** (Synology, QNAP, Cisco, HP/Aruba, Ubiquiti, MikroTik…), grabadores Hikvision y **PCs con Kitty**, con gráficos de hasta 90 días. |
+| <img src="docs/screenshots/salud-kittens.png" alt="Hardware"> | **Hardware** y **PCs (Kitty)** · temperaturas, discos, ventiladores, RAID y puertos por **SNMP v2c y v3** (Synology, QNAP, Cisco, HP/Aruba, Ubiquiti, MikroTik…), grabadores Hikvision y **PCs con Kitty**, con gráficos de hasta 90 días. |
 | <img src="docs/screenshots/incidencias.png" alt="Incidencias"> | **Incidencias** · prioridad, estado, persona o grupo asignado, seguimiento e incidencias hijas, en lista o en **tablero**, con tus **tareas y notas personales** al lado. Los usuarios las abren **desde Kitty**, en su PC; las críticas avisan por tus canales. |
-| <img src="docs/screenshots/salud-kitty.png" alt="Kitty en Salud"> | **Control remoto** · ver y manejar la pantalla de un PC con Kitty desde el navegador, siempre con el permiso de quien lo está usando. Sin abrir puertos en el PC y con registro de cada sesión. |
+| <img src="docs/screenshots/salud-kitty.png" alt="Un PC con Kitty"> | **Control remoto** · ver y manejar la pantalla de un PC con Kitty desde el navegador, siempre con el permiso de quien lo está usando. Sin abrir puertos en el PC y con registro de cada sesión. |
 | <img src="docs/screenshots/wiki-guia.png" alt="Wiki"> | **Wiki** · procedimientos en Markdown con editor visual. `[[#id]]` enlaza un equipo, `[[INC-n]]` una incidencia y `[[Página]]` otra página. Una instalación nueva trae la **Guía de catlan**. |
 | <img src="docs/screenshots/buscador.png" alt="Buscador"> | **Buscador global** (`Alt+C` o `/`) · busca en todo; `W:` wiki, `U:` equipos, `T:` incidencias. |
-| <img src="docs/screenshots/opciones.png" alt="Opciones"> | **Opciones** (administradores) · usuarios y grupos con permisos de edición o solo vista, **avisos** configurables con prueba, **copia de seguridad** descargable y zona de peligro. |
+| <img src="docs/screenshots/opciones.png" alt="Administración"> | **Administración** (administradores) · usuarios y grupos con permisos de edición o solo vista, **avisos** configurables con prueba, **copia de seguridad** descargable y zona de peligro. |
 
 Además: **dashboard** personalizable (arrastrar, agrandar, líneas, barras o tarta), **Actividad** con una foto de cada versión,
 **tutorial** guiado la primera vez, aviso si dos personas editan lo mismo a la vez, **deshacer** (`Ctrl+Z`) al borrar,
 **cambios en lote** en el inventario, **mantenimientos programados**, **verificación en dos pasos**, una página de
-**Salud de catlan** en Opciones, y la web se adapta al móvil.
+**Sistema** en Administración, y la web se adapta al móvil.
 
 <p align="center">
   <img src="docs/screenshots/dashboard-claro.png" width="64%" alt="Tema claro">
@@ -116,7 +116,7 @@ docker compose up -d
 
 Abre **http://localhost:8080** y entra con **admin / admin**: catlan te pide cambiar la contraseña antes de nada.
 
-¿Contraseña olvidada? Un administrador te pone una nueva en **Opciones → Usuarios**. Si eres el único administrador,
+¿Contraseña olvidada? Un administrador te pone una nueva en **Administración → Usuarios y grupos**. Si eres el único administrador,
 en el servidor (no hace falta parar catlan):
 
 ```bash
@@ -145,18 +145,18 @@ ventana: conserva la ficha del equipo.
 
 <img src="docs/screenshots/tutorial.png" alt="Tutorial guiado" width="100%">
 
-1. **Al entrar**, un tutorial te enseña dónde está cada cosa (se repite en **Ajustes → Ayuda**). En la Wiki tienes la
+1. **Al entrar**, un tutorial te enseña dónde está cada cosa (se repite en **Mi cuenta → Ayuda**). En la Wiki tienes la
    **Guía de catlan** con todo el detalle.
-2. **Tu equipo de trabajo**: en **Opciones → Usuarios y grupos** pega una lista de nombres (o una columna de Excel) y
+2. **Tu equipo de trabajo**: en **Administración → Usuarios y grupos** pega una lista de nombres (o una columna de Excel) y
    reparte permisos con grupos de *edición* o de *solo vista*.
-3. **Avisos**: en **Opciones → Avisos** pon tu correo, un bot de Telegram o un webhook de Slack, Teams o Discord, y
+3. **Avisos**: en **Administración → General** pon tu correo, un bot de Telegram o un webhook de Slack, Teams o Discord, y
    pulsa «Enviar aviso de prueba».
 4. **Inventario**: **Descubrir red** con tu red (por ejemplo `10.0.0.0/24`) y añade lo que encuentre, o usa **En serie**
    para dar de alta muchos equipos de golpe.
 5. **Monitor**: «Vigilar» lo que no puede caerse; elige cada cuánto y qué sonido suena si cae.
-6. **Salud**: «Añadir equipo» con la IP y la comunidad SNMP de tu NAS o switch. Desde ahí, **Dibujar topología**.
+6. **Hardware**: «Añadir equipo» con la IP y la comunidad SNMP de tu NAS o switch. Desde ahí, **Dibujar topología**.
 7. **PCs**: en **Inventario → Añadir con Kitty** copia una línea, pégala en PowerShell como administrador en el PC y
-   acéptalo cuando pida entrar. Aparecerá en **Salud → Kittens**.
+   acéptalo cuando pida entrar. Aparecerá en **PCs (Kitty)**.
 
 ## Kitty: el gato de catlan en cada PC
 
@@ -172,7 +172,7 @@ El comando de **Inventario → Añadir con Kitty** (Windows PowerShell como admi
 
 - **Cada 15 segundos**, `kitty servicio` (una tarea programada que arranca con el PC, como SYSTEM) envía **solo** nombre, sistema,
   modelo, CPU, memoria, discos, IPs, tiempo encendido, nº de serie y, cada 5 minutos, los **errores y críticos del Visor de
-  eventos** (Sistema y Aplicación, con las rutas de usuario tapadas), que se ven en su ficha de Salud; un crítico, como un apagado
+  eventos** (Sistema y Aplicación, con las rutas de usuario tapadas), que se ven en su ficha de PCs (Kitty); un crítico, como un apagado
   inesperado, avisa. Nada de usuarios, programas, procesos ni archivos.
 - **Un gato en la bandeja** de cada usuario: una ventana con el diseño de catlan para **avisar a IT** («¿Qué está
   fallando?»), seguir **sus avisos** (recibido, en curso, resuelto) y ver **cómo va el PC** en vivo. Cada aviso llega
@@ -183,7 +183,7 @@ El comando de **Inventario → Añadir con Kitty** (Windows PowerShell como admi
   y el teclado del técnico. Una barra avisa mientras dura y tiene un botón para **cortar**.
 - **Se actualiza solo**: cada 5 minutos el servicio compara su `kitty.exe` con el que reparte catlan y, si cambia, lo
   descarga, comprueba su sha256 y se reemplaza; la ventana de cada usuario se reabre con el nuevo.
-- **Instala y actualiza programas** que IT elige en **Opciones → Programas en los PCs**, con winget (incluido en
+- **Instala y actualiza programas** que IT elige en **PCs (Kitty) → Programas**, con winget (incluido en
   Windows 10 y 11). Los instala para todo el equipo y busca actualizaciones cada hora. Quitar uno de la lista no lo
   desinstala.
 - **Arranca solo** al iniciar sesión (clave `Run` de Windows) y **solo un administrador de catlan puede cerrarlo**
@@ -214,7 +214,7 @@ que envía lo mismo **cada 5 minutos**, con los errores y críticos del journal 
 - Las credenciales de SNMP y de los avisos nunca salen por la web. Van en la copia de seguridad, por eso la copia que
   baja la web **va cifrada con una contraseña** (PBKDF2 + SHAKE-256 + HMAC-SHA256).
 - **HTTPS siempre**: sin `CATLAN_CERT`, catlan crea un certificado autofirmado en `data/tls.pem` y escribe su huella
-  SHA-256 al arrancar (y en **Salud de catlan**). El comando de instalación de Kitty lleva esa huella: PowerShell, curl y
+  SHA-256 al arrancar (y en **Administración → Sistema**). El comando de instalación de Kitty lleva esa huella: PowerShell, curl y
   Kitty solo hablan con ese certificado, y el instalador comprueba el SHA-256 de `kitty.exe` antes de ponerlo. En claro
   (HTTP) solo responde al propio equipo, a los proxies de `CATLAN_PROXIES` y a la telemetría de las Kitty instaladas
   antes; la web redirige a https, y sin cifrar no hay login, control remoto ni actualizaciones de Kitty.
@@ -223,7 +223,7 @@ que envía lo mismo **cada 5 minutos**, con los errores y críticos del journal 
 
 ## Usuarios del dominio (LDAP y OIDC)
 
-En **Opciones → Inicio de sesión con el dominio** (solo administradores). Se puede poner uno, otro o los dos.
+En **Administración → General → Inicio de sesión con el dominio** (solo administradores). Se puede poner uno, otro o los dos.
 
 - **Active Directory / LDAP.** Servidor (`ldaps://dc1.empresa.local`) y dominio (`empresa.local`). catlan hace el bind
   **con el propio usuario** (`juan@empresa.local`; vale escribir `juan`, `juan@empresa.local` o `EMPRESA\juan`), le pregunta
@@ -250,7 +250,7 @@ En **Opciones → Inicio de sesión con el dominio** (solo administradores). Se 
 
 ## Actualizar catlan
 
-catlan solo se conecta a GitHub si un administrador lo pide. En **Opciones → Salud de catlan → Actualizaciones**:
+catlan solo se conecta a GitHub si un administrador lo pide. En **Administración → Sistema → Actualizaciones**:
 
 - **Buscar actualizaciones** mira la última versión publicada en
   [Releases](https://github.com/TRristan/catlan/releases).
@@ -276,22 +276,22 @@ Todo se configura desde la web. Opcionalmente, con variables de entorno:
 | `CATLAN_SYSLOG_PORT` | `514` | Puerto UDP del receptor de syslog (`0`: sin syslog; en Linux, 514 necesita root o `CAP_NET_BIND_SERVICE`) |
 | `CATLAN_CERT` · `CATLAN_KEY` | (vacío) | Certificado y clave propios (PEM). Vacío: autofirmado en `data/tls.pem` |
 | `CATLAN_PROXIES` | `127.0.0.1,::1` | Proxies de confianza: solo de ellos se cree `X-Forwarded-For` y `X-Forwarded-Proto` |
-| `CATLAN_SMTP_HOST` · `_PORT` · `_USER` · `_PASS` | (vacío) · `587` | Correo de avisos (465 = SSL directo). Lo de **Opciones → Avisos** manda sobre esto |
+| `CATLAN_SMTP_HOST` · `_PORT` · `_USER` · `_PASS` | (vacío) · `587` | Correo de avisos (465 = SSL directo). Lo de **Administración → General** manda sobre esto |
 | `CATLAN_MAIL_FROM` · `CATLAN_MAIL_TO` | (vacío) | Remitente y destinatarios (separados por comas) |
 | `CATLAN_TELEGRAM_TOKEN` · `CATLAN_TELEGRAM_CHAT` | (vacío) | Avisos por Telegram |
 | `CATLAN_WEBHOOK_URL` | (vacío) | Slack, Teams, Discord, Mattermost o Google Chat |
 
 ## Copias de seguridad
 
-**Opciones → Descargar copia de seguridad** baja toda la base de datos cifrada con la contraseña que elijas (`.catlan`);
+**Administración → Descargar copia de seguridad** baja toda la base de datos cifrada con la contraseña que elijas (`.catlan`);
 o copia `data/catlan.db` con catlan parado. Para restaurar, con catlan parado:
 
 ```bash
 catlan descifrar catlan-20261120-1800.catlan data/catlan.db
 ```
 
-Además, catlan hace **una copia al día** en `data/backups/` y guarda las 7 últimas (se ven en **Opciones → Salud de
-catlan**). Para restaurar una, con catlan parado, cópiala sobre `data/catlan.db`.
+Además, catlan hace **una copia al día** en `data/backups/` y guarda las 7 últimas (se ven en **Administración →
+Sistema**). Para restaurar una, con catlan parado, cópiala sobre `data/catlan.db`.
 
 Al arrancar, catlan comprueba la base de datos (`PRAGMA integrity_check`), aplica las migraciones que falten (numeradas,
 guarda una copia antes) y se niega a abrir una base de datos de una versión más nueva. Usa SQLite en modo WAL: aguanta
@@ -352,7 +352,7 @@ pasa todo en cada cambio (el servidor en Linux, Kitty en Windows).
 - Un usuario puede terminar `kitty.exe` desde el Administrador de tareas. El envío del estado no se corta (lo hace
   el servicio de SYSTEM) y Kitty vuelve a abrirse en el siguiente inicio de sesión.
 - Con envíos cada 15 s, el historial de métricas ocupa más. Por defecto se borra a los 7 días y las medias por hora se
-  guardan 400; los días se cambian en **Opciones → Salud de catlan → Cuánto se guarda**.
+  guardan 400; los días se cambian en **Administración → Sistema → Cuánto se guarda**.
 - Las actualizaciones automáticas de catlan necesitan versiones publicadas en GitHub (Releases); hasta la primera,
   «Buscar actualizaciones» dice que no hay ninguna.
 - Usuarios del dominio: solo los grupos directos de AD (sin anidados), sin LDAP en claro ni StartTLS (solo LDAPS), y

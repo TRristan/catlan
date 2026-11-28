@@ -17,7 +17,7 @@ async function autoTopo(sid) {
 }
 async function autoTopoDialog() {
   const srcs = (await api('health')).filter(h => !['kitty', 'hikvision'].includes(h.kind));
-  if (!srcs.length) return toast('Primero añade el switch en Salud (por SNMP): catlan usará sus credenciales', 'bad');
+  if (!srcs.length) return toast('Primero añade el switch en Hardware (por SNMP): catlan usará sus credenciales', 'bad');
   const f = await dialog(`<h3>Topología automática</h3><p>catlan lee del switch quién está conectado a cada puerto (vecinos LLDP y CDP, y su tabla MAC con la ARP para las IP) y lo dibuja en un esquema. Los equipos que estén en el inventario salen enlazados.</p>
     <div class="field"><label for="tp-s">Switch</label><select id="tp-s" name="src">${srcs.map(h => `<option value="${h.id}">${esc(srcName(h))} · ${esc(h.host)}</option>`).join('')}</select></div>
     <p class="small muted">En el switch tienen que estar activos LLDP o CDP y SNMP. Si el esquema ya existe, se rehace.</p>`, {ok: 'Dibujar'});

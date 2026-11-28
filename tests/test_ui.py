@@ -37,7 +37,7 @@ try:
         page.get_by_label("Contraseña").fill("miau")
         page.get_by_role("button", name="Entrar").click()
         expect(page.locator("#login")).to_have_count(0)
-        expect(page.locator("#user-name")).to_have_text("admin")
+        expect(page.locator('[data-v="cuenta"]')).to_have_attribute("title", "Mi cuenta · admin")
 
         # Alta de equipo desde «Nuevo»
         page.locator("#new").click()
@@ -56,12 +56,12 @@ try:
         assert page.request.get("/api/incidents").json()[0]["status"] == "abierta"
 
         # «Añadir con Kitty»: enseña la huella del certificado y la mete en el comando
-        page.goto("/#/inv")
+        page.goto("/#/pcs")
         page.get_by_role("button", name="Añadir con Kitty").click()
         dlg = page.locator("dialog[open]")
         expect(dlg).to_contain_text("Añadir un equipo con Kitty")
         expect(dlg).to_contain_text(PIN)
-        expect(dlg.locator("code").first).to_contain_text(f"-eq '{PIN}'")
+        expect(dlg.locator("code").first).to_contain_text(f"[KittyPin]::Set('{PIN}')")
         dlg.get_by_role("button", name="Listo").click()
         expect(page.locator("dialog[open]")).to_have_count(0)
 

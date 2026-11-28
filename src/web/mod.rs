@@ -710,6 +710,7 @@ mod tests {
         ("DELETE", "/api/items/{id}", Perm::User),
         ("GET", "/api/items/{id}/refs", Perm::User),
         ("GET", "/api/items/{id}/syslog", Perm::User),
+        ("GET", "/api/syslog", Perm::User),
         ("GET", "/api/expiries", Perm::User),
         ("POST", "/api/expiries", Perm::User),
         ("GET", "/api/expiries/{id}", Perm::User),

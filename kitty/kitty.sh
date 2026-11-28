@@ -96,7 +96,7 @@ code=$(printf %s "$KEY" | sha256sum | cut -c1-8 | tr a-f A-F | sed 's/^\(....\)/
 echo "Kitty instalado en $(hostname) (código $code)."
 state=$(head -n1 "$DIR/state" 2>/dev/null || true)
 case "$state" in
-    pendiente) echo "Acéptalo en catlan: Inventario → Kitty pide entrar (código $code)." ;;
+    pendiente) echo "Acéptalo en catlan: PCs (Kitty) → Kitty pide entrar (código $code)." ;;
     error) echo "Primer envío con error: $(sed -n 3p "$DIR/state")" ;;
     ?*) echo "Primer envío: $state." ;;
 esac

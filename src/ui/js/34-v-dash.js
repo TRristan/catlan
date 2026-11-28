@@ -96,7 +96,7 @@ Object.assign(views, {
     async function configure(w, fresh) {
       const [health, maps] = await Promise.all([w.kind === 'health' ? get('health') : [], w.kind === 'map' ? get('maps') : []]);
       const schemas = maps.filter(m => m.type !== 'rack');
-      if (w.kind === 'health' && !health.length) return void toast('Primero añade un equipo en Salud', 'bad');
+      if (w.kind === 'health' && !health.length) return void toast('Primero añade un equipo en Hardware', 'bad');
       if (w.kind === 'map' && !schemas.length) return void toast('Primero crea un esquema', 'bad');
       const sel = (name, label, opts, cur) => `<div class="field"><label for="dw-${name}">${label}</label><select id="dw-${name}" name="${name}">${opts.map(([v, t]) => `<option value="${esc(v)}" ${String(v) === String(cur) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>`;
       const fields = {

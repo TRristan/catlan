@@ -3,7 +3,23 @@
 .side{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:4px;padding:18px 12px 14px;border-right:1px solid var(--line);overflow:hidden;z-index:40;background:var(--bg)}
 .brand{display:flex;align-items:center;gap:11px;height:40px;padding:0 12px;margin-bottom:14px;font-weight:700;font-size:16.5px;letter-spacing:-.02em;text-decoration:none}
 .brand .wm{display:block}.brand .ic{color:var(--acc);transition:transform .5s var(--spring)}.brand:hover .ic{transform:rotate(-12deg) scale(1.08)}
-.nav{position:relative;display:flex;flex-direction:column;gap:2px}
+.nav{position:relative;display:flex;flex-direction:column;gap:2px;flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-width:none}
+.nav::-webkit-scrollbar{display:none}
+/* Grupos con título que se pliegan; dentro, un solo nivel de secciones */
+.ngt{display:flex;align-items:center;justify-content:space-between;gap:8px;height:28px;margin-top:10px;padding:0 13px;border:0;border-radius:8px;background:none;color:var(--tx3);font:inherit;font-size:11px;font-weight:640;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;white-space:nowrap;transition:color .2s}
+.ngt:hover{color:var(--tx)}
+.ngt .ic{transition:transform .3s var(--e)}
+.ngrp.fold .ngt .ic{transform:rotate(-90deg)}
+.ngl{display:grid;grid-template-rows:1fr;transition:grid-template-rows .3s var(--e)}
+.ngl>div{display:flex;flex-direction:column;gap:2px;min-height:0;overflow:hidden}
+.ngrp.fold .ngl{grid-template-rows:0fr}
+.ngrp:not(:has(a:not([hidden]))){display:none}
+/* Barra contraída: el título es un separador y todo queda a la vista */
+@media (min-width:761px){
+  :root[data-rail] .ngt{width:calc(100% - 24px);height:1px;margin:9px 12px;padding:0;background:var(--line);pointer-events:none}
+  :root[data-rail] .ngt>*{display:none}
+  :root[data-rail] .ngrp.fold .ngl{grid-template-rows:1fr}
+}
 .nav a,.navbtn{position:relative;z-index:1;display:flex;align-items:center;gap:12px;height:38px;padding:0 13px;border-radius:10px;border:0;background:none;color:var(--tx2);font:inherit;font-weight:540;text-decoration:none;cursor:pointer;white-space:nowrap;transition:color .2s,background .2s}
 .nav a:hover,.navbtn:hover{color:var(--tx)}
 .navbtn:hover{background:var(--s2)}
@@ -14,7 +30,7 @@
 .ind{position:absolute;left:0;right:0;top:0;height:38px;border-radius:10px;background:var(--s1);box-shadow:var(--sh1);opacity:0;transition:transform .45s var(--spring),opacity .2s}
 .lbl{transition:opacity .25s var(--e)}
 :root[data-rail] .side .lbl{opacity:0;pointer-events:none}
-.side-foot{margin-top:auto;display:flex;flex-direction:column;gap:2px}
+.side-foot{margin-top:8px;display:flex;flex-direction:column;gap:2px}
 :root[data-rail] #toggle-rail .ic{transform:scaleX(-1)}
 .main{min-width:0;display:flex;flex-direction:column}
 .top{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:12px;height:64px;padding:0 clamp(16px,3vw,36px);background:color-mix(in oklab,var(--bg) 80%,transparent);-webkit-backdrop-filter:saturate(1.5) blur(14px);backdrop-filter:saturate(1.5) blur(14px);border-bottom:1px solid transparent;transition:border-color .3s}
