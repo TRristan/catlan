@@ -3,7 +3,7 @@
 Cada versión, lo que cambia para quien usa catlan. Sigue [SemVer](https://semver.org/lang/es/): el primer número sube
 cuando hay que hacer algo a mano al actualizar.
 
-## Sin publicar
+## 2.1.0
 
 ### Nuevo
 - **Inventario de programas.** Si lo activas en **PCs (Kitty) → Programas**, Kitty cuenta qué hay instalado en cada PC
