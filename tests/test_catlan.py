@@ -8,8 +8,8 @@ HERE = Path(__file__).parent.parent  # la raíz del repositorio
 BIN = os.environ.get("CATLAN_BIN") or str(HERE / "target" / "release" / ("catlan.exe" if os.name == "nt" else "catlan"))
 if not Path(BIN).exists():
     sys.exit(f"No encuentro {BIN}: compila con «cargo build --release» o indica la ruta en CATLAN_BIN")
-MIGRATIONS = 35  # migraciones numeradas de src/db.rs
-SECRET = ("community", "pass", "priv_pass")
+MIGRATIONS = 36  # migraciones numeradas de src/db.rs
+SECRET = ("community", "pass", "priv_pass", "ssh_pass")
 SEAL = b"CATLAN-CIFRADO-1"
 sha = lambda t: hashlib.sha256(t.encode()).hexdigest()
 
@@ -518,7 +518,7 @@ try:
     snd = call("/api/sounds?name=Gong", "POST", b"RIFF-fake-wav", ctype="audio/wav")[1]
     assert call(f"/api/sounds/{snd['id']}/audio")[1] == b"RIFF-fake-wav"
     assert call(f"/api/sounds/{snd['id']}", "DELETE")[0] == 204 and call("/api/sounds")[1] == []
-    v3 = {"host": "127.0.0.1", "v3": True, "user": "lector", "auth": "sha", "pass": "clave-larga", "priv": "aes", "priv_pass": "otra-clave"}
+    v3 = {"host": "127.0.0.1", "v3": True, "user": "lector", "auth": "sha", "pass": "clave-larga", "priv": "aes", "priv_pass": "otra-clave", "ssh_user": "admin", "ssh_pass": "clave-ssh"}
     for bad in [{**v3, "user": ""}, {**v3, "auth": "none"}, {**v3, "pass": "corta"}, {**v3, "auth": "sha1"}, {**v3, "priv": "des"}, {**v3, "v3": 2}]:
         assert call("/api/sources", "POST", bad)[0] == 400, bad
     s3, r3 = call("/api/sources", "POST", {**v3, "label": "v3 sin equipo"})
