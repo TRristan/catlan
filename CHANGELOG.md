@@ -3,6 +3,19 @@
 Cada versión, lo que cambia para quien usa catlan. Sigue [SemVer](https://semver.org/lang/es/): el primer número sube
 cuando hay que hacer algo a mano al actualizar.
 
+## 2.2.0
+
+### Nuevo
+- **Fotos de perfil.** En **Mi cuenta → Foto de perfil** cada uno sube la suya (se recorta a 256 px, sin datos de la
+  cámara). Sale junto a lo que hace cada técnico en Actividad e historiales; lo que hace Kitty sale con su gato.
+- **Imágenes en la wiki** y en las notas: botón de imagen, pegar o arrastrar (JPEG, PNG, GIF o WebP, hasta 8 MB).
+- **El chat de Kitty parece un chat**: burbujas por persona, días, hora y caja de escribir abajo (Intro envía).
+- **Tarjeta del equipo en las incidencias**: si está conectado, CPU, memoria, disco, sistema, IP, seguridad, parches y
+  acceso a control remoto, ficha y estado.
+
+### Arreglado
+- Actividad decía «ejecutar» en vez de «ejecutó un script en», y no tenía verbo para encender un PC.
+
 ## 2.1.1
 
 ### Arreglado
