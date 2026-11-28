@@ -18,6 +18,7 @@ pub fn routes() -> Vec<Route> {
         r("POST", "/api/notices", Perm::User, Ctx::notice_create),
         r("DELETE", "/api/notices/{id}", Perm::User, Ctx::notice_delete),
         r("GET", "/api/files/{id}", Perm::User, Ctx::file_get),
+        r("POST", "/api/files", Perm::User, Ctx::file_put),
         r("POST", "/api/scripts/{id}/run", Perm::Admin, Ctx::script_run),
         r("GET", "/api/runs", Perm::Admin, Ctx::runs_list),
     ]
@@ -83,6 +84,17 @@ impl Ctx {
         q("DELETE FROM notices WHERE id=?", p![&n["id"]])?;
         self.log("borrar", "notice", &n["id"], &n["text"], &Value::Object(n.clone()))?;
         Ok(no_content())
+    }
+
+    /// Una imagen para la wiki o una nota: el cuerpo es la imagen y su nombre va en x-nombre (codificado como URL). Hasta 8 MB.
+    /// shortcut: no se borra al quitarla de la página (queda huérfana); limpiar las que nadie enlaza si llegan a ocupar.
+    fn file_put(&mut self) -> Result<Resp> {
+        let img = self.req.body.to_vec();
+        let Some(mime) = crate::util::image_mime(&img).filter(|_| img.len() <= 8 << 20) else { return bad("solo imágenes JPEG, PNG, GIF o WebP de hasta 8 MB") };
+        let name = form_urlencoded::parse(format!("n={}", self.req.header("x-nombre")).as_bytes()).next().map(|(_, v)| trunc(&v, 150)).unwrap_or_default();
+        let name = if name.trim().is_empty() { "imagen".to_string() } else { name };
+        let id = q("INSERT INTO files(name, mime, data, who) VALUES(?, ?, ?, ?)", p![&name, mime, img, &self.user])?.lastrowid;
+        Ok(js(201, json!({"id": id, "name": name, "url": format!("/api/files/{id}")})))
     }
 
     /// Un archivo de una incidencia (las capturas que manda Kitty). Sin scripts aunque sea un SVG o un HTML.

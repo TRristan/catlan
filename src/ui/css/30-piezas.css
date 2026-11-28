@@ -107,6 +107,11 @@ a.ref:hover,a.iref:hover{background:color-mix(in oklab,var(--acc) 24%,transparen
 .snap{margin:6px 0 4px;padding:12px 14px;max-height:280px;overflow:auto;white-space:pre-wrap;word-break:break-word;font:12px/1.6 var(--mono);color:var(--tx2);background:var(--s2);border-radius:10px}
 .compact .ev{grid-template-columns:26px minmax(0,1fr);padding:7px 0}
 .compact .av{width:26px;height:26px;font-size:11px}
+img.av{object-fit:cover;background:var(--s2)}
+:root .av.kit,:root:not([data-theme=light]) .av.kit{background:color-mix(in oklab,var(--acc) 16%,transparent);color:var(--acc)} /* gana a los colores del modo oscuro */.compact .av.kit .ic{width:19px;height:19px}
+.me-ph{display:flex;align-items:center;gap:14px}.me-ph .av{width:64px;height:64px;font-size:24px}.me-ph .av.kit .ic{width:28px;height:28px}
+.me-ph>div{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.me-ph small{flex-basis:100%;font-size:12px}
+.prose img{display:block;max-width:100%;height:auto;margin:10px 0;border-radius:10px;border:1px solid var(--line)}
 .compact .ev:not(:last-child)::before{left:12.5px;top:38px}
 .compact .ev p{margin-top:3px;font-size:13px}
 

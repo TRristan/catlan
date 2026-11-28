@@ -179,6 +179,26 @@ pub fn quote(s: &str) -> String {
         .collect()
 }
 
+/// El tipo de una imagen por sus primeros bytes (JPEG, PNG, GIF o WebP); None si no es ninguna. No se fía del nombre ni del navegador.
+pub fn image_mime(b: &[u8]) -> Option<&'static str> {
+    match b {
+        [0xFF, 0xD8, 0xFF, ..] => Some("image/jpeg"),
+        [0x89, b'P', b'N', b'G', ..] => Some("image/png"),
+        [b'G', b'I', b'F', b'8', ..] => Some("image/gif"),
+        [b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => Some("image/webp"),
+        _ => None,
+    }
+}
+
+#[test]
+fn tipos_de_imagen() {
+    assert_eq!(image_mime(b"\xFF\xD8\xFF\xE0x"), Some("image/jpeg"));
+    assert_eq!(image_mime(b"\x89PNG\r\n"), Some("image/png"));
+    assert_eq!(image_mime(b"RIFF1234WEBPVP8"), Some("image/webp"));
+    assert_eq!(image_mime(b"<svg onload=alert(1)>"), None); // un SVG lleva scripts: fuera
+    assert_eq!(image_mime(b""), None);
+}
+
 /// Mutex que sigue sirviendo aunque un hilo muriera con él cogido.
 pub fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())

@@ -14,6 +14,7 @@ function toMd(root) {
     if (t === 'A' && c.classList.contains('iref')) return `[[${incId(+href.split('/').pop())}]]`;
     if (t === 'A' && href.startsWith('#/p/')) return `[[${c.textContent}]]`;
     if (t === 'A' && href) return `[${x}](${href})`;
+    if (t === 'IMG' && /^\/api\/files\/\d+$/.test(c.getAttribute('src') || '')) return `\n![${(c.alt || '').replace(/[\[\]]/g, '')}](${c.getAttribute('src')})\n`;
     return x; // span, font, u…: solo su texto
   }).join('');
   const out = [];
@@ -36,7 +37,7 @@ function toMd(root) {
   return out.map(l => l.replace(/\s+$/, '')).join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 const RTE = [['bold', 'Negrita (Ctrl+B)', 'B'], ['italic', 'Cursiva (Ctrl+I)', 'I'], '|', ['h2', 'Título', 'H1'], ['h3', 'Subtítulo', 'H2'], '|',
-  ['ul', 'Lista', 'ul'], ['ol', 'Lista numerada', 'ol'], ['code', 'Código', 'code'], '|', ['link', 'Enlace (Ctrl+K)', 'link'], ['item', 'Enlazar un equipo', 'box'], ['inc', 'Enlazar una incidencia', 'ticket'], ['page', 'Enlazar una página de la wiki', 'book'], '|',
+  ['ul', 'Lista', 'ul'], ['ol', 'Lista numerada', 'ol'], ['code', 'Código', 'code'], '|', ['link', 'Enlace (Ctrl+K)', 'link'], ['item', 'Enlazar un equipo', 'box'], ['inc', 'Enlazar una incidencia', 'ticket'], ['page', 'Enlazar una página de la wiki', 'book'], ['img', 'Imagen (también se puede pegar o arrastrar)', 'image'], '|',
   ['undo', 'Deshacer (Ctrl+Z)', 'undo'], ['redo', 'Rehacer', 'redo']];
 function richEditor(ta, names = {}) {
   const w = document.createElement('div');
@@ -52,7 +53,30 @@ function richEditor(ta, names = {}) {
   const sync = () => { ta.value = toMd(ed); ed.classList.toggle('empty', !ed.textContent.trim() && !ed.querySelector('li,pre')); ta.dispatchEvent(new Event('input', {bubbles: true})); };
   ed.classList.toggle('empty', !ed.textContent.trim());
   ed.oninput = sync;
-  ed.onpaste = e => { e.preventDefault(); document.execCommand('insertText', false, e.clipboardData.getData('text/plain')); }; // texto limpio, sin estilos de otras webs
+  ed.onpaste = e => {
+    e.preventDefault();
+    const imgs = [...e.clipboardData.files].filter(f => f.type.startsWith('image/'));
+    if (imgs.length) return upload(imgs);
+    document.execCommand('insertText', false, e.clipboardData.getData('text/plain')); // texto limpio, sin estilos de otras webs
+  };
+  ed.ondragover = e => { if ([...e.dataTransfer.items].some(i => i.type.startsWith('image/'))) e.preventDefault(); };
+  ed.ondrop = e => {
+    const imgs = [...e.dataTransfer.files].filter(f => f.type.startsWith('image/')); if (!imgs.length) return;
+    e.preventDefault();
+    const at = document.caretRangeFromPoint?.(e.clientX, e.clientY); if (at) { const s = getSelection(); s.removeAllRanges(); s.addRange(at); }
+    upload(imgs);
+  };
+  // cada imagen sube a catlan y entra en el texto como ![nombre](/api/files/N)
+  const upload = async files => {
+    keep();
+    for (const f of files) {
+      if (f.size > 8 << 20) { toast(`${f.name}: como mucho 8 MB`, 'bad'); continue; }
+      const r = await fetch('/api/files', {method: 'POST', headers: {'x-nombre': encodeURIComponent(f.name || 'imagen')}, body: f}).catch(() => null);
+      if (!r?.ok) { toast((await r?.json().catch(() => null))?.error || `No se ha podido subir ${f.name}`, 'bad'); continue; }
+      const {url, name} = await r.json();
+      html(`<img src="${esc(url)}" alt="${esc(name.replace(/\.[a-z0-9]+$/i, ''))}"><br>`);
+    }
+  };
   let range = null;
   const keep = () => { const sel = getSelection(); if (sel.rangeCount && ed.contains(sel.anchorNode)) range = sel.getRangeAt(0).cloneRange(); };
   const back = () => { ed.focus(); if (range) { const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range); } };
@@ -83,6 +107,12 @@ function richEditor(ta, names = {}) {
       return html(`<a class="ref" href="#/inv/${r[0]}" contenteditable="false">${esc(names[r[0]])}</a>&nbsp;`); }
     else if (c === 'inc') { const incs = await api('incidents'), r = await pick('Enlazar una incidencia', incs.map(x => [x.id, `${incId(x.id)} ${x.title}`]));
       if (!r) return back(); return html(`<a class="iref" href="#/inc/${r[0]}" contenteditable="false">${incId(r[0])}</a>&nbsp;`); }
+    else if (c === 'img') {
+      keep();
+      const inp = Object.assign(document.createElement('input'), {type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp', multiple: true});
+      inp.onchange = () => upload([...inp.files]);
+      return inp.click();
+    }
     else if (c === 'page') { const ps = await api('pages'), r = await pick('Enlazar una página', ps.map(x => [x.id, x.title || 'Sin título']));
       if (!r) return back(); return html(`<a href="#/p/${encodeURIComponent(r[1])}">${esc(r[1])}</a>&nbsp;`); }
     ed.focus(); sync(); state();
