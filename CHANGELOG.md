@@ -3,7 +3,24 @@
 Cada versión, lo que cambia para quien usa catlan. Sigue [SemVer](https://semver.org/lang/es/): el primer número sube
 cuando hay que hacer algo a mano al actualizar.
 
-## Sin publicar
+## 2.1.0
+
+### Nuevo
+- **Inventario de programas.** Si lo activas en **PCs (Kitty) → Programas**, Kitty cuenta qué hay instalado en cada PC
+  (nombre, versión y editor). Se ve en la ficha del PC y se busca con **Alt+C**: «anydesk» dice qué PCs lo tienen y con
+  qué versión. Viene apagado y, al apagarlo, se borra lo recogido. Hace falta la Kitty nueva.
+- **Parches y seguridad de los PCs.** Kitty cuenta el último parche, los pendientes y si espera un reinicio; un PC con
+  más de 30 días sin parchear avisa. Un semáforo en cada PC resume antivirus, firewall, BitLocker y la cuenta
+  Administrador de serie.
+- **Avisos a los PCs** (PCs (Kitty) → Avisos): un mensaje en la ventana de Kitty de todos los PCs o de unos cuantos.
+- **Conversación con el usuario del PC.** En una incidencia abierta desde Kitty, «Que la vea … en Kitty» manda la nota
+  a su ventana, y el usuario contesta desde «Mis avisos».
+- **Captura al avisar** y **autoayuda**: Kitty adjunta una captura si se pide y sugiere las páginas de la wiki marcadas
+  con «Sugerir en Kitty».
+- **Scripts de PowerShell** (PCs (Kitty) → Scripts, solo administradores) en uno o varios PCs, con la salida en la
+  ficha del equipo.
+- **Archivos en el control remoto**: enviar uno al PC o pedir uno, hasta 20 MB.
+- **Encender un PC** desde su ficha (Wake-on-LAN).
 
 ### Cambia
 - **Barra lateral por grupos** que se pliegan (y se recuerdan): Vigilancia, Servicio, Infraestructura, Conocimiento y

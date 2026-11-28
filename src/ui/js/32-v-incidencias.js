@@ -97,6 +97,8 @@ Object.assign(views, {
     const mention = [...n.mentions.pages.map(p => ['book', `#/wiki/${p.id}`, p.title || 'Sin título', 'Página de la wiki']), ...n.mentions.items.map(i => ['box', `#/inv/${i.id}`, i.name, 'Notas del equipo']),
       ...n.mentions.incidents.map(x => ['ticket', `#/inc/${x.id}`, `${incId(x.id)} ${x.title}`, 'Incidencia · ' + x.status])];
     crumbs([['Incidencias', '#/inc'], [incId(n.id)]]);
+    // abierta desde Kitty: se puede contestar al usuario del PC (lo ve en «Mis avisos»)
+    const fromKitty = n.history.find(h => h.change && h.text === 'abrió la incidencia' && (h.who || '').startsWith('Kitty · '))?.who.slice(8) || '';
     app.innerHTML = head(`<span class="dim">${incId(n.id)}</span> ${esc(n.title)}`, `Abierta por ${esc(n.author_name || '—')} ${esc(ago(n.created))} · ${statusPill(n.status)} ${prioPill(n.priority)}${n.parent ? ` · cuelga de <a href="#/inc/${+n.parent}">${incId(+n.parent)} ${esc(n.parent_title)}</a>` : ''}`,
       `<button class="chip" id="iref" title="Copiar la referencia para enlazarla desde la wiki">${ui('link', 14)}<span class="mono">[[${incId(n.id)}]]</span></button>${moreBtn}`)
       + `<div class="split stagger"><section class="card pad" style="--i:0">
@@ -106,8 +108,8 @@ Object.assign(views, {
           <button class="btn ghost sm" id="kid" type="button">${ui('plus', 15)}Crear incidencia hija</button>
           <h3 class="card-t mt">Seguimiento</h3>
           <form id="nf"><div class="field"><label for="nt">Actualización</label><textarea id="nt" rows="3" required maxlength="5000" placeholder="Qué se ha hecho, qué falta…"></textarea></div>
-            <div style="display:flex;justify-content:flex-end;margin-top:8px"><button class="btn pri">${ui('check', 16)}Añadir al seguimiento</button></div></form>
-          <ol class="itl">${[...n.history].reverse().map(h => `<li class="${h.change ? 'ch' : 'nt'}"><span><b>${esc(h.who || '—')}</b> ${h.change ? esc(h.text) : 'escribió'} <time class="dim">${esc(ago(h.ts))}</time></span>
+            <div style="display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:8px">${fromKitty ? `<label class="small" style="display:flex;gap:6px;align-items:center;margin-right:auto"><input type="checkbox" id="npub" checked> Que la vea ${esc(fromKitty)} en Kitty</label>` : ''}<button class="btn pri">${ui('check', 16)}Añadir al seguimiento</button></div></form>
+          <ol class="itl">${[...n.history].reverse().map(h => `<li class="${h.change ? 'ch' : 'nt'}"><span><b>${esc(h.who || '—')}</b> ${h.change ? esc(h.text) : 'escribió'} <time class="dim">${esc(ago(h.ts))}</time>${fromKitty && !h.change && h.public && !(h.who || '').startsWith('Kitty · ') ? ' <span class="pill" title="La ve el usuario en Kitty"><i></i>en Kitty</span>' : ''}</span>
             ${h.change ? '' : `<div class="prose tl-note">${md(h.text, names)}</div>`}</li>`).join('')}</ol>
 </section>
         <aside class="side-col"><section class="card pad" style="--i:1"><div class="fields" id="inc-f">
@@ -131,7 +133,7 @@ Object.assign(views, {
     };
     if (!ME.readonly) richEditor($('#nt'), names);
     $('#kid').onclick = () => incidentDialog({parent: n.id, item: n.item, grp: n.grp, priority: n.priority});
-    $('#nf').onsubmit = async e => { e.preventDefault(); if (!$('#nt').value.trim()) return toast('Escribe algo antes de añadirlo', 'bad'); await api(`incidents/${n.id}/notes`, 'POST', {text: $('#nt').value}); route(false); };
+    $('#nf').onsubmit = async e => { e.preventDefault(); if (!$('#nt').value.trim()) return toast('Escribe algo antes de añadirlo', 'bad'); await api(`incidents/${n.id}/notes`, 'POST', {text: $('#nt').value, public: !!$('#npub')?.checked}); route(false); };
     $('#more').onclick = e => menu(e.currentTarget, [
       ['Editar título y descripción', async () => {
         const p = dialog(`<h3>Editar incidencia</h3><div class="fields"><div class="field"><label for="e-t">Título</label><input id="e-t" name="title" required maxlength="200" value="${esc(n.title)}"></div>

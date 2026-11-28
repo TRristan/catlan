@@ -73,7 +73,8 @@ Object.assign(views, {
       $('#bulk').onclick = itemSeries;
       return;
     }
-    const [i, n, refs, log, sys] = await Promise.all([api('items/' + id), names(), api(`items/${id}/refs`), api(`log?kind=item&ref=${id}`), api(`items/${id}/syslog`)]);
+    const [i, n, refs, log, sys, sw] = await Promise.all([api('items/' + id), names(), api(`items/${id}/refs`), api(`log?kind=item&ref=${id}`), api(`items/${id}/syslog`), api('software?item=' + id)]);
+    const runs = refs.agent && ME.admin ? await api('runs?item=' + id) : [];
     const ref = `[[#${i.id}]]`;
     const rel = [...refs.pages.map(p => ['book', `#/wiki/${p.id}`, p.title, 'Página de la wiki']), ...refs.incidents.map(x => ['ticket', `#/inc/${x.id}`, `${incId(x.id)} ${x.title}`, 'Incidencia · ' + x.status]),
       ...refs.items.map(x => ['box', `#/inv/${x.id}`, x.name, 'Notas de otro equipo']),
@@ -90,6 +91,7 @@ Object.assign(views, {
            <button class="btn ghost" id="ip-ping" title="Hacer ping a ${esc(i.ip)} ahora">${ui('signal', 15)}Ping</button>
            <a class="btn ghost" href="http://${esc(i.ip)}" target="_blank" rel="noopener" title="Abrir http://${esc(i.ip)} en otra pestaña">${ui('link', 15)}Abrir web</a>` : '')
         + `<button class="chip" id="ref" title="Copiar la referencia para enlazarlo desde la wiki">${ui('link', 14)}<span class="mono">${ref}</span></button>
+         ${refs.agent && !ME.readonly ? `<button class="btn ghost" id="wake" title="Encender este PC por la red (Wake-on-LAN)">${ui('play', 15)}Encender</button>` : ''}
          ${refs.agent ? `<button class="btn" id="rmt" title="Ver y usar este PC con Kitty, con permiso de quien lo usa">${ui('screen', 16)}Control remoto</button>` : ''}
          <button class="btn pri" id="save" disabled>${ui('check', 16)}Guardar</button>${moreBtn}`)
       + `<div class="split stagger"><section class="card pad" style="--i:0"><div class="fields two">
@@ -104,6 +106,9 @@ Object.assign(views, {
           <div class="scroll" style="max-height:340px"><table class="tbl kv"><tbody>${sys.map(l => `<tr><td class="mono dim small" style="white-space:nowrap">${esc(date(l.ts).toLocaleString('es'))}</td>
             <td>${l.sev <= 3 ? `<span class="pill bad"><i></i>${l.sev <= 2 ? 'crítico' : 'error'}</span>` : l.sev === 4 ? '<span class="pill warn"><i></i>aviso</span>' : ''}</td>
             <td class="mono small" style="word-break:break-word">${esc(l.msg)}</td></tr>`).join('')}</tbody></table></div></section>` : ''}
+        ${refs.agent && ME.admin ? `<section class="card pad mt"><h3 class="card-t">${ui('code', 15)}Scripts <span class="count">${runs.length}</span><button class="btn ghost sm" id="run" style="margin-left:auto">${ui('play', 14)}Ejecutar script…</button></h3>${runsList(runs)}</section>` : ''}
+        ${sw.rows.length ? `<section class="card pad mt"><h3 class="card-t">${ui('box', 15)}Programas instalados <span class="count">${sw.rows.length}</span><span class="dim small" style="font-weight:400;margin-left:auto">según Kitty</span></h3>
+          <div class="scroll" style="max-height:340px"><table class="tbl kv"><tbody>${sw.rows.map(x => `<tr><td>${esc(x.name)}</td><td class="mono small">${esc(x.version)}</td><td class="dim small hide-m">${esc(x.publisher)}</td></tr>`).join('')}</tbody></table></div></section>` : ''}
         <datalist id="dl-status">${STATUSES.map(s => `<option value="${s}">`).join('')}</datalist><datalist id="dl-kind">${Object.values(ICONS).map(([n]) => `<option value="${n.toLowerCase()}">`).join('')}</datalist>`;
     const save = $('#save');
     app.querySelectorAll('.field input,.field textarea').forEach(el => el.oninput = () => { save.disabled = false; onSave = doSave; });
@@ -115,6 +120,13 @@ Object.assign(views, {
     save.onclick = doSave;
     $('#ref').onclick = () => copy(ref);
     $('#rmt') && ($('#rmt').onclick = () => remoteStart(refs.agent));
+    $('#run') && ($('#run').onclick = async () => {
+      const list = await api('scripts');
+      if (!list.length) { toast('Aún no hay scripts: créalos en PCs → Scripts', 'bad'); return; }
+      const f = await dialog(`<h3>Ejecutar un script en ${esc(i.name)}</h3><div class="field"><label for="rs-s">Script</label><select id="rs-s" name="s">${optList(list)}</select></div>`, {ok: 'Ejecutar'});
+      if (f) { await scriptRun(list.find(s => s.id === +f.get('s')), [i.id]); route(false); }
+    });
+    $('#wake') && ($('#wake').onclick = async () => { try { await api(`items/${id}/wake`, 'POST'); toast('Paquete de encendido enviado: si el PC tiene Wake-on-LAN activado, arrancará en un minuto'); } catch {} });
     $('#ip-copy') && ($('#ip-copy').onclick = () => copy(i.ip)); // copy() ya avisa
     $('#ip-ping') && ($('#ip-ping').onclick = async e => {
       const b = e.currentTarget; b.disabled = true;
@@ -180,7 +192,7 @@ Object.assign(views, {
   async apps() {
     crumbs([['PCs (Kitty)', '#/pcs'], ['Programas']]);
     if (!ME.admin) { app.innerHTML = empty('cog', 'Solo para administradores', 'Aquí se elige qué se instala en todos los PCs.'); return; }
-    const [list, hs] = await Promise.all([api('apps'), api('health')]), kits = hs.filter(h => h.kind === 'kitty');
+    const [list, hs, sw] = await Promise.all([api('apps'), api('health'), api('software')]), kits = hs.filter(h => h.kind === 'kitty');
     const st = id => { const r = kits.map(h => [h, h.info?.apps?.[id]]).filter(([, x]) => x); return {ok: r.filter(([, x]) => x.ok).length, bad: r.filter(([, x]) => !x.ok), wait: kits.length - r.length}; };
     app.innerHTML = head('Programas en los PCs', `Kitty los instala si faltan y los actualiza cada hora con winget, en los ${kits.length} PCs con Kitty. Quitar uno de la lista no lo desinstala.`, `<button class="btn" id="add">${ui('plus', 16)}Añadir programa</button>`)
       + tabs(TABS.pcs) + (list.length ? `<div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Programa</th><th>Id de winget</th><th>En los PCs</th><th class="hide-m">Notas</th></tr></thead>
@@ -198,6 +210,10 @@ Object.assign(views, {
       try { await (a.id ? api('apps/' + a.id, 'PUT', d) : api('apps', 'POST', d)); } catch { return; }
       toast(a.id ? 'Guardado' : 'Los PCs lo instalarán en los próximos minutos'); route(false);
     };
+    app.insertAdjacentHTML('beforeend', `<section class="card pad mt" aria-labelledby="sw-t"><h3 class="card-t" id="sw-t">${ui('search', 15)}Inventario de programas</h3>
+      <div class="set"><span>Kitty cuenta qué hay instalado en cada PC<small>Nombre, versión y editor, cada 5 minutos si cambia. Se ve en la ficha de cada PC y se busca con Alt+C. Al apagarlo se borra lo recogido.</small></span>
+        <button class="switch" role="switch" id="sw-on" aria-checked="${!!sw.on}" aria-label="Inventario de programas"></button></div></section>`);
+    $('#sw-on').onclick = async e => { const on = e.currentTarget.getAttribute('aria-checked') !== 'true'; try { await api('software', 'PUT', {on}); } catch { return; } e.currentTarget.setAttribute('aria-checked', on); toast(on ? 'Los PCs mandarán sus programas en los próximos minutos' : 'Inventario de programas apagado y borrado'); };
     [$('#add'), $('#add2')].forEach(b => b && (b.onclick = () => edit()));
     app.querySelectorAll('tr[data-id]').forEach(tr => {
       const a = list.find(x => x.id === +tr.dataset.id);

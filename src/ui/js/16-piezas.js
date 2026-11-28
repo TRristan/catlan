@@ -7,7 +7,7 @@ const tabs = list => `<nav class="seg tabs" aria-label="Pestañas">${list.filter
 const TABS = {
   monitor: [['Comprobaciones', '#/monitor'], ['Disponibilidad', '#/sla'], ['Mantenimientos', '#/mant']],
   inv: [['Equipos', '#/inv'], ['Descubrir red', '#/discover']],
-  pcs: [['PCs', '#/pcs'], ['Programas', '#/apps', 1]],
+  pcs: [['PCs', '#/pcs'], ['Avisos', '#/avisos'], ['Scripts', '#/scripts', 1], ['Programas', '#/apps', 1]],
   admin: [['General', '#/opts'], ['Usuarios y grupos', '#/users'], ['Sistema', '#/sistema']],
 };
 const moreBtn = `<button class="btn icon ghost" id="more" aria-label="Más acciones" aria-haspopup="menu" aria-expanded="false">${ui('more')}</button>`;

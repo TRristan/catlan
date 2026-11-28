@@ -4,6 +4,13 @@ const PROFILES = {generic: 'SNMP genérico', synology: 'Synology', qnap: 'QNAP',
 const srcName = h => h.label || h.item_name || h.host;
 const everyTxt = s => s < 60 ? `${s} s` : s < 3600 ? `${s / 60} min` : `${s / 3600} h`;
 const SRC_KIND = {...PROFILES, kitty: 'Kitty'}, osShort = d => (d || 'Kitty').split(' · ')[0].replace(/^Microsoft /, '').replace(/ \d+(\.\d+)+$/, ''), gb = n => n ? `${+(n / 2 ** 30).toFixed(n < 10 * 2 ** 30 ? 1 : 0)} GB` : '—';
+// PCs con Kitty: semáforo de seguridad y estado de parches
+const secPill = i => i?.seclight ? `<span class="pill ${i.seclight}" title="${esc(i.secwhy?.length ? i.secwhy.join(' · ') : 'Seguridad en orden')}"><i></i>${{ok: 'seguro', warn: 'revisar', bad: 'en riesgo'}[i.seclight]}</span>` : '';
+const patchTxt = p => {
+  const d = p.last ? Math.floor((Date.now() - new Date(p.last + 'T00:00')) / 864e5) : null;
+  return [d == null ? 'sin datos del último' : `<span class="pill ${d > 30 ? 'bad' : 'ok'}"><i></i>último hace ${d} ${d === 1 ? 'día' : 'días'}</span> <span class="mono dim small">${esc(p.kb)}</span>`,
+    p.pending == null ? '' : p.pending ? `${p.pending} pendientes` : 'ninguno pendiente', p.reboot ? '<span class="pill warn"><i></i>reinicio pendiente</span>' : ''].filter(Boolean).join(' · ');
+};
 const upTxt = s => s >= 86400 ? `${Math.floor(s / 86400)} d` : s >= 3600 ? `${Math.floor(s / 3600)} h` : `${Math.floor(s / 60)} min`;
 const fmtV = (v, u) => `${+(+v).toFixed(v >= 100 || u === 'rpm' ? 0 : 1)} ${u}`;
 const fmtBw = v => v >= 1000 ? `${+(v / 1000).toFixed(2)} Gbps` : v >= 1 ? `${+v.toFixed(1)} Mbps` : `${Math.round(v * 1000)} kbps`;

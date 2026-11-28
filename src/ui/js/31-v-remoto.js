@@ -7,13 +7,24 @@ Object.assign(views, {
     app.innerHTML = `<div class="rm" id="rm">
         <header class="rm-bar"><span class="pill" id="rm-st"><i></i><span></span></span><b>${esc(st0.pc)}</b><span class="dim small" id="rm-t"></span><span class="grow"></span>
           <div class="seg" id="rm-mode" role="group" aria-label="Modo"><button data-v="ctl" class="on">${ui('edit', 15)}Controlar</button><button data-v="view">${ui('eye', 15)}Solo ver</button></div>
+          <button class="btn sm" id="rm-up" title="Enviar un archivo a la carpeta Descargas del usuario (hasta 20 MB)">${ui('redo', 15)}<span class="hide-s">Enviar archivo</span></button>
+          <button class="btn sm" id="rm-get" title="Copiar un archivo del PC (hasta 20 MB)">${ui('copy', 15)}<span class="hide-s">Pedir archivo</span></button>
+          <input type="file" id="rm-file" hidden>
           <button class="btn sm" id="rm-fs" title="Pantalla completa">${ui('layers', 15)}<span class="hide-s">Pantalla completa</span></button>
           <button class="btn sm danger" id="rm-end">${ui('x', 15)}Terminar</button></header>
         <div class="rm-stage"><canvas id="rm-cv" tabindex="0" aria-label="Pantalla de ${esc(st0.pc)}: con el foco aquí, el teclado va al PC"></canvas>
+          <div class="rm-files" id="rm-files" hidden></div>
           <div class="rm-wait" id="rm-wait"><span class="rm-pulse">${ui('screen', 30)}</span><h3 id="rm-w-t"></h3><p class="muted" id="rm-w-x"></p></div></div></div>`;
     const cv = $('#rm-cv'), cx = cv.getContext('2d');
     let alive = true, done = false, ctl = true, q = [], lastMove = 0, since = null;
+    // archivos que llegan del PC: para descargar
+    const files = list => {
+      const box = $('#rm-files'); box.hidden = !list?.length; if (!list?.length) return;
+      box.innerHTML = `<b class="small">Del PC</b>` + list.map(f => f.error ? `<span class="small t-bad" title="${esc(f.error)}">${ui('alert', 13)}${esc(f.name)}: ${esc(f.error)}</span>`
+        : `<a class="small" href="/api/remote/${encodeURIComponent(sid)}/files/${+f.id}" download>${ui('layers', 13)}${esc(f.name)} <span class="dim">${(f.size / 1048576).toFixed(1)} MB</span></a>`).join('');
+    };
     const show = st => {
+      files(st.files);
       const [tone, txt] = {pedida: ['warn', 'Esperando permiso'], aceptada: ['ok', 'Conectado'], rechazada: ['bad', 'Rechazada'], cerrada: ['', 'Terminada']}[st.state] || ['', st.state];
       $('#rm-st').className = 'pill ' + tone; $('#rm-st span').textContent = txt;
       if (st.state === 'aceptada' && st.secs != null) since ??= Date.now() - st.secs * 1000;
@@ -24,7 +35,7 @@ Object.assign(views, {
         $('#rm-w-t').textContent = st.state === 'rechazada' ? 'No se ha podido conectar' : 'Sesión terminada';
         $('#rm-w-x').innerHTML = `${esc(st.why || '')}<br><button class="btn mt" id="rm-back">Volver</button>`;
         $('#rm-back').onclick = () => history.back();
-        $('#rm-end').hidden = true; $('#rm-mode').hidden = true;
+        $('#rm-end').hidden = true; $('#rm-mode').hidden = true; $('#rm-up').hidden = true; $('#rm-get').hidden = true;
       }
     };
     show(st0); seg($('#rm-mode'));
@@ -58,6 +69,21 @@ Object.assign(views, {
     cv.onkeydown = cv.onkeyup = e => { if (!ctl) return; e.preventDefault(); e.stopPropagation(); q.push({t: 'k', c: e.code, k: e.key, d: e.type === 'keydown'}); flush(); };
     $('#rm-mode').onclick = e => { const b = e.target.closest('[data-v]'); if (!b) return; ctl = b.dataset.v === 'ctl';
       $('#rm-mode').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); seg($('#rm-mode')); cv.classList.toggle('view', !ctl); };
+    $('#rm-up').onclick = () => $('#rm-file').click();
+    $('#rm-file').onchange = async () => {
+      const f = $('#rm-file').files[0]; $('#rm-file').value = ''; if (!f) return;
+      if (f.size > 20 << 20) return toast('Como mucho 20 MB por archivo', 'bad');
+      toast(`Enviando ${f.name}…`);
+      const r = await fetch(`/api/remote/${encodeURIComponent(sid)}/files`, {method: 'POST', headers: {'x-nombre': encodeURIComponent(f.name)}, body: f}).catch(() => null);
+      if (r?.ok) toast(`${f.name} enviado: lo tiene en Descargas`); else toast((await r?.json().catch(() => null))?.error || 'No se ha podido enviar', 'bad');
+    };
+    $('#rm-get').onclick = async () => {
+      const f = await dialog(`<h3>Pedir un archivo del PC</h3><p>Kitty lo copia con los permisos del usuario del PC, que verá un aviso. Hasta 20 MB.</p>
+        <div class="field"><label for="rg-p">Ruta en el PC</label><input id="rg-p" name="p" class="mono" required spellcheck="false" placeholder="C:\\Users\\ana\\Desktop\\informe.pdf" autofocus></div>`, {ok: 'Pedir'});
+      if (!f) return;
+      q.push({t: 'get', path: f.get('p').trim()}); flush();
+      toast('Pedido: saldrá arriba a la derecha cuando llegue');
+    };
     $('#rm-fs').onclick = () => document.fullscreenElement ? document.exitFullscreen() : $('#rm').requestFullscreen?.();
     const stop = () => { if (!done) { done = true; fetch('/api/remote/' + sid, {method: 'DELETE', keepalive: true}).catch(() => {}); } };
     $('#rm-end').onclick = async () => { stop(); show({state: 'cerrada', why: 'La has terminado tú.'}); };

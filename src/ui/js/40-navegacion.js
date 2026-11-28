@@ -6,7 +6,7 @@ function moveInd() {
   if (shown) ind.style.transform = `translateY(${a.offsetTop}px)`;
 }
 // Sección encendida en la barra; las subpantallas encienden la suya (#/sla → Monitor…)
-const NAV_OF = {p: 'wiki', discover: 'inv', sla: 'monitor', mant: 'monitor', users: 'opts', sistema: 'opts', apps: 'pcs', remoto: 'pcs'};
+const NAV_OF = {p: 'wiki', discover: 'inv', sla: 'monitor', mant: 'monitor', users: 'opts', sistema: 'opts', apps: 'pcs', remoto: 'pcs', avisos: 'pcs', scripts: 'pcs'};
 function navOn(v) {
   document.querySelectorAll('#nav a').forEach(a => { a.classList.toggle('on', a.dataset.v === (NAV_OF[v] || v)); a.toggleAttribute('aria-current', a.classList.contains('on')); });
   foldNav(true); moveInd();

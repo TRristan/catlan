@@ -8,7 +8,7 @@ HERE = Path(__file__).parent.parent  # la raíz del repositorio
 BIN = os.environ.get("CATLAN_BIN") or str(HERE / "target" / "release" / ("catlan.exe" if os.name == "nt" else "catlan"))
 if not Path(BIN).exists():
     sys.exit(f"No encuentro {BIN}: compila con «cargo build --release» o indica la ruta en CATLAN_BIN")
-MIGRATIONS = 32  # migraciones numeradas de src/db.rs
+MIGRATIONS = 34  # migraciones numeradas de src/db.rs
 SECRET = ("community", "pass", "priv_pass")
 SEAL = b"CATLAN-CIFRADO-1"
 sha = lambda t: hashlib.sha256(t.encode()).hexdigest()
@@ -680,7 +680,7 @@ try:
     assert call("/api/agents", auth=LEC)[0] == 403 and call(f"/api/agents/{ag['id']}", "PUT", {"state": "adoptado"}, auth=LEC)[0] == 403
     it = call(f"/api/items/{call(f'/api/agents/{ag['id']}', 'PUT', {'state': 'adoptado'})[1]['item']}")[1]  # la ficha sale ya al aceptar
     assert (it["name"], it["ip"], it["serial"], it["kind"], it["status"]) == ("pc-kitty", "10.0.0.50", "KSN1", "pc", "activo")
-    assert kitty(K1) == (200, {"state": "adoptado", "item": it["id"], "catlan": CAT, "apps": []}) and len(call("/api/items")[1]) == n_items + 1
+    assert kitty(K1) == (200, {"state": "adoptado", "item": it["id"], "catlan": CAT, "apps": [], "software": None, "run": []}) and len(call("/api/items")[1]) == n_items + 1
     call(f"/api/items/{it['id']}", "PUT", {"name": "Portátil de Ana", "notes": "mío"})
     nlog = len(call(f"/api/log?kind=item&ref={it['id']}")[1])
     kitty(K1, ip="10.0.0.51"), kitty(K1, ip="10.0.0.51")
@@ -736,6 +736,48 @@ try:
     kitty(K1, every=1, facts=ok_disks, apps={"Google.Chrome": {"ok": True, "msg": "instalado"}})
     assert next(h for h in call("/api/health")[1] if h["id"] == hk["id"])["info"]["apps"] == {"Google.Chrome": {"ok": True, "msg": "instalado"}}
     assert call(f"/api/apps/{chrome['id']}", "DELETE")[0] == 204 and kitty(K1, every=1, facts=ok_disks)[1]["apps"] == []
+    # Parches y seguridad: el semáforo y el aviso de más de 30 días sin parchear; con la MAC, el PC se enciende por la red
+    iid0 = kitty(K1, every=1, facts=ok_disks)[1]["item"]
+    assert call(f"/api/items/{iid0}/wake", "POST")[0] == 400  # aún no ha mandado su MAC
+    posture = {**ok_disks, "macs": ["00:1a:2b:3c:4d:5e"], "patch": {"last": "2020-01-01", "kb": "KB1", "reboot": True, "pending": 4},
+               "sec": {"defender": True, "sigdays": 1, "av": [], "fwoff": ["Public"], "bitlocker": 0, "admin": False}}
+    kitty(K1, every=1, facts=posture)
+    hp = next(h for h in call("/api/health")[1] if h["id"] == hk["id"])
+    assert hp["info"]["seclight"] == "bad" and hp["info"]["secwhy"] == ["Firewall apagado: Public", "BitLocker apagado en el disco del sistema"], hp["info"]
+    assert hp["info"]["patch"] == {"last": "2020-01-01", "kb": "KB1", "reboot": True, "pending": 4} and any(p.startswith("Sin parches de Windows desde hace") for p in hp["problems"])
+    wk = call(f"/api/items/{iid0}/wake", "POST")
+    assert wk == (200, {"macs": ["00:1a:2b:3c:4d:5e"]}), wk
+    assert call(f"/api/items/{iid0}/wake", "POST", auth="")[0] == 401
+    assert call(f"/api/log?kind=item&ref={iid0}")[1][0]["action"] == "encender"
+    kitty(K1, every=1, facts=ok_disks)
+    # Inventario de programas: apagado no se guarda nada; encendido, Kitty sabe cuántos tiene catlan y se busca por nombre
+    prog = [{"name": "AnyDesk", "version": "9.0.1", "publisher": "AnyDesk Software"}, {"name": "7-Zip 24.09 (x64)", "version": "24.09"}, {"name": ""}, "nada"]
+    assert kitty(K1, every=1, facts=ok_disks, software=prog)[1]["software"] is None and call("/api/software?item=" + str(it["id"]))[1] == {"on": False, "rows": []}
+    assert call("/api/software", "PUT", {"on": True}, auth=LEC)[0] == 403 and call("/api/software", "PUT", {"on": "sí"})[0] == 400
+    assert call("/api/software", "PUT", {"on": True})[1] == {"on": True}
+    iid = kitty(K1, every=1, facts=ok_disks)[1]["item"]
+    assert kitty(K1, every=1, facts=ok_disks)[1]["software"] == 0 and kitty(K1, every=1, facts=ok_disks, software=prog)[1]["software"] == 2
+    assert kitty(K1, every=1, facts=ok_disks, software="mucho")[1]["software"] == 2  # forma rara: se queda lo que había
+    hits = call("/api/software?q=anyd", auth=LEC)[1]
+    assert hits["rows"] == [{"item": iid, "item_name": "pc-kitty", "name": "AnyDesk", "version": "9.0.1"}], hits
+    assert call("/api/software?q=a")[1]["rows"] == [] and call("/api/software?q=%25")[1]["rows"] == []  # % es literal
+    assert [r["name"] for r in call(f"/api/software?item={iid}")[1]["rows"]] == ["7-Zip 24.09 (x64)", "AnyDesk"]
+    assert call("/api/software", "PUT", {"on": False})[1] == {"on": False} and call(f"/api/software?item={iid}")[1]["rows"] == []  # apagar lo borra
+    # Scripts: solo admins; Kitty los recibe en su envío y devuelve la salida en el siguiente
+    assert call("/api/scripts", "POST", {"name": "x", "body": "dir"}, auth=LEC)[0] == 403 and call("/api/scripts", auth=LEC)[0] == 403
+    assert call("/api/scripts", "POST", {"name": "", "body": "dir"})[0] == 400 and call("/api/scripts", "POST", {"name": "x", "body": " "})[0] == 400
+    scr = call("/api/scripts", "POST", {"name": "Quién hay", "body": "whoami"})[1]
+    assert call(f"/api/scripts/{scr['id']}/run", "POST", {"items": []})[0] == 400
+    assert call(f"/api/scripts/{scr['id']}/run", "POST", {"items": [iid]}, auth=LEC)[0] == 403
+    lone = call("/api/items", "POST", {"name": "sin-kitty"})[1]
+    rr = call(f"/api/scripts/{scr['id']}/run", "POST", {"items": [iid, lone["id"]]})[1]
+    assert len(rr["runs"]) == 1 and rr["skipped"] == [lone["id"]]
+    got = kitty(K1, every=1, facts=ok_disks)[1]["run"]
+    assert got == [{"id": rr["runs"][0], "body": "whoami"}] and kitty(K1, every=1, facts=ok_disks)[1]["run"] == []  # una sola vez
+    kitty(K1, every=1, facts=ok_disks, runs=[{"id": rr["runs"][0], "code": 0, "out": "nt authority\\system"}, {"id": 99999, "code": 0, "out": "x"}])
+    run = call(f"/api/runs?item={iid}")[1][0]
+    assert (run["state"], run["code"], run["output"], run["name"]) == ("hecho", 0, "nt authority\\system", "Quién hay"), run
+    assert call(f"/api/runs?item={iid}", auth=LEC)[0] == 403 and call(f"/api/log?kind=item&ref={iid}")[1][0]["action"] == "ejecutar"
     # Actualizar catlan: solo admins; sin pedirlo no se habla con GitHub (aquí no se pulsa «Buscar»)
     up = call("/api/update")[1]
     assert up["auto"] is False and up["last"] is None and up["current"] and call("/api/update", auth=LEC)[0] == 403
@@ -761,6 +803,41 @@ try:
     call("/api/incidents", "POST", {"title": "abierta por IT", "item": hk["item"]})
     st, mine = agent("mine", {"ukey": UK})
     assert st == 200 and [i["title"] for i in mine["incidents"]] == ["No imprime"], mine  # solo lo que avisó el PC
+    # captura al abrir el aviso: un JPEG, guardado con la incidencia y enlazado en su seguimiento
+    assert agent("incident", {"ukey": UK, "title": "x", "shot": base64.b64encode(b"no es jpeg").decode()})[0] == 400
+    st, k2 = agent("incident", {"ukey": UK, "title": "Pantalla rara", "shot": base64.b64encode(b"\xff\xd8\xffcaptura").decode()})
+    note = [h for h in call(f"/api/incidents/{k2['id']}")[1]["history"] if not h["change"]][0]
+    fid = int(note["text"].split("/api/files/")[1].rstrip(")"))
+    assert st == 201 and call(f"/api/files/{fid}") == (200, b"\xff\xd8\xffcaptura") and call(f"/api/files/{fid}", auth="")[0] == 401
+    # chat: el usuario ve su aviso y las notas públicas de IT, y contesta
+    call(f"/api/incidents/{ki['id']}/notes", "POST", {"text": "nota interna"})
+    call(f"/api/incidents/{ki['id']}/notes", "POST", {"text": "¿Has probado a reiniciarla?", "public": True})
+    st, th = agent("thread", {"ukey": UK, "id": ki["id"]})
+    assert st == 200 and th["incident"]["body"] == "Sale en rojo" and [n["text"] for n in th["notes"]] == ["¿Has probado a reiniciarla?"], th
+    assert agent("thread", {"ukey": UK, "id": full["id"] + 1000})[0] == 404 and agent("thread", {"ukey": UK2, "id": ki["id"]})[0] == 403
+    it_inc = next(i for i in call("/api/incidents")[1] if i["title"] == "abierta por IT")
+    assert agent("thread", {"ukey": UK, "id": it_inc["id"]})[0] == 404  # solo las que abrió este PC
+    assert agent("reply", {"ukey": UK, "id": ki["id"], "text": " "})[0] == 400
+    assert agent("reply", {"ukey": UK, "id": ki["id"], "text": "Sí, y sigue igual"}) == (201, {"ok": True})
+    assert [n["who"] for n in agent("thread", {"ukey": UK, "id": ki["id"]})[1]["notes"]][-1] == "Kitty · pc-kitty"
+    mine2 = agent("mine", {"ukey": UK})[1]
+    row = next(i for i in mine2["incidents"] if i["id"] == ki["id"])
+    assert row["notes"] == 2 and row["last_it"] == th["notes"][0]["id"]
+    # autoayuda: solo las páginas marcadas para Kitty
+    call("/api/pages", "POST", {"title": "Impresora atascada", "body": "Abre la tapa y saca el papel.", "kitty": True})
+    call("/api/pages", "POST", {"title": "Contraseñas de la impresora", "body": "secreta"})
+    assert call("/api/pages", "POST", {"title": "x", "kitty": "sí"})[0] == 400
+    hp2 = agent("help", {"ukey": UK, "q": "la impresora no imprime"})[1]["pages"]
+    assert [p["title"] for p in hp2] == ["Impresora atascada"] and agent("help", {"ukey": UK, "q": "no"})[1] == {"pages": []}
+    # avisos masivos: a todos o a unos equipos, hasta que caducan o se quitan
+    for bad in ({"text": "", "hours": 2}, {"text": "x", "hours": 0}, {"text": "x", "hours": 2, "items": [999999]}, {"text": "x", "hours": 2, "items": []}):
+        assert call("/api/notices", "POST", bad)[0] == 400, bad
+    assert call("/api/notices", "POST", {"text": "x", "hours": 2}, auth="")[0] == 401
+    n1 = call("/api/notices", "POST", {"text": "El correo estará caído de 14 a 15 h", "hours": 2})[1]
+    other = call("/api/items", "POST", {"name": "otro-pc"})[1]
+    call("/api/notices", "POST", {"text": "Solo para otro", "hours": 2, "items": [other["id"]]})
+    assert [n["text"] for n in agent("mine", {"ukey": UK})[1]["notices"]] == ["El correo estará caído de 14 a 15 h"]
+    assert call(f"/api/notices/{n1['id']}", "DELETE")[0] == 204 and agent("mine", {"ukey": UK})[1]["notices"] == []
     assert [agent("incident", {"ukey": UK, "title": f"n{i}"})[0] for i in range(10)][-1] == 429  # 10 por hora
     assert agent("nada", {"ukey": UK})[0] == 404
     # Cerrar Kitty: solo con un administrador de catlan
@@ -809,6 +886,24 @@ try:
     assert ws_recv(tech) == b"\xff\xd8\xff\xe0otra"
     ws_send(tech, json.dumps([{"t": "w", "d": 100}]))
     assert json.loads(ws_recv(kit))["input"] == [{"t": "w", "d": 100}]
+    # archivos: el técnico manda uno (Kitty lo recoge) y pide otro (Kitty lo sube y el técnico lo descarga)
+    def send_file(path, data, headers):
+        req = urllib.request.Request(f"http://127.0.0.1:{PORT}{path}", data, method="POST", headers=headers)
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, None
+    up = send_file(f"/api/remote/{sid}/files", b"hola PC", {"Authorization": AUTH, "x-nombre": urllib.parse.quote("../informe ñ.txt")})
+    assert up[0] == 201, up
+    assert json.loads(ws_recv(kit))["input"] == [{"t": "file", "id": up[1]["id"], "name": "informe ñ.txt", "size": 7}]
+    assert call("/api/agent/remote/file", "POST", {"ukey": UK, "sesion": sid, "id": up[1]["id"]}, auth="") == (200, b"hola PC")
+    assert call("/api/agent/remote/file", "POST", {"ukey": UK2, "sesion": sid, "id": up[1]["id"]}, auth="")[0] == 403
+    assert send_file("/api/agent/remote/upload", b"%PDF-1", {"x-kitty": UK, "x-sesion": sid, "x-nombre": "nota.pdf"})[0] == 201
+    st_files = json.loads(ws_recv(tech))
+    assert [(f["name"], f["size"]) for f in st_files["files"]] == [("nota.pdf", 6)], st_files
+    assert call(f"/api/remote/{sid}/files/{st_files['files'][0]['id']}") == (200, b"%PDF-1")
+    assert call(f"/api/remote/{sid}/files/{up[1]['id']}")[0] == 404  # lo que va al PC no vuelve al técnico
     assert agent("remote/answer", {"ukey": UK, "id": sid, "ok": False})[1]["state"] == "cerrada"  # lo corta el usuario del PC
     assert json.loads(ws_recv(tech))["why"] == "la cortó el usuario del PC" and json.loads(ws_recv(kit))["state"] == "cerrada"
     assert frame(b"\xff\xd8x")[1]["state"] == "cerrada"
@@ -820,13 +915,13 @@ try:
     assert ws_recv(hws) == "salud"
     hws.close()
     hist = [h["action"] for h in call(f"/api/log?kind=item&ref={hk['item']}")[1]]
-    assert hist[:3] == ["control remoto terminado", "control remoto aceptado", "pedir control remoto"], hist
+    assert hist[:5] == ["control remoto terminado", "copiar archivo del PC", "enviar archivo al PC", "control remoto aceptado", "pedir control remoto"], hist
     assert urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{PORT}/kitty.exe")).status == 200 if (Path(BIN).parent / "kitty.exe").exists() else call("/kitty.exe", auth="")[0] == 404
     kexe = Path(BIN).parent / "kitty.exe"  # las Kitty instaladas comparan este sha256 con el suyo para actualizarse
     assert call("/kitty.json", auth="")[1]["kitty"] == (hashlib.sha256(kexe.read_bytes()).hexdigest() if kexe.exists() else "")
     # expulsado: fuera de Salud con su historial; la ficha del inventario se queda
     assert call(f"/api/agents/{ag['id']}", "PUT", {"state": "rechazado"})[0] == 200 and not [h for h in call("/api/health")[1] if h["kind"] == "kitty"]
-    assert call(f"/api/metrics?source={hk['id']}&hours=1")[1] == {} and len(call("/api/items")[1]) == n_items + 1
+    assert call(f"/api/metrics?source={hk['id']}&hours=1")[1] == {} and len(call("/api/items")[1]) == n_items + 3  # + otro-pc y sin-kitty
     assert {("agent", "aceptar"), ("agent", "rechazar"), ("agent", "olvidar")} <= {(h["kind"], h["action"]) for h in call("/api/log")[1]}
     assert call("/api/nope")[0] == 404
     # Auto-topología: LLDP, CDP y tabla MAC del switch -> quién está en qué puerto, casado con el inventario y dibujado

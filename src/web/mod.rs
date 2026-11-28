@@ -6,6 +6,7 @@ mod incidencias;
 mod inventario;
 mod kitty;
 mod monitor;
+mod pcs;
 mod remoto;
 mod usuarios;
 mod wiki;
@@ -85,6 +86,7 @@ pub fn routes() -> Vec<Route> {
         monitor::routes(),
         incidencias::routes(),
         remoto::routes(),
+        pcs::routes(),
         vec![
             // lo que no es ninguna de las anteriores: con sesión, «no existe»
             r("*", "/api", Perm::User, nothing),
@@ -671,6 +673,27 @@ mod tests {
         ("GET", "/api/agents", Perm::Admin),
         ("PUT", "/api/agents/{id}", Perm::Admin),
         ("DELETE", "/api/agents/{id}", Perm::Admin),
+        ("GET", "/api/software", Perm::User),
+        ("POST", "/api/items/{id}/wake", Perm::User),
+        ("POST", "/api/agent/thread", Perm::Free),
+        ("POST", "/api/agent/reply", Perm::Free),
+        ("POST", "/api/agent/help", Perm::Free),
+        ("GET", "/api/notices", Perm::User),
+        ("POST", "/api/notices", Perm::User),
+        ("DELETE", "/api/notices/{id}", Perm::User),
+        ("GET", "/api/files/{id}", Perm::User),
+        ("GET", "/api/scripts", Perm::Admin),
+        ("POST", "/api/scripts", Perm::Admin),
+        ("GET", "/api/scripts/{id}", Perm::Admin),
+        ("PUT", "/api/scripts/{id}", Perm::Admin),
+        ("DELETE", "/api/scripts/{id}", Perm::Admin),
+        ("POST", "/api/scripts/{id}/run", Perm::Admin),
+        ("GET", "/api/runs", Perm::Admin),
+        ("POST", "/api/remote/{id}/files", Perm::User),
+        ("GET", "/api/remote/{id}/files/{fid}", Perm::User),
+        ("POST", "/api/agent/remote/file", Perm::Free),
+        ("POST", "/api/agent/remote/upload", Perm::Free),
+        ("PUT", "/api/software", Perm::Admin),
         ("POST", "/api/login", Perm::Free),
         ("POST", "/api/logout", Perm::Pending),
         ("GET", "/api/me", Perm::Pending),
@@ -823,7 +846,7 @@ mod tests {
     }
 
     fn concrete(path: &str) -> String {
-        path.replace("{id}", "1").replace("{other}", "nada").replace("{*rest}", "x/y")
+        path.replace("{id}", "1").replace("{fid}", "1").replace("{other}", "nada").replace("{*rest}", "x/y")
     }
 
     /// Por el router de verdad: sin sesión, toda ruta que no es libre responde 401 (y nunca llega a su manejador).

@@ -10,6 +10,7 @@ mod facts;
 mod net;
 #[cfg(windows)]
 mod remote;
+mod scripts;
 mod update;
 
 /// Un envío, con lo lento recién sacado o reaprovechado, y su resultado anotado para el instalador.
@@ -36,6 +37,7 @@ fn main() {
             use std::time::{Duration, Instant};
             let mut slow: Option<(Instant, serde_json::Value)> = None;
             apps::start();
+            facts::pending_start();
             loop {
                 let t0 = Instant::now();
                 let fresh = slow.as_ref().is_none_or(|(at, _)| at.elapsed() >= net::SLOW_EVERY);

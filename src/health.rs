@@ -786,7 +786,65 @@ pub fn kitty_read(name: &str, x: &Value) -> (Vec<M>, Map<String, Value>) {
     info.insert("serial".into(), txt(x.get("serial"), 100).into());
     info.insert("ips".into(), ips.into());
     info.insert("disks".into(), disks.into());
+    let list = |v: Option<&Value>, n: usize| -> Vec<Value> {
+        v.and_then(Value::as_array).map(|a| a.iter().take(n).filter_map(Value::as_str).map(|s| Value::from(trunc(s.trim(), 100))).collect()).unwrap_or_default()
+    };
+    info.insert("macs".into(), list(x.get("macs"), 16).into());
+    if let Some(p) = x.get("patch").and_then(Value::as_object) {
+        let last = txt(p.get("last"), 10);
+        let pending = p.get("pending").filter(|v| crate::util::is_int(v)).cloned().unwrap_or(Value::Null);
+        info.insert(
+            "patch".into(),
+            json!({"last": NaiveDate::parse_from_str(&last, "%Y-%m-%d").ok().map(|_| last), "kb": txt(p.get("kb"), 20), "reboot": p.get("reboot").and_then(Value::as_bool).unwrap_or(false), "pending": pending}),
+        );
+    }
+    if let Some(sx) = x.get("sec").and_then(Value::as_object) {
+        let b = |k: &str| sx.get(k).and_then(Value::as_bool);
+        let n = |k: &str| sx.get(k).filter(|v| crate::util::is_int(v)).and_then(Value::as_i64);
+        info.insert(
+            "sec".into(),
+            json!({"defender": b("defender"), "sigdays": n("sigdays"), "av": list(sx.get("av"), 8), "bitlocker": n("bitlocker"), "fwoff": list(sx.get("fwoff"), 4), "admin": b("admin")}),
+        );
+    }
     (out, info)
+}
+
+/// Lo que dice la seguridad de un PC con Kitty: (semáforo «ok», «warn» o «bad»; motivos). Rojo: sin antivirus o con el
+/// firewall apagado. Ámbar: firmas de más de 7 días, BitLocker apagado o la cuenta Administrador de serie activa.
+pub fn kitty_security(info: &Map<String, Value>) -> (&'static str, Vec<String>) {
+    let Some(sx) = info.get("sec").and_then(Value::as_object) else { return ("", vec![]) };
+    let (mut red, mut amber) = (vec![], vec![]);
+    let other = sx.get("av").and_then(Value::as_array).is_some_and(|a| !a.is_empty());
+    match sx.get("defender").and_then(Value::as_bool) {
+        Some(false) if !other => red.push("Sin antivirus activo".to_string()),
+        Some(true) if sx.get("sigdays").and_then(Value::as_i64).is_some_and(|d| d > 7) => amber.push(format!("Firmas del antivirus de hace {} días", sx["sigdays"])),
+        _ => {}
+    }
+    if let Some(off) = sx.get("fwoff").and_then(Value::as_array).filter(|a| !a.is_empty()) {
+        red.push(format!("Firewall apagado: {}", off.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")));
+    }
+    if sx.get("bitlocker").and_then(Value::as_i64) == Some(0) {
+        amber.push("BitLocker apagado en el disco del sistema".into());
+    }
+    if sx.get("admin").and_then(Value::as_bool) == Some(true) {
+        amber.push("La cuenta Administrador de serie está activa".into());
+    }
+    let light = if !red.is_empty() {
+        "bad"
+    } else if !amber.is_empty() {
+        "warn"
+    } else {
+        "ok"
+    };
+    red.extend(amber);
+    (light, red)
+}
+
+/// Aviso de parches: un PC que lleva más de 30 días sin instalar ninguno.
+pub fn kitty_patch_problem(info: &Map<String, Value>) -> Option<String> {
+    let last = info.get("patch")?.get("last")?.as_str()?;
+    let days = (Utc::now().date_naive() - NaiveDate::parse_from_str(last, "%Y-%m-%d").ok()?).num_days();
+    (days > 30).then(|| format!("Sin parches de Windows desde hace {days} días"))
 }
 
 /// Fecha ISO 8601 como `datetime.fromisoformat`; sin zona, en UTC.
@@ -809,6 +867,24 @@ pub fn parse_iso(s: &str, naive_local: bool) -> Option<DateTime<Utc>> {
 
 /// Eventos de Windows que envía Kitty, junto a los ya guardados -> (los de 7 días, máx. 30, el más nuevo primero; avisos).
 /// Avisan los críticos de las últimas 24 h (un apagado inesperado, un pantallazo azul): los errores, que Windows tiene muchos, solo se ven.
+#[cfg(test)]
+mod posture_tests {
+    use serde_json::json;
+    #[test]
+    fn semaforo_y_parches() {
+        let (_, i) =
+            super::kitty_read("pc", &json!({"sec": {"defender": false, "av": [], "fwoff": ["Public"], "bitlocker": 0, "admin": true}, "patch": {"last": "2020-01-01", "reboot": true, "pending": 3}}));
+        let (l, why) = super::kitty_security(&i);
+        assert_eq!((l, why.len()), ("bad", 4), "{why:?}");
+        assert!(super::kitty_patch_problem(&i).is_some_and(|p| p.starts_with("Sin parches")));
+        let (_, i) = super::kitty_read("pc", &json!({"sec": {"defender": false, "av": ["ESET"], "fwoff": [], "bitlocker": 1, "admin": false, "sigdays": 30}}));
+        assert_eq!(super::kitty_security(&i).0, "ok"); // otro antivirus: las firmas de Defender no cuentan
+        let (_, i) = super::kitty_read("pc", &json!({"sec": {"defender": true, "sigdays": 9}, "patch": {"last": "mañana"}}));
+        assert_eq!(super::kitty_security(&i).0, "warn");
+        assert!(super::kitty_patch_problem(&i).is_none() && super::kitty_security(&super::kitty_read("pc", &json!({})).1).0.is_empty());
+    }
+}
+
 pub fn kitty_events(new: &Value, prev: &Value) -> (Vec<Value>, Vec<String>) {
     let txt = |v: &Value, n: usize| v.as_str().map(|s| trunc(s.trim(), n)).unwrap_or_default();
     let now = Utc::now();
