@@ -16,7 +16,7 @@
 - **Racks**: armarios montados U a U, con bocas de switch, patch panel y PDU.
 - **Redes**: tus subredes con las IPs libres y en uso, y los conflictos: una IP en dos equipos del inventario o un equipo que responde sin estar en él.
 - **Monitor**: comprueba cada pocos segundos lo que elijas y avisa en pantalla, con el sonido de cada dispositivo y por tus canales. Si cae un switch, avisa de él y no de todo lo que cuelga de él.
-- **Hardware**: SNMP v2c y v3 (Synology, QNAP, Cisco, HP, Ubiquiti, MikroTik…) y grabadores Hikvision, con gráficos de hasta 90 días.
+- **Hardware**: SNMP v2c y v3 (Synology, QNAP, Cisco, HP, Ubiquiti, MikroTik…) y grabadores Hikvision, con gráficos de hasta 90 días. En switches y routers Cisco, HP y MikroTik, con un usuario SSH, catlan guarda además su **configuración** cada día y te enseña qué cambió.
 - **PCs (Kitty)**: los PCs con Kitty, su control remoto, los que piden entrar y los programas que IT instala en todos.
 - **Monitor → Mantenimientos**: todo lo silenciado o con un mantenimiento programado, en una lista.
 - **Incidencias**: tickets con prioridad, estado, persona o grupo asignado, seguimiento e incidencias hijas. En **Mis tareas**, tu tablero con tus incidencias, tareas y notas.

@@ -78,6 +78,7 @@ van sus discos y qué incidencias tiene abiertas. Con historial de cada cambio.
 | | **Syslog** · catlan escucha en UDP 514 y lo que envía cada equipo del inventario sale en su ficha (30 días). |
 | <img src="docs/screenshots/monitor.png" alt="Monitor"> | **Monitor** · ping, puertos TCP, webs, certificados SSL y DNS cada pocos segundos. Avisa en pantalla, con el **sonido de cada dispositivo** y por correo, Telegram o webhook. Si cae un switch, avisa de él y no de todo lo que cuelga de él. Informe mensual de disponibilidad. |
 | <img src="docs/screenshots/salud-kittens.png" alt="Hardware"> | **Hardware** y **PCs (Kitty)** · temperaturas, discos, ventiladores, RAID y puertos por **SNMP v2c y v3** (Synology, QNAP, Cisco, HP/Aruba, Ubiquiti, MikroTik…), grabadores Hikvision y **PCs con Kitty**, con gráficos de hasta 90 días. |
+| | **Copia de configuraciones** · la `running-config` de los switches y routers (Cisco, HP/Aruba, MikroTik) por **SSH**, una vez al día, con los cambios entre versiones y aviso si cambia. |
 | <img src="docs/screenshots/incidencias.png" alt="Incidencias"> | **Incidencias** · prioridad, estado, persona o grupo asignado, seguimiento e incidencias hijas, en lista o en **tablero**, con tus **tareas y notas personales** al lado. Los usuarios las abren **desde Kitty**, en su PC; las críticas avisan por tus canales. |
 | <img src="docs/screenshots/salud-kitty.png" alt="Un PC con Kitty"> | **Control remoto** · ver y manejar la pantalla de un PC con Kitty desde el navegador, siempre con el permiso de quien lo está usando. Sin abrir puertos en el PC y con registro de cada sesión. |
 | <img src="docs/screenshots/wiki-guia.png" alt="Wiki"> | **Wiki** · procedimientos en Markdown con editor visual. `[[#id]]` enlaza un equipo, `[[INC-n]]` una incidencia y `[[Página]]` otra página. Una instalación nueva trae la **Guía de catlan**. |
@@ -328,6 +329,7 @@ src/          el servidor (Rust)
   monitor.rs    comprobaciones, avisos, resúmenes, SLA, syslog e IPAM
   snmp.rs       SNMP v2c y v3 (BER a mano, firma y cifrado USM)
   health.rs     perfiles por fabricante, interfaces, topología y Kitty
+  configs.rs    copia diaria de la configuración de switches y routers por SSH, con versiones y diff
   crypto.rs     contraseñas, copias cifradas y TOTP
   ui/           la web (HTML, CSS y JS sin dependencias): index.html, css/ y js/; build.rs la une
                 en una sola página dentro del ejecutable, en orden de nombre (10-…, 20-…)
@@ -364,7 +366,8 @@ pasa todo en cada cambio (el servidor en Linux, Kitty en Windows).
 - La ventana de Kitty es **solo para Windows**; en Linux, Kitty envía el estado del equipo sin ventana.
 - La imagen de Docker no incluye `kitty.exe`: cópialo a `/data` para repartirlo.
 - Perfiles SNMP de Cisco, HP/Aruba, Ubiquiti, MikroTik y Hikvision **sin probar todavía con hardware real**;
-  la auto-topología está probada con agentes simulados (snmpsim), no con un switch físico.
+  la auto-topología está probada con agentes simulados (snmpsim), no con un switch físico. La copia de configuraciones
+  por SSH está probada contra un servidor SSH simulado, no con un Cisco, HP o MikroTik reales.
 - El control remoto ve y maneja **solo la pantalla principal** del PC.
 - Un usuario puede terminar `kitty.exe` desde el Administrador de tareas. El envío del estado no se corta (lo hace
   el servicio de SYSTEM) y Kitty vuelve a abrirse en el siguiente inicio de sesión.

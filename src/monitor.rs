@@ -717,6 +717,12 @@ fn monitor_round(pool: &Pool, n: u64) -> Result<()> {
         rollup()?;
         warranties()?;
         daily_backup()?;
+        for src in crate::configs::due()? {
+            q("UPDATE sources SET cfg_last=CURRENT_TIMESTAMP WHERE id=?", p![&src["id"]])?; // marcado antes: no se lanza dos veces
+            pool.submit(move || {
+                let _ = crate::configs::backup(&src); // el error queda en el equipo (y avisa la primera vez)
+            });
+        }
     }
     if n.is_multiple_of(1800) {
         // en bruto, unos días; lo de antes ya está resumido por horas (días: Opciones → Salud de catlan)
@@ -926,7 +932,7 @@ pub fn system_health() -> Result<Value> {
 }
 
 /// Nunca salen por la API ni al historial.
-pub const SECRET: [&str; 3] = ["community", "pass", "priv_pass"];
+pub const SECRET: [&str; 4] = ["community", "pass", "priv_pass", "ssh_pass"];
 
 pub fn health() -> Result<Value> {
     let agents: HashMap<i64, Value> = q("SELECT source, id FROM agents WHERE source IS NOT NULL", p![])?.into_iter().filter_map(|r| Some((r.i("source")?, r["id"].clone()))).collect();

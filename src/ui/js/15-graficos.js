@@ -1,5 +1,6 @@
 // ── Salud de equipos: gráficos SVG hechos a mano ───────
 const V3_AUTH = {sha: 'SHA-1', sha256: 'SHA-256', sha384: 'SHA-384', sha512: 'SHA-512', sha224: 'SHA-224', md5: 'MD5', none: 'Sin autenticación'};
+const CFG_KINDS = ['cisco', 'hp', 'mikrotik']; // los que guardan copia de su configuración por SSH
 const PROFILES = {generic: 'SNMP genérico', synology: 'Synology', qnap: 'QNAP', cisco: 'Cisco', hp: 'HP / Aruba', ubiquiti: 'Ubiquiti', mikrotik: 'MikroTik', hikvision: 'Grabador Hikvision'};
 const srcName = h => h.label || h.item_name || h.host;
 const everyTxt = s => s < 60 ? `${s} s` : s < 3600 ? `${s / 60} min` : `${s / 3600} h`;
@@ -70,6 +71,16 @@ function diskBars(box, disks, limit) {
       <span class="bv">${st ? ui('alert', 14) : ''}${esc(fmtV(v, '%'))}${st === 'crit' ? ' · lleno' : st === 'warn' ? ' · casi' : ''}</span></div>`; }).join('')}</div>`
     : '<p class="muted small chart-empty">Este equipo no informa de discos.</p>';
 }
+// Una versión de la configuración frente a la anterior: + y − además del color
+async function cfgDiff(id) {
+  const d = await api(`configs/${id}/diff`);
+  const rows = d.hunks.map(([op, l]) => op === '…' ? `<div class="df-gap">··· ${l} ${l === 1 ? 'línea' : 'líneas'} sin cambios</div>`
+    : `<div class="df-${op === '+' ? 'add' : op === '-' ? 'del' : 'eq'}"><b title="${op === '+' ? 'añadida' : op === '-' ? 'quitada' : ''}">${op === '=' ? '' : op === '-' ? '−' : '+'}</b>${esc(l)}</div>`).join('');
+  const p = dialog(`<h3>${d.prev ? 'Cambios en la configuración' : 'Primera copia'}</h3><p class="small muted">${d.prev ? `De ${esc(when(d.prev.ts))} a ${esc(when(d.ts))}` : esc(when(d.ts))}</p>
+    <div class="diff mono">${rows}</div><p class="small"><a href="/api/configs/${id}" download>Descargar esta versión</a></p>`, {ok: 'Cerrar'});
+  document.querySelector('dialog[open]:last-of-type').className = 'ports-dlg';
+  await p;
+}
 async function sourceDialog(h, items) {
   const ip = items.filter(i => i.ip);
   const p = dialog(`<h3>${h.id ? 'Editar equipo' : 'Leer la salud de un equipo'}</h3><p>catlan leerá sus temperaturas, discos y estado cada cierto tiempo, y te avisará si algo pasa del límite.</p>
@@ -89,6 +100,10 @@ async function sourceDialog(h, items) {
       <div class="field v3 v3a v3p"><label for="s-vk">Contraseña de cifrado</label><input id="s-vk" name="priv_pass" type="password" minlength="8" ${h.id && h.v3 ? '' : 'required'} autocomplete="new-password" placeholder="${h.id && h.v3 ? 'sin cambios' : 'mínimo 8 caracteres'}"></div>
       <div class="field hik"><label for="s-u">Usuario</label><input id="s-u" name="user" value="${esc(h.user || 'admin')}" autocomplete="off"></div>
       <div class="field hik"><label for="s-pw">Contraseña</label><input id="s-pw" name="pass" type="password" autocomplete="new-password" placeholder="${h.id ? 'sin cambios' : ''}"></div>
+      <div class="field full ssh"><p class="small muted" style="margin:0"><b>Copia de la configuración</b> · una vez al día por SSH, con aviso si cambia. Basta un usuario que pueda ver la configuración. Déjalo vacío para no copiarla.</p></div>
+      <div class="field ssh"><label for="s-su">Usuario SSH <span class="dim">· opcional</span></label><input id="s-su" name="ssh_user" value="${esc(h.ssh_user || '')}" autocomplete="off" class="mono"></div>
+      <div class="field ssh"><label for="s-sp">Contraseña SSH</label><input id="s-sp" name="ssh_pass" type="password" autocomplete="new-password" placeholder="${h.id && h.ssh_user ? 'sin cambios' : ''}"></div>
+      <div class="field ssh"><label for="s-so">Puerto SSH</label><input id="s-so" name="ssh_port" type="number" min="1" max="65535" value="${h.ssh_port || 22}" class="mono"></div>
       <div class="field"><label for="s-t">Avisar sobre (°C)</label><input id="s-t" name="temp_max" type="number" min="1" max="200" value="${h.temp_max || 65}" class="mono"></div>
       <div class="field"><label for="s-d">Avisar con disco al (%)</label><input id="s-d" name="disk_max" type="number" min="1" max="200" value="${h.disk_max || 90}" class="mono"></div>
       <div class="field"><label for="s-e">Leer cada</label><select id="s-e" name="every">${[[60, '1 minuto'], [300, '5 minutos'], [900, '15 minutos'], [3600, '1 hora']].map(([v, t]) => `<option value="${v}" ${v === (h.every || 300) ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
@@ -98,7 +113,7 @@ async function sourceDialog(h, items) {
   const show = (sel, on) => dl.querySelectorAll(sel).forEach(f => { f.hidden = !on; f.querySelectorAll('input,select').forEach(i => i.disabled = !on); }); // desactivado = no va en el formulario
   const kind = () => {
     const hik = $d('#s-k').value === 'hikvision', v3 = !hik && $d('#s-v').value === '1', auth = v3 && $d('#s-va').value !== 'none';
-    show('.snmp', !hik); show('.hik', hik); show('.v2', !hik && !v3); show('.v3', v3); show('.v3a', auth); show('.v3p', auth && $d('#s-vc').value !== 'none');
+    show('.snmp', !hik); show('.hik', hik); show('.ssh', CFG_KINDS.includes($d('#s-k').value)); show('.v2', !hik && !v3); show('.v3', v3); show('.v3a', auth); show('.v3p', auth && $d('#s-vc').value !== 'none');
     $d('#s-hint').textContent = hik ? 'Usa un usuario del grabador con permiso de consulta. Los grabadores llenan el disco a propósito (sobrescriben lo antiguo): con 100 % solo avisa de discos con error.'
       : v3 ? 'Crea en el equipo un usuario SNMPv3 de solo lectura con los mismos algoritmos y contraseñas. Lo más habitual y seguro: SHA y AES.'
       : 'Activa SNMP v2c en el equipo con una comunidad de solo lectura (Synology: Panel de control › Terminal y SNMP · QNAP: Panel de control › SNMP · MikroTik: /snmp set enabled=yes).';
@@ -108,9 +123,9 @@ async function sourceDialog(h, items) {
   $d('#s-it').onchange = e => { const i = ip.find(x => x.id === +e.target.value); if (i) { $d('#s-h').value = i.ip; $d('#s-l').placeholder = i.name; } };
   kind();
   const body = () => {
-    const f = new FormData($d('form')), b = Object.fromEntries(['host', 'label', 'kind', 'community', 'user', 'pass', 'priv_pass'].map(k => [k, (f.get(k) || '').trim()]));
+    const f = new FormData($d('form')), b = Object.fromEntries(['host', 'label', 'kind', 'community', 'user', 'pass', 'priv_pass', 'ssh_user', 'ssh_pass'].map(k => [k, (f.get(k) || '').trim()]));
     const v3 = f.get('v3') === '1' ? {auth: f.get('auth'), priv: f.get('auth') === 'none' ? 'none' : f.get('priv')} : {};
-    return {...b, ...v3, v3: f.get('v3') === '1', item: f.get('item') ? +f.get('item') : null, port: +f.get('port') || 161, every: +f.get('every'), temp_max: +f.get('temp_max'), disk_max: +f.get('disk_max')};
+    return {...b, ...v3, v3: f.get('v3') === '1', item: f.get('item') ? +f.get('item') : null, port: +f.get('port') || 161, ssh_port: +f.get('ssh_port') || 22, every: +f.get('every'), temp_max: +f.get('temp_max'), disk_max: +f.get('disk_max')};
   };
   $d('#s-test').onclick = async () => {
     const out = $d('#s-out'); out.innerHTML = '<span class="dim">Probando… (hasta 5 s)</span>';

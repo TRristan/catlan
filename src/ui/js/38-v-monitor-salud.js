@@ -291,8 +291,34 @@ Object.assign(views, {
         <section class="card pad" id="fan-card" hidden><h3 class="card-t">Ventiladores</h3><div id="c-fan"></div></section></div>
       <section class="card pad mt" id="if-card" hidden><h3 class="card-t">Interfaces <span class="dim small" id="if-sum" style="font-weight:400"></span></h3>
         <p class="small muted" style="margin:0 0 8px">Tráfico de <b id="if-sel"></b> · elige otro puerto en la tabla</p><div id="if-chart"></div><div id="if-table" class="mt"></div></section>
+      <section class="card pad mt" id="cfg-card" hidden><h3 class="card-t">Configuración <span class="dim small" id="cfg-sum" style="font-weight:400"></span></h3><div id="cfg-body"></div></section>
       <div class="card pad mt">${collapsible('Ver datos de la última lectura', '<div id="h-data"></div>')}</div>`;
     await paint();
+    // Copias de la configuración por SSH: se pintan aparte, no cambian con cada lectura de Salud
+    const cfgPaint = async () => {
+      const card = $('#cfg-card'); if (!card || (card.hidden = !CFG_KINDS.includes(h.kind))) return;
+      const c = await api(`sources/${h.id}/configs`), v = c.versions;
+      $('#cfg-sum').textContent = c.on ? `· una copia al día por SSH${c.last ? ' · la última, ' + ago(c.last) : ''}` : '';
+      if (!c.on) { $('#cfg-body').innerHTML = '<p class="muted small" style="margin:0">Pon un usuario SSH en <b>Editar</b> y catlan guardará su configuración cada día, con los cambios entre versiones y un aviso si cambia.</p>'; return; }
+      $('#cfg-body').innerHTML = `${c.error ? `<div class="banner bad">${ui('alert', 16)}<span>${esc(c.error)}</span></div>` : ''}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"><button class="btn sm" id="cfg-now">${ui('copy', 16)}Copiar ahora</button>${c.error?.includes('ha cambiado') ? '<button class="btn ghost sm" id="cfg-forget">Olvidar la clave SSH guardada</button>' : ''}</div>
+        ${v.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Versión</th><th>Líneas</th><th></th></tr></thead><tbody>${v.map((x, i) =>
+          `<tr><td>${esc(when(x.ts))}${i === 0 ? ' <span class="dim small">· la actual</span>' : ''}</td><td class="mono">${x.lines}</td>
+            <td style="text-align:right;white-space:nowrap">${ME.admin ? `<button class="btn ghost sm" data-diff="${x.id}">${i === v.length - 1 ? 'Ver' : 'Ver cambios'}</button> <a class="btn ghost sm" href="/api/configs/${x.id}" download>Descargar</a>` : ''}</td></tr>`).join('')}</tbody></table></div>`
+          : '<p class="muted small" style="margin:0">Todavía no hay ninguna copia.</p>'}
+        <p class="dim small" style="margin:8px 0 0">Solo se guarda una versión nueva cuando algo cambia.${ME.admin ? '' : ' Ver y descargar las copias es cosa de los administradores: llevan contraseñas del equipo.'}${c.key ? ` Clave del equipo: <span class="mono">${esc(c.key)}</span>` : ''}</p>`;
+      $('#cfg-now').onclick = async () => {
+        toast('Copiando la configuración…');
+        try { const r = await api(`sources/${h.id}/configs`, 'POST'); toast(r.new ? 'Versión nueva guardada' : 'Sin cambios desde la última copia'); } catch {} // el aviso con el motivo ya sale
+        cfgPaint();
+      };
+      if ($('#cfg-forget')) $('#cfg-forget').onclick = async () => {
+        if (!await ask('¿Olvidar la clave SSH?', 'Hazlo solo si has cambiado o reinstalado el equipo. La próxima copia aceptará la clave que presente y la fijará otra vez.', 'Olvidar')) return;
+        await api(`sources/${h.id}/hostkey`, 'DELETE'); toast('Clave olvidada'); cfgPaint();
+      };
+      $('#cfg-body').querySelectorAll('[data-diff]').forEach(b => b.onclick = () => cfgDiff(+b.dataset.diff));
+    };
+    cfgPaint();
     $('#h-name').textContent = srcName(h);
     seg($('#rng'));
     $('#rng').onclick = e => { const b = e.target.closest('[data-v]'); if (!b) return; hours = healthRange = +b.dataset.v;
