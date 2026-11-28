@@ -7,7 +7,7 @@
 
 **El gato amigo de los IT.** Inventario, wiki, esquemas de red, racks, monitor, salud de equipos e incidencias en una sola web, autoalojada y 100 % local.
 
-![Estado](https://img.shields.io/badge/versión-2.1.0-blue)
+![Estado](https://img.shields.io/badge/versión-2.1.1-blue)
 ![Rust](https://img.shields.io/badge/hecho%20en-Rust-b7410e)
 ![Ejecutable](https://img.shields.io/badge/servidor-un%20solo%20ejecutable-success)
 ![Datos](https://img.shields.io/badge/datos-solo%20en%20tu%20servidor-1f9d6a)
