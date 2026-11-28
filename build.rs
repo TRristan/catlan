@@ -2,6 +2,8 @@
 //! Los archivos se pegan en orden de nombre (10-…, 20-…), así que el número decide el orden. Sale en $OUT_DIR/index.html.
 use std::{env, fs, path::Path};
 
+include!("build_icon.rs");
+
 // Un clon de Git en Windows deja CRLF: se pasa a LF y la página sale igual (y con el mismo ETag) en cualquier sistema
 fn read(p: &Path) -> String {
     fs::read_to_string(p).unwrap().replace("\r\n", "\n")
@@ -20,4 +22,5 @@ fn main() {
     assert!(page.matches("/* @css */\n").count() == 1 && page.matches("/* @js */\n").count() == 1, "src/ui/index.html necesita /* @css */ y /* @js */ una vez cada uno");
     let page = page.replace("/* @css */\n", &join(&web.join("css"), "css")).replace("/* @js */\n", &join(&web.join("js"), "js"));
     fs::write(Path::new(&env::var("OUT_DIR").unwrap()).join("index.html"), page).unwrap();
+    exe_icon("catlan.ico");
 }
