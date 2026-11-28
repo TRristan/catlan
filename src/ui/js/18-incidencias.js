@@ -5,6 +5,24 @@ const incOpen = n => !['resuelta', 'cerrada'].includes(n.status);
 const incMine = n => n.assignee === ME?.id || (ME?.groups || []).includes(n.grp);
 const statusPill = st => `<span class="pill ${{abierta: 'bad', 'en curso': 'warn', resuelta: 'ok'}[st] || ''}"><i></i>${esc(st)}</span>`;
 const prioPill = p => `<span class="pill ${{'crítica': 'bad', alta: 'warn'}[p] || ''}"><i></i>${esc(p)}</span>`;
+// El equipo de una incidencia, de un vistazo: si está encendido, su sistema y lo que dice Kitty de él
+function pcCard(pc, h, fromKitty) {
+  const i = h?.info || {}, on = h && h.state && h.state !== 'error', ram = h?.latest?.find(m => m.key === 'mem'), cpu = h?.latest?.find(m => m.key === 'cpu');
+  const disk = h?.latest?.filter(m => m.key.startsWith('disk:')).sort((a, b) => b.value - a.value)[0];
+  // el icono de su tipo, como en esquemas y racks («portátil» → laptop)
+  const ic = Object.keys(ICONS).find(k => k === pc.kind || ICONS[k][0].toLowerCase() === (pc.kind || '').toLowerCase()) || 'pc';
+  const row = (k, v) => v ? `<div class="pc-r"><span>${k}</span><b>${v}</b></div>` : '';
+  return `<section class="card pcard" style="--i:0" aria-label="Equipo de la incidencia">
+    <div class="pc-top"><span class="pc-ic${h ? (on ? ' on' : ' off') : ''}"><svg width="26" height="26" aria-hidden="true"><use href="#i-${ic}"/></svg></span>
+      <div class="pc-n"><a href="#/inv/${+pc.id}"><b>${esc(pc.name)}</b></a>
+        <small>${h ? `<i class="mdot ${on ? 'up' : 'down'}"></i>${on ? `Conectado · ${esc(ago(h.last))}` : 'Sin conexión'}` : esc(pc.kind || 'Equipo')}${fromKitty ? ' · avisó desde Kitty' : ''}</small></div></div>
+    ${h ? `<div class="pc-kpi"><div><span>CPU</span><b>${cpu ? Math.round(cpu.value) + ' %' : '—'}</b></div><div><span>Memoria</span><b>${ram ? Math.round(ram.value) + ' %' : '—'}</b></div><div><span>${esc(disk?.label || 'Disco')}</span><b>${disk ? Math.round(disk.value) + ' %' : '—'}</b></div></div>` : ''}
+    <div class="pc-rows">${row('Sistema', esc(osShort(i.descr)))}${row('IP', pc.ip && `<span class="mono">${esc(pc.ip)}</span>`)}${row('Encendido', i.uptime && 'hace ' + esc(upTxt(i.uptime)))}
+      ${row('Seguridad', i.seclight && secPill(i))}${row('Parches', i.patch?.last && `<span class="pill ${daysTo(i.patch.last) < -30 ? 'bad' : ''}"><i></i>hace ${-daysTo(i.patch.last)} d</span>${i.patch.reboot ? ' <span class="pill warn"><i></i>reinicio</span>' : ''}`)}
+      ${row('Ubicación', esc(pc.location))}</div>
+    <div class="pc-acts">${h?.agent && on && !ME.readonly ? `<button class="btn sm pri" id="pc-rmt">${ui('screen', 15)}Control remoto</button>` : ''}
+      <a class="btn sm" href="#/inv/${+pc.id}">${ui('box', 15)}Ficha</a>${h ? `<a class="btn sm ghost" href="#/salud/${+h.id}">${ui('pulse', 15)}Estado</a>` : ''}</div></section>`;
+}
 const optList = (list, cur, none) => (none ? `<option value="">${none}</option>` : '') + list.map(x => `<option value="${x.id ?? x}" ${(x.id ?? x) === cur ? 'selected' : ''}>${esc(x.name ?? x)}</option>`).join('');
 async function incidentDialog(pre = {}) {
   const [users, groups, items] = await Promise.all([api('users'), api('groups'), api('items')]);

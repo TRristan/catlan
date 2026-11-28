@@ -93,6 +93,8 @@ Object.assign(views, {
       return;
     }
     const [n, users, groups, items, incs] = await Promise.all([api('incidents/' + id), api('users'), api('groups'), api('items'), api('incidents')]);
+    const pc = n.item ? items.find(x => x.id === n.item) : null;
+    const kit = pc ? (await api('health').catch(() => [])).find(h => h.kind === 'kitty' && h.item === pc.id) : null;
     const names = Object.fromEntries(items.map(i => [i.id, i.name]));
     const mention = [...n.mentions.pages.map(p => ['book', `#/wiki/${p.id}`, p.title || 'Sin título', 'Página de la wiki']), ...n.mentions.items.map(i => ['box', `#/inv/${i.id}`, i.name, 'Notas del equipo']),
       ...n.mentions.incidents.map(x => ['ticket', `#/inc/${x.id}`, `${incId(x.id)} ${x.title}`, 'Incidencia · ' + x.status])];
@@ -112,18 +114,19 @@ Object.assign(views, {
           <ol class="itl">${[...n.history].reverse().map(h => `<li class="${h.change ? 'ch' : 'nt'}"><span><b>${esc(h.who || '—')}</b> ${h.change ? esc(h.text) : 'escribió'} <time class="dim">${esc(ago(h.ts))}</time>${fromKitty && !h.change && h.public && !(h.who || '').startsWith('Kitty · ') ? ' <span class="pill" title="La ve el usuario en Kitty"><i></i>en Kitty</span>' : ''}</span>
             ${h.change ? '' : `<div class="prose tl-note">${md(h.text, names)}</div>`}</li>`).join('')}</ol>
 </section>
-        <aside class="side-col"><section class="card pad" style="--i:1"><div class="fields" id="inc-f">
+        <aside class="side-col">${pc ? pcCard(pc, kit, fromKitty) : ''}<section class="card pad" style="--i:1"><div class="fields" id="inc-f">
           <div class="field"><label for="f-st">Estado</label><select id="f-st" data-k="status">${optList(INC_STATUS, n.status)}</select></div>
           <div class="field"><label for="f-pr">Prioridad</label><select id="f-pr" data-k="priority">${optList(INC_PRIO, n.priority)}</select></div>
           <div class="field"><label for="f-as">Asignada a</label><select id="f-as" data-k="assignee">${optList(users, n.assignee, 'Nadie')}</select></div>
           <div class="field"><label for="f-gr">Grupo</label><select id="f-gr" data-k="grp">${optList(groups, n.grp, 'Ninguno')}</select></div>
           <div class="field"><label for="f-it">Equipo</label><select id="f-it" data-k="item">${optList(items, n.item, 'Ninguno')}</select></div>
           <div class="field"><label for="f-pa">Cuelga de</label><select id="f-pa" data-k="parent">${optList(incs.filter(x => x.id !== n.id).map(x => ({id: x.id, name: `${incId(x.id)} ${x.title}`})), n.parent, 'Ninguna (es principal)')}</select></div>
-          ${n.item ? `<a class="linkrow" href="#/inv/${+n.item}">${ui('box', 16)}Abrir ficha del equipo</a>` : ''}</div></section>
+          ${n.item && !pc ? `<a class="linkrow" href="#/inv/${+n.item}">${ui('box', 16)}Abrir ficha del equipo</a>` : ''}</div></section>
         <section class="card pad" style="--i:2"><h3 class="card-t">${ui('link', 15)}Enlazada desde <span class="count">${mention.length}</span></h3>
           ${mention.length ? `<ul class="rel">${mention.map(([ic, h, t, s]) => `<li><a href="${h}"><span class="badge-ic">${ui(ic, 16)}</span><span><b>${esc(t)}</b><small>${s}</small></span></a></li>`).join('')}</ul>`
             : `<p class="muted small" style="margin:0">Pega <code class="mono">[[${incId(n.id)}]]</code> en una página de la wiki, en las notas de un equipo o en otra incidencia y saldrá aquí.</p>`}</section></aside></div>`;
     $('#iref').onclick = () => copy(`[[${incId(n.id)}]]`);
+    $('#pc-rmt') && ($('#pc-rmt').onclick = () => remoteStart(kit.agent));
     if (ME.readonly) app.querySelectorAll('#inc-f select').forEach(x => x.disabled = true);
     $('#inc-f').onchange = async e => { // cada cambio queda en el seguimiento
       const k = e.target.dataset.k, v = e.target.value;
