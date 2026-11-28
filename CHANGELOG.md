@@ -3,6 +3,18 @@
 Cada versión, lo que cambia para quien usa catlan. Sigue [SemVer](https://semver.org/lang/es/): el primer número sube
 cuando hay que hacer algo a mano al actualizar.
 
+## Sin publicar
+
+### Cambia
+- **Barra lateral por grupos** que se pliegan (y se recuerdan): Vigilancia, Servicio, Infraestructura, Conocimiento y
+  Ajustes. Todo lo que tenía ruta propia tiene ahora su entrada o su pestaña: **Syslog** de todos los equipos,
+  **Caducidades**, **Mis tareas**, **PCs (Kitty)** (con los que piden entrar y los programas) y
+  **Monitor → Mantenimientos**, la lista de todo lo silenciado o programado.
+- **Salud** se llama **Hardware** y solo lleva lo de SNMP; los PCs con Kitty van en **PCs (Kitty)**, con su propio aviso.
+- **Opciones** pasa a ser **Administración** (General · Usuarios y grupos · Sistema); el cajón de Ajustes y el menú de la
+  cuenta se juntan en **Mi cuenta**. Las direcciones de antes (`#/opts`, `#/cad`, `#/tablero`…) siguen funcionando.
+- «Nuevo» sigue el orden de la barra y añade comprobación, equipo por SNMP, caducidad, red y PC con Kitty.
+
 ## 2.0.0
 
 **Hay que reinstalar Kitty en los PCs** (el mismo comando de Inventario → Añadir con Kitty). Las Kitty de antes siguen

@@ -1010,6 +1010,8 @@ try:
         if len(logs) == 2: break
         time.sleep(0.1)
     assert [(l["sev"], l["msg"]) for l in logs] == [(6, "sin prioridad"), (3, "Nov 20 18:00:00 sw1 kernel: disco lleno ñ")], logs
+    todo = [l for l in call("/api/syslog", auth=LEC)[1] if l["item"] == lo["id"]]  # vista global, también para los de solo vista
+    assert [(l["msg"], l["item_name"]) for l in todo] == [("sin prioridad", "manda-syslog"), ("Nov 20 18:00:00 sw1 kernel: disco lleno ñ", "manda-syslog")], todo
     # IPAM: subred normalizada; en uso, libres, IP repetida en el inventario y lo que responde sin estar en él
     for bad in ({"cidr": "10.0.0.0/15"}, {"cidr": "fe80::/64"}, {"cidr": "hola"}, {}):
         assert call("/api/subnets", "POST", bad)[0] == 400, bad
@@ -1234,7 +1236,7 @@ try:
     assert kj["pin"] == hashlib.sha256(der).hexdigest().upper() and len(base64.b64decode(kj["spki"])) == 32, kj
     assert hdr["X-Frame-Options"] == "DENY" and "frame-ancestors 'none'" in hdr["Content-Security-Policy"] and "Strict-Transport-Security" not in hdr  # HSTS no, con autofirmado
     ps = urllib.request.urlopen(f"https://127.0.0.1:{PORT}/kitty.ps1", context=ctx).read().decode()
-    assert f"$Pin = '{kj['pin']}'" in ps and f"-eq '{kj['pin']}'" in ps and "{{" not in ps
+    assert f"$Pin = '{kj['pin']}'" in ps and "[KittyPin]::Set($Pin)" in ps and "{{" not in ps  # el anclado va en C# (a2c6c7f)
     # CSRF sin Origin: el navegador dice Sec-Fetch-Site
     xs = urllib.request.Request(f"http://127.0.0.1:{PORT}/api/items", b'{"name":"csrf"}', method="POST", headers={"Authorization": AUTH, "Content-Type": "application/json", "Sec-Fetch-Site": "cross-site"})
     try: urllib.request.urlopen(xs); assert False

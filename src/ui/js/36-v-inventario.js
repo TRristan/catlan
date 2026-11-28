@@ -1,22 +1,14 @@
 Object.assign(views, {
   async inv(id) {
     if (!id) {
-      const [items, agents, exps] = await Promise.all([api('items'), ME?.admin ? api('agents') : [], api('expiries')]), q = qv(), ro = ME.readonly, sel = new Set();
-      const waiting = agents.filter(a => a.state !== 'adoptado'), code = c => c.toUpperCase().replace(/^(.{4})/, '$1-');
+      const [items, exps] = await Promise.all([api('items'), api('expiries')]), q = qv(), ro = ME.readonly, sel = new Set();
       const expiring = [...items.filter(i => i.warranty).map(i => ({name: i.name, date: i.warranty, kind: 'garantía', href: '#/inv/' + i.id})),
         ...exps.map(e => ({name: e.name, date: e.date, kind: e.kind, href: '#/cad'}))].filter(e => daysTo(e.date) <= 60).sort((a, b) => a.date.localeCompare(b.date));
       const hits = items.filter(i => Object.values(i).join(' ').toLowerCase().includes(q));
       crumbs([['Inventario']]);
       app.innerHTML = head('Inventario', items.length ? `${q ? `${hits.length} de ` : ''}${items.length} ${items.length === 1 ? 'equipo' : 'equipos'}` : 'Todo lo que tiene IP, número de serie o enchufe',
-          `<a class="btn ghost" href="#/discover">${ui('search', 16)}Descubrir red</a><a class="btn ghost" href="#/cad">${ui('clock', 16)}Caducidades</a><button class="btn ghost" id="bulk">${ui('layers', 16)}En serie</button>${ME.admin ? `<button class="btn ghost" id="addpc">${ui('signal', 16)}Añadir con Kitty</button>` : ''}${items.length ? `<button class="btn ghost" id="csv">${ui('box', 16)}Exportar CSV</button>` : ''}` + (items.length ? `<button class="btn" id="add">${ui('plus', 16)}Nuevo equipo</button>` : ''))
-        + (waiting.length ? `<section class="card" style="margin-bottom:16px"><div class="pad"><h3 class="card-t">Kitty pide entrar <span class="count">${waiting.length}</span></h3>
-            <p class="muted small">Equipos con Kitty instalado que han encontrado este catlan. Acepta solo los que reconozcas: el código debe coincidir con el que mostró el instalador en ese equipo.</p></div>
-            ${waiting.map(a => `<div data-ag="${a.id}" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;padding:12px 16px;border-top:1px solid var(--line)">
-              <div style="flex:1 1 220px;min-width:0"><b>${esc(a.name)}</b>${a.state === 'rechazado' ? ' <span class="pill bad"><i></i>rechazado</span>' : ''}
-                <br><small class="dim"><span class="mono">${esc(a.ip)}</span> · ${esc(a.os)} · ${esc(ago(a.seen))}</small></div>
-              <span class="mono" title="Código de este Kitty">${esc(code(a.code))}</span>
-              <div style="display:flex;gap:8px"><button class="btn pri" data-st="adoptado">${ui('check', 15)}Aceptar</button>${a.state === 'pendiente' ? '<button class="btn ghost" data-st="rechazado">Rechazar</button>' : '<button class="btn ghost" data-st="del">Olvidar</button>'}</div></div>`).join('')}</section>` : '')
-        + (expiring.length ? `<section class="card pad" style="margin-bottom:16px"><h3 class="card-t">${ui('clock', 15)}Caducan pronto <span class="count">${expiring.length}</span></h3>
+          `<button class="btn ghost" id="bulk">${ui('layers', 16)}En serie</button>${items.length ? `<button class="btn ghost" id="csv">${ui('box', 16)}Exportar CSV</button>` : ''}` + (items.length ? `<button class="btn" id="add">${ui('plus', 16)}Nuevo equipo</button>` : ''))
+        + tabs(TABS.inv) + (expiring.length ? `<section class="card pad" style="margin-bottom:16px"><h3 class="card-t">${ui('clock', 15)}Caducan pronto <span class="count">${expiring.length}</span></h3>
             <ul class="rel">${expiring.map(e => `<li><a href="${e.href}"><span class="badge-ic">${ui(daysTo(e.date) < 0 ? 'alert' : 'clock', 16)}</span><span><b>${esc(e.name)}</b><small class="${daysTo(e.date) < 0 ? 't-bad' : ''}">${esc(e.kind)} · ${warrantyTxt(e.date)} · ${esc(new Date(e.date + 'T00:00').toLocaleDateString('es'))}</small></span></a></li>`).join('')}</ul></section>` : '')
         + (items.length ? `<div class="ufil"><input id="ifil" style="width:min(480px,100%)" type="search" placeholder="Filtrar por nombre, IP, tipo, ubicación, estado o nº de serie…" aria-label="Filtrar equipos" autocomplete="off"></div>` : '')
         + (hits.length ? `<div class="card tbl-wrap"><table class="tbl utbl itbl"><thead><tr>${ro ? '' : '<th style="width:36px"><input type="checkbox" id="uall" aria-label="Seleccionar todos"></th>'}<th>Nombre</th><th class="hide-m">Tipo</th><th>IP</th><th class="hide-m">Ubicación</th><th>Estado</th><th class="hide-m">Nº serie</th></tr></thead>
@@ -79,27 +71,6 @@ Object.assign(views, {
       }
       $('#add') && ($('#add').onclick = create.item);
       $('#bulk').onclick = itemSeries;
-      $('#addpc') && ($('#addpc').onclick = async () => {
-        // Por https y, con el certificado autofirmado, anclado a su huella: nadie en la red puede colar otro instalador
-        const k = await fetch('/kitty.json').then(r => r.json()).catch(() => ({})), base = `https://${location.host}`;
-        const tls = `[Net.ServicePointManager]::SecurityProtocol='Tls12';` + // en C#: un scriptblock de PowerShell 5 se ejecuta en un hilo sin runspace y falla con «Error inesperado de envío»
-          (k.pin ? `Add-Type 'public static class KittyPin{public static void Set(string p){System.Net.ServicePointManager.ServerCertificateValidationCallback=(s,c,h,e)=>System.BitConverter.ToString(System.Security.Cryptography.SHA256.Create().ComputeHash(c.GetRawCertData())).Replace("-","")==p;}}';[KittyPin]::Set('${k.pin}');` : '');
-        const cmd = `${tls}irm ${base}/kitty.ps1|iex`, sh = k.spki ? `curl -fsSLk --pinnedpubkey 'sha256//${k.spki}' ${base}/kitty.sh | sudo sh` : `curl -fsSL ${base}/kitty.sh | sudo sh`;
-        const line = (c, id) => `<div style="display:flex;gap:8px;align-items:center"><code class="mono" style="flex:1;padding:10px 12px;border:1px solid var(--line);border-radius:8px;word-break:break-all">${esc(c)}</code><button type="button" class="btn" id="${id}">${ui('copy', 15)}Copiar</button></div>`;
-        dialog(`<h3>Añadir un equipo con Kitty</h3><p><b>Windows</b>: en el PC, <a href="/kitty.exe" download>descarga Kitty</a>, ábrelo y pulsa «Conectar este PC». Busca este catlan en la red, se instala (Windows pide permiso de administrador) y aparece aquí para que lo aceptes. Envía el estado del PC cada minuto y deja en la bandeja un gato para que el usuario avise a IT, sin tener que llamar.</p>
-          <p class="muted small">Para muchos equipos a la vez, lo mismo en Windows PowerShell (powershell.exe) como administrador. Va por https${k.pin ? ` y solo acepta este certificado (huella SHA-256 <span class="mono">${esc(k.pin)}</span>: compárala con la del candado del navegador)` : ""}:</p>${line(cmd, 'pc-copy')}
-          <p class="muted small">Para quitarlo, en PowerShell como administrador: <span class="mono">Unregister-ScheduledTask Kitty -Confirm:$false; Stop-Process -Name kitty -Force; Remove-ItemProperty HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run Kitty; Remove-Item -Recurse "$env:ProgramFiles\\Kitty", "$env:ProgramData\\Kitty", HKLM:\\SOFTWARE\\Kitty</span></p>
-          <p><b>Linux</b> (con curl): pega esta línea en una terminal. Deja un temporizador de systemd (o cron) que envía lo mismo cada 5 minutos.</p>${line(sh, 'sh-copy')}
-          <p class="muted small">Para quitarlo: <span class="mono">sudo sh /usr/local/lib/kitty-agent.sh quitar</span>. Después aparecerá aquí, en «Kitty pide entrar», para que lo aceptes.</p>`, {ok: 'Listo'});
-        document.querySelector('dialog[open]:last-of-type .dlg-a .ghost').remove();
-        document.querySelector('#pc-copy').onclick = () => copy(cmd);
-        document.querySelector('#sh-copy').onclick = () => copy(sh);
-      });
-      app.querySelectorAll('[data-ag] [data-st]').forEach(b => b.onclick = async () => {
-        const id = b.closest('[data-ag]').dataset.ag, st = b.dataset.st;
-        await (st === 'del' ? api('agents/' + id, 'DELETE') : api('agents/' + id, 'PUT', {state: st}));
-        toast({adoptado: 'Kitty aceptado: ya está en el inventario', rechazado: 'Kitty rechazado', del: 'Kitty olvidado'}[st]); route(false);
-      });
       return;
     }
     const [i, n, refs, log, sys] = await Promise.all([api('items/' + id), names(), api(`items/${id}/refs`), api(`log?kind=item&ref=${id}`), api(`items/${id}/syslog`)]);
@@ -157,10 +128,10 @@ Object.assign(views, {
   },
   async sistema() {
     const h = await api('system'), mb = n => (n / 1048576).toFixed(n < 10485760 ? 1 : 0) + ' MB', m = h.monitor, ok = (v, t, f) => `<span class="pill ${v ? 'ok' : 'bad'}"><i></i>${v ? t : f}</span>`;
-    crumbs([['Opciones', '#/opts'], ['Salud de catlan']]);
+    crumbs([['Administración', '#/opts'], ['Sistema']]);
     const row = (k, v) => `<tr><td class="muted" style="width:40%">${k}</td><td>${v}</td></tr>`;
-    app.innerHTML = head('Salud de catlan', `catlan ${esc(h.version)} · base de datos v${h.schema} · en marcha desde ${esc(ago(h.started))}`)
-      + `<div class="split stagger"><section class="card pad" style="--i:0"><h3 class="card-t">${ui('pulse', 15)}Ahora</h3><table class="tbl kv"><tbody>
+    app.innerHTML = head('Sistema', `catlan ${esc(h.version)} · base de datos v${h.schema} · en marcha desde ${esc(ago(h.started))}`)
+      + tabs(TABS.admin) + `<div class="split stagger"><section class="card pad" style="--i:0"><h3 class="card-t">${ui('pulse', 15)}Ahora</h3><table class="tbl kv"><tbody>
           ${row('Monitor', ok(m.age <= 30, `late (hace ${m.age} s)`, `parado desde hace ${esc(upTxt(m.age))}`) + (m.error ? `<div class="small muted mt">Último error${m.error_ago != null ? ` (hace ${esc(upTxt(m.error_ago))})` : ''}: <span class="mono">${esc(m.error)}</span></div>` : ''))}
           ${row('Comprobaciones atrasadas', h.late ? `<span class="pill warn"><i></i>${h.late}</span> <span class="small muted">llevan más de 3 vueltas sin hacerse</span>` : ok(true, 'ninguna'))}
           ${row('Base de datos', ok(h.integrity === 'ok', 'íntegra', 'con daños: ' + esc(h.integrity)) + ` · ${mb(h.db_bytes)}${h.wal_bytes ? ` + ${mb(h.wal_bytes)} en WAL` : ''}`)}
@@ -207,12 +178,12 @@ Object.assign(views, {
     };
   },
   async apps() {
-    crumbs([['Opciones', '#/opts'], ['Programas en los PCs']]);
+    crumbs([['PCs (Kitty)', '#/pcs'], ['Programas']]);
     if (!ME.admin) { app.innerHTML = empty('cog', 'Solo para administradores', 'Aquí se elige qué se instala en todos los PCs.'); return; }
     const [list, hs] = await Promise.all([api('apps'), api('health')]), kits = hs.filter(h => h.kind === 'kitty');
     const st = id => { const r = kits.map(h => [h, h.info?.apps?.[id]]).filter(([, x]) => x); return {ok: r.filter(([, x]) => x.ok).length, bad: r.filter(([, x]) => !x.ok), wait: kits.length - r.length}; };
     app.innerHTML = head('Programas en los PCs', `Kitty los instala si faltan y los actualiza cada hora con winget, en los ${kits.length} PCs con Kitty. Quitar uno de la lista no lo desinstala.`, `<button class="btn" id="add">${ui('plus', 16)}Añadir programa</button>`)
-      + (list.length ? `<div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Programa</th><th>Id de winget</th><th>En los PCs</th><th class="hide-m">Notas</th></tr></thead>
+      + tabs(TABS.pcs) + (list.length ? `<div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Programa</th><th>Id de winget</th><th>En los PCs</th><th class="hide-m">Notas</th></tr></thead>
         <tbody class="stagger">${list.map((a, k) => { const s = st(a.winget); return `<tr data-id="${a.id}" tabindex="0" style="--i:${Math.min(k, 14)}"><td><b>${esc(a.name)}</b></td><td class="mono">${esc(a.winget)}</td>
           <td>${s.ok ? `<span class="pill ok"><i></i>${s.ok} bien</span> ` : ''}${s.bad.length ? `<span class="pill bad" title="${esc(s.bad.map(([h, x]) => `${srcName(h)}: ${x.msg}`).join(' · '))}"><i></i>${s.bad.length} con error</span> ` : ''}${s.wait ? `<span class="dim small">${s.wait} pendientes</span>` : ''}</td>
           <td class="muted hide-m">${esc(a.notes)}</td></tr>`; }).join('')}</tbody></table></div>`
@@ -237,7 +208,7 @@ Object.assign(views, {
   },
   async cad() {
     const [exps, items] = await Promise.all([api('expiries'), api('items')]), ro = ME.readonly, byId = Object.fromEntries(items.map(i => [i.id, i]));
-    crumbs([['Inventario', '#/inv'], ['Caducidades']]);
+    crumbs([['Caducidades']]);
     app.innerHTML = head('Caducidades', 'Licencias, dominios, certificados y contratos. Avisan 30 días antes y el mismo día, como las garantías.', ro ? '' : `<button class="btn" id="add">${ui('plus', 16)}Nueva</button>`)
       + (exps.length ? `<div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Nombre</th><th>Tipo</th><th>Caduca</th><th class="hide-m">Equipo</th><th class="hide-m">Notas</th></tr></thead>
         <tbody class="stagger">${exps.map((e, k) => { const n = daysTo(e.date); return `<tr data-id="${e.id}" tabindex="0" style="--i:${Math.min(k, 14)}"><td><b>${esc(e.name)}</b></td><td class="muted">${esc(e.kind)}</td>
@@ -265,3 +236,38 @@ Object.assign(views, {
     });
   },
 });
+
+// Kitty: aceptar los que piden entrar y el diálogo para instalarlo (sección PCs)
+function kittyWaiting(agents) {
+  const waiting = agents.filter(a => a.state !== 'adoptado'), code = c => c.toUpperCase().replace(/^(.{4})/, '$1-');
+  return waiting.length ? `<section class="card" style="margin-bottom:16px"><div class="pad"><h3 class="card-t">Kitty pide entrar <span class="count">${waiting.length}</span></h3>
+            <p class="muted small">Equipos con Kitty instalado que han encontrado este catlan. Acepta solo los que reconozcas: el código debe coincidir con el que mostró el instalador en ese equipo.</p></div>
+            ${waiting.map(a => `<div data-ag="${a.id}" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;padding:12px 16px;border-top:1px solid var(--line)">
+              <div style="flex:1 1 220px;min-width:0"><b>${esc(a.name)}</b>${a.state === 'rechazado' ? ' <span class="pill bad"><i></i>rechazado</span>' : ''}
+                <br><small class="dim"><span class="mono">${esc(a.ip)}</span> · ${esc(a.os)} · ${esc(ago(a.seen))}</small></div>
+              <span class="mono" title="Código de este Kitty">${esc(code(a.code))}</span>
+              <div style="display:flex;gap:8px"><button class="btn pri" data-st="adoptado">${ui('check', 15)}Aceptar</button>${a.state === 'pendiente' ? '<button class="btn ghost" data-st="rechazado">Rechazar</button>' : '<button class="btn ghost" data-st="del">Olvidar</button>'}</div></div>`).join('')}</section>` : '';
+}
+function kittyWaitingBind() {
+  app.querySelectorAll('[data-ag] [data-st]').forEach(b => b.onclick = async () => {
+    const id = b.closest('[data-ag]').dataset.ag, st = b.dataset.st;
+    await (st === 'del' ? api('agents/' + id, 'DELETE') : api('agents/' + id, 'PUT', {state: st}));
+    toast({adoptado: 'Kitty aceptado: ya está en el inventario', rechazado: 'Kitty rechazado', del: 'Kitty olvidado'}[st]); route(false);
+  });
+}
+async function kittyAdd() {
+  // Por https y, con el certificado autofirmado, anclado a su huella: nadie en la red puede colar otro instalador
+  const k = await fetch('/kitty.json').then(r => r.json()).catch(() => ({})), base = `https://${location.host}`;
+  const tls = `[Net.ServicePointManager]::SecurityProtocol='Tls12';` + // en C#: un scriptblock de PowerShell 5 se ejecuta en un hilo sin runspace y falla con «Error inesperado de envío»
+    (k.pin ? `Add-Type 'public static class KittyPin{public static void Set(string p){System.Net.ServicePointManager.ServerCertificateValidationCallback=(s,c,h,e)=>System.BitConverter.ToString(System.Security.Cryptography.SHA256.Create().ComputeHash(c.GetRawCertData())).Replace("-","")==p;}}';[KittyPin]::Set('${k.pin}');` : '');
+  const cmd = `${tls}irm ${base}/kitty.ps1|iex`, sh = k.spki ? `curl -fsSLk --pinnedpubkey 'sha256//${k.spki}' ${base}/kitty.sh | sudo sh` : `curl -fsSL ${base}/kitty.sh | sudo sh`;
+  const line = (c, id) => `<div style="display:flex;gap:8px;align-items:center"><code class="mono" style="flex:1;padding:10px 12px;border:1px solid var(--line);border-radius:8px;word-break:break-all">${esc(c)}</code><button type="button" class="btn" id="${id}">${ui('copy', 15)}Copiar</button></div>`;
+  dialog(`<h3>Añadir un equipo con Kitty</h3><p><b>Windows</b>: en el PC, <a href="/kitty.exe" download>descarga Kitty</a>, ábrelo y pulsa «Conectar este PC». Busca este catlan en la red, se instala (Windows pide permiso de administrador) y aparece aquí para que lo aceptes. Envía el estado del PC cada minuto y deja en la bandeja un gato para que el usuario avise a IT, sin tener que llamar.</p>
+    <p class="muted small">Para muchos equipos a la vez, lo mismo en Windows PowerShell (powershell.exe) como administrador. Va por https${k.pin ? ` y solo acepta este certificado (huella SHA-256 <span class="mono">${esc(k.pin)}</span>: compárala con la del candado del navegador)` : ""}:</p>${line(cmd, 'pc-copy')}
+    <p class="muted small">Para quitarlo, en PowerShell como administrador: <span class="mono">Unregister-ScheduledTask Kitty -Confirm:$false; Stop-Process -Name kitty -Force; Remove-ItemProperty HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run Kitty; Remove-Item -Recurse "$env:ProgramFiles\\Kitty", "$env:ProgramData\\Kitty", HKLM:\\SOFTWARE\\Kitty</span></p>
+    <p><b>Linux</b> (con curl): pega esta línea en una terminal. Deja un temporizador de systemd (o cron) que envía lo mismo cada 5 minutos.</p>${line(sh, 'sh-copy')}
+    <p class="muted small">Para quitarlo: <span class="mono">sudo sh /usr/local/lib/kitty-agent.sh quitar</span>. Después aparecerá aquí, en «Kitty pide entrar», para que lo aceptes.</p>`, {ok: 'Listo'});
+  document.querySelector('dialog[open]:last-of-type .dlg-a .ghost').remove();
+  document.querySelector('#pc-copy').onclick = () => copy(cmd);
+  document.querySelector('#sh-copy').onclick = () => copy(sh);
+}

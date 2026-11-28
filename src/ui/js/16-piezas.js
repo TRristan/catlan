@@ -1,6 +1,15 @@
 // ── Piezas de página ────────────────────────────────────
 const head = (title, sub = '', actions = '') => `<header class="ph"><div><h1>${title}</h1>${sub ? `<p class="sub">${sub}</p>` : ''}</div><div class="ph-a">${actions}</div></header>`;
 const empty = (icon, title, text = '', action = '') => `<div class="empty"><span class="empty-ic">${ui(icon, 28)}</span><h3>${title}</h3>${text ? `<p>${text}</p>` : ''}${action}</div>`;
+// Pestañas de una sección: enlaces a sus rutas (el tercer campo, solo administradores); route() coloca la píldora
+const tabs = list => `<nav class="seg tabs" aria-label="Pestañas">${list.filter(t => !t[2] || ME?.admin).map(([t, h]) => { const on = location.hash === h || location.hash.startsWith(h + '/');
+  return `<a href="${h}"${on ? ' class="on" aria-current="page"' : ''}>${t}</a>`; }).join('')}</nav>`;
+const TABS = {
+  monitor: [['Comprobaciones', '#/monitor'], ['Disponibilidad', '#/sla'], ['Mantenimientos', '#/mant']],
+  inv: [['Equipos', '#/inv'], ['Descubrir red', '#/discover']],
+  pcs: [['PCs', '#/pcs'], ['Programas', '#/apps', 1]],
+  admin: [['General', '#/opts'], ['Usuarios y grupos', '#/users'], ['Sistema', '#/sistema']],
+};
 const moreBtn = `<button class="btn icon ghost" id="more" aria-label="Más acciones" aria-haspopup="menu" aria-expanded="false">${ui('more')}</button>`;
 function crumbs(list) {
   $('#crumbs').innerHTML = list.map(([t, h], i) => (i ? '<span class="sep">/</span>' : '') + (h ? `<a href="${h}">${esc(t)}</a>` : `<span class="cur">${esc(t)}</span>`)).join('');

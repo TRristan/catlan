@@ -21,6 +21,7 @@ pub fn routes() -> Vec<Route> {
         r("PUT", "/api/items/{id}", Perm::User, Ctx::crud_put),
         r("DELETE", "/api/items/{id}", Perm::User, Ctx::crud_delete),
         r("GET", "/api/items/{id}/refs", Perm::User, |c| Ok(js(200, refs(c.param("id").unwrap_or("").parse().map_err(|_| Bad("id no válido".into()))?)?))),
+        r("GET", "/api/syslog", Perm::User, |_| Ok(js(200, q("SELECT s.ts, s.ip, s.sev, s.msg, s.item, i.name AS item_name FROM syslog s LEFT JOIN items i ON i.id = s.item ORDER BY s.rowid DESC LIMIT 500", p![])?.rows))),
         r("GET", "/api/items/{id}/syslog", Perm::User, |c| Ok(js(200, q("SELECT ts, ip, sev, msg FROM syslog WHERE item=? ORDER BY rowid DESC LIMIT 200", p![c.id()])?.rows))),
         r("GET", "/api/expiries", Perm::User, Ctx::crud_list),
         r("POST", "/api/expiries", Perm::User, Ctx::crud_create),

@@ -11,7 +11,7 @@ Object.assign(views, {
     crumbs([['Monitor', '#/monitor'], ['Disponibilidad']]);
     app.innerHTML = head(`Disponibilidad de ${when}`, r.checks.length ? `${known.length} de ${r.checks.length} con datos${month === now ? ' · mes en curso, hasta hace una hora' : ''}` : 'Aún no vigilas nada',
         `<input type="month" id="sm" value="${month}" max="${now}" aria-label="Mes" class="mono"><button class="btn" id="print">${ui('print', 16)}Imprimir</button>`)
-      + `<div class="kpi-row">${kpi('Media', pct(r.avg), 'de todo lo vigilado', r.avg != null && r.avg < .99)}${kpi('Peor', pct(worst?.uptime), worst ? worst.name : '', worst && worst.uptime < .99)}
+      + tabs(TABS.monitor) + `<div class="kpi-row">${kpi('Media', pct(r.avg), 'de todo lo vigilado', r.avg != null && r.avg < .99)}${kpi('Peor', pct(worst?.uptime), worst ? worst.name : '', worst && worst.uptime < .99)}
           ${kpi('Tiempo caído', dur(known.reduce((t, x) => t + x.down_min, 0)), 'sumando todos')}${kpi('Horas del mes', r.hours, month === now ? 'transcurridas' : '')}</div>`
       + (known.length ? `<div class="card tbl-wrap"><table class="tbl sla-t"><thead><tr><th>Equipo</th><th class="hide-m">Tipo</th><th>Disponible</th><th class="num">Caído</th><th class="num hide-m" title="Horas con datos sobre las del mes">Datos</th><th class="num hide-m">Latencia</th></tr></thead>
           <tbody>${rows.map(x => `<tr><td><b>${esc(x.name)}</b>${x.name !== x.host ? `<div class="dim small mono">${esc(x.host)}</div>` : ''}</td><td class="muted hide-m">${KN[x.kind] || esc(x.kind || 'Ping')}</td>
@@ -28,8 +28,8 @@ Object.assign(views, {
     const [items, sounds] = await Promise.all([api('items'), api('sounds'), pollMonitor()]);
     const withIp = items.filter(i => i.ip), every = s => s < 60 ? `${s} s` : `${s / 60} min`;
     if (S.sound.startsWith('u:') && !sounds.some(x => 'u:' + x.id === S.sound)) { S.sound = 'bell'; applySettings(); } // su audio se borró
-    app.innerHTML = head('Monitor', '<span id="mon-sub"></span>', `<a class="btn ghost" href="#/sla">${ui('bars', 16)}Disponibilidad</a><button class="btn" id="maint" aria-haspopup="menu">${ui('bell', 16)}Mantenimiento</button><button class="btn pri" id="add">${ui('plus', 16)}Vigilar</button>`)
-      + `<div class="split stagger"><section class="card mon-list" id="mon-list" style="--i:0" aria-live="polite"></section>
+    app.innerHTML = head('Monitor', '<span id="mon-sub"></span>', `<button class="btn pri" id="add">${ui('plus', 16)}Vigilar</button>`)
+      + tabs(TABS.monitor) + `<div class="split stagger"><section class="card mon-list" id="mon-list" style="--i:0" aria-live="polite"></section>
         <aside class="side-col">
           <section class="card pad" style="--i:1"><h3 class="card-t">${ui('signal', 15)}Ping rápido</h3>
             <form class="row" id="pf" style="margin:0"><input id="ph" list="mon-ips" class="mono" placeholder="IP o nombre" aria-label="IP o nombre" required style="flex:1;min-width:0"><button class="btn">Ping ×4</button></form>
@@ -44,8 +44,8 @@ Object.assign(views, {
             ${sounds.length ? `<ul class="snd-list">${sounds.map(x => `<li><span>${esc(x.name)}</span><button class="btn icon ghost sm" data-del="${x.id}" aria-label="Borrar ${esc(x.name)}">${ui('trash', 15)}</button></li>`).join('')}</ul>` : ''}</section>
           <section class="card pad" style="--i:3"><h3 class="card-t">${ui('mail', 15)}Avisos fuera de catlan</h3>
             ${monData?.channels?.length ? `<p class="small muted" style="margin:0 0 12px">Por ${esc(monData.channels.join(', '))}: cuando algo falla y cuando vuelve.</p><button class="btn" id="mail-test">Enviar aviso de prueba</button>`
-              : `<p class="small muted" style="margin:0">Sin configurar. ${ME.admin ? 'Configura el correo, Telegram o un webhook (Slack, Teams, Discord…) en <a href="#/opts">Opciones → Avisos</a>.' : 'Pide a un administrador que los configure en Opciones → Avisos.'}</p>`}
-            ${ME.admin && monData?.channels?.length ? '<p class="small" style="margin:10px 0 0"><a href="#/opts">Cambiar en Opciones → Avisos</a></p>' : ''}</section>
+              : `<p class="small muted" style="margin:0">Sin configurar. ${ME.admin ? 'Configura el correo, Telegram o un webhook (Slack, Teams, Discord…) en <a href="#/opts">Administración → General</a>.' : 'Pide a un administrador que los configure en Administración → General.'}</p>`}
+            ${ME.admin && monData?.channels?.length ? '<p class="small" style="margin:10px 0 0"><a href="#/opts">Cambiar en Administración → General</a></p>' : ''}</section>
         </aside></div>
         <datalist id="mon-ips">${withIp.map(i => `<option value="${esc(i.ip)}">${esc(i.name)}</option>`).join('')}</datalist>`;
     const paint = () => {
@@ -139,27 +139,56 @@ Object.assign(views, {
     };
     app.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { await api('sounds/' + b.dataset.del, 'DELETE'); if (S.sound === 'u:' + b.dataset.del) S.sound = 'bell'; applySettings(); route(false); });
     $('#mail-test') && ($('#mail-test').onclick = testAlerts);
-    // Mantenimiento: silencia (o reactiva) todo lo vigilado y todo lo que se lee en Salud
-    const muteAll = async m => {
+    paint(); redraw = monPaint = paint; cleanup = () => { monPaint = null; };
+  },
+  // Mantenimientos: todo lo silenciado o programado, de Monitor, Hardware y PCs
+  async mant() {
+    crumbs([['Monitor', '#/monitor'], ['Mantenimientos']]);
+    await pollMonitor();
+    app.innerHTML = head('Mantenimientos', 'Lo que está silenciado ahora o tiene un mantenimiento programado', `<button class="btn" id="unall">${ui('check', 16)}Quitar todos los silencios</button><button class="btn pri" id="muteall">${ui('bell', 16)}Silenciar todo…</button>`)
+      + tabs(TABS.monitor) + '<div id="mt-list"></div>';
+    const muteAll = async m => { // silencia (o reactiva) todo lo vigilado y todo lo que se lee
       await Promise.all([...monData.checks.map(c => api(`checks/${c.id}/mute`, 'POST', {minutes: m})), ...(monData.sources || []).map(x => api(`sources/${x.id}/mute`, 'POST', {minutes: m}))]);
       toast(m ? 'Mantenimiento: avisos silenciados' : 'Avisos activados de nuevo'); pollMonitor();
     };
-    $('#maint').onclick = e => menu(e.currentTarget, [['Silenciar todo…', async () => { const m = await muteDialog('Modo mantenimiento'); if (m) muteAll(m); }, {icon: 'bell'}],
-      ['Quitar todos los silencios', () => muteAll(0), {icon: 'check'}]]);
+    const paint = () => {
+      const rows = [...(monData?.checks || []).map(c => ({res: 'checks', x: c, name: monName(c), where: 'Monitor', ic: 'signal', href: '#/monitor'})),
+        ...(monData?.sources || []).map(x => ({res: 'sources', x, name: x.name, where: x.kind === 'kitty' ? 'PC' : 'Hardware', ic: x.kind === 'kitty' ? 'screen' : 'thermo', href: '#/salud/' + x.id}))]
+        .filter(r => isMuted(r.x) || isPlanned(r.x)).sort((a, b) => String(a.x.mute_from || a.x.mute_until).localeCompare(String(b.x.mute_from || b.x.mute_until)));
+      $('#mt-list').innerHTML = rows.length ? `<div class="rows stagger">${rows.map((r, i) => `<div class="rowlink" style="--i:${Math.min(i, 14)}"><span class="badge-ic">${ui(r.ic, 18)}</span>
+          <div class="grow"><b><a href="${r.href}">${esc(r.name)}</a></b><span class="ex">${r.where} · ${esc(muteTxt(r.x))}</span></div>
+          <button class="btn sm" data-un="${r.res}/${r.x.id}">${isPlanned(r.x) ? 'Cancelar' : 'Quitar silencio'}</button></div>`).join('')}</div>`
+        : empty('bell', 'Sin mantenimientos', 'Programa uno desde la ficha de un equipo o de un rack (⋯ → Programar mantenimiento), o en Inventario seleccionando varios equipos.');
+      $('#mt-list').querySelectorAll('[data-un]').forEach(b => b.onclick = async () => { await api(b.dataset.un + '/mute', 'POST', {minutes: 0}); await pollMonitor(); });
+    };
+    $('#muteall').onclick = async () => { const m = await muteDialog('Modo mantenimiento'); if (m) muteAll(m); };
+    $('#unall').onclick = () => muteAll(0);
     paint(); redraw = monPaint = paint; cleanup = () => { monPaint = null; };
   },
-  async salud(id) {
+  // Syslog de todos los equipos del inventario (el de IPs desconocidas no se guarda)
+  async syslog() {
+    crumbs([['Syslog']]);
+    const sys = await api('syslog');
+    app.innerHTML = head('Syslog', 'Lo último que mandan los equipos del inventario · sin verificar: llega por UDP sin firmar')
+      + (sys.length ? `<div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Hora</th><th>Equipo</th><th></th><th>Mensaje</th></tr></thead><tbody>${sys.map(l => `<tr>
+          <td class="mono dim small" style="white-space:nowrap">${esc(date(l.ts).toLocaleString('es'))}</td><td style="white-space:nowrap"><a href="#/inv/${+l.item}">${esc(l.item_name || l.ip)}</a></td>
+          <td>${l.sev <= 3 ? `<span class="pill bad"><i></i>${l.sev <= 2 ? 'crítico' : 'error'}</span>` : l.sev === 4 ? '<span class="pill warn"><i></i>aviso</span>' : ''}</td>
+          <td class="mono small" style="word-break:break-word">${esc(l.msg)}</td></tr>`).join('')}</tbody></table></div>`
+        : empty('ul', 'Sin mensajes', 'Configura tus equipos para que manden syslog por UDP a este catlan (se activa en el servidor). Solo se guarda lo que llega desde la IP de un equipo del inventario.'));
+  },
+  pcs() { return views.salud(null, true); },
+  async salud(id, pc = false) {
     const items = await api('items');
     if (!id) {
-      const hs = await api('health'), q = qv(), bad = hs.filter(h => h.state === 'warn' || h.state === 'error').length;
+      const [hs0, agents] = await Promise.all([api('health'), pc && ME.admin ? api('agents') : []]), q = qv();
+      const hs = hs0.filter(h => (h.kind === 'kitty') === pc), bad = hs.filter(h => h.state === 'warn' || h.state === 'error').length;
       const top = (h, pre) => h.latest.filter(m => m.key.startsWith(pre)).sort((a, b) => b.value - a.value)[0];
-      const kits = hs.filter(h => h.kind === 'kitty').length, tab = h => saludTab === 'all' || (saludTab === 'kitty') === (h.kind === 'kitty');
-      const shown = hs.filter(h => tab(h) && [srcName(h), h.host, SRC_KIND[h.kind], h.info?.descr].join(' ').toLowerCase().includes(q));
-      crumbs([['Salud']]);
-      app.innerHTML = head('Salud', hs.length ? `${hs.length} ${hs.length === 1 ? 'equipo' : 'equipos'} · ${bad ? `${bad} con avisos` : 'todo en orden'}` : 'Temperaturas, discos, ventiladores y RAID de tus equipos',
-          `<button class="btn pri" id="add">${ui('plus', 16)}Añadir equipo</button>`)
-        + (hs.length ? `<div class="seg" id="stab" style="margin-bottom:16px">${[['all', 'Todo', hs.length], ['snmp', 'SNMP', hs.length - kits], ['kitty', 'Kittens', kits]].map(([k, t, n]) =>
-            `<button data-v="${k}" class="${k === saludTab ? 'on' : ''}">${t} <span class="dim">${n}</span></button>`).join('')}</div>` : '')
+      const shown = hs.filter(h => [srcName(h), h.host, SRC_KIND[h.kind], h.info?.descr].join(' ').toLowerCase().includes(q));
+      crumbs([[pc ? 'PCs (Kitty)' : 'Hardware']]);
+      app.innerHTML = head(pc ? 'PCs (Kitty)' : 'Hardware', hs.length ? `${hs.length} ${pc ? (hs.length === 1 ? 'PC' : 'PCs') : hs.length === 1 ? 'equipo' : 'equipos'} · ${bad ? `${bad} con avisos` : 'todo en orden'}`
+          : pc ? 'Sistema, CPU, memoria, discos y control remoto de los PCs con Kitty' : 'Temperaturas, discos, ventiladores y RAID de tus equipos por SNMP',
+          pc ? (ME.admin ? `<button class="btn pri" id="add">${ui('plus', 16)}Añadir con Kitty</button>` : '') : `<button class="btn pri" id="add">${ui('plus', 16)}Añadir equipo</button>`)
+        + (pc ? tabs(TABS.pcs) + kittyWaiting(agents) : '')
         + (shown.length ? `<div class="grid hgrid stagger">${shown.map((h, i) => { const t = top(h, 'temp:'), d = top(h, 'disk:'), c = h.latest.find(m => m.key === 'cpu'), m = h.latest.find(x => x.key === 'mem'), kit = h.kind === 'kitty';
             return `<a class="src-card ${h.state || ''}" style="--i:${Math.min(i, 14)}" href="#/salud/${h.id}">
               <header><span class="mdot ${h.state === 'ok' ? 'up' : h.state ? 'down' : ''}"></span><b>${esc(srcName(h))}</b><small>${esc(kit ? osShort(h.info?.descr) : SRC_KIND[h.kind] || h.kind)}</small></header>
@@ -168,20 +197,20 @@ Object.assign(views, {
                 : h.problems.length ? `<ul class="probs">${h.problems.slice(0, 3).map(p => `<li>${ui('alert', 14)}${esc(p)}</li>`).join('')}${h.problems.length > 3 ? `<li class="dim">y ${h.problems.length - 3} más</li>` : ''}</ul>`
                 : h.state === 'ok' ? `<p class="hc-ok">${ui('check', 14)}Todo en orden</p>` : '<p class="dim small" style="margin:0">Leyendo por primera vez…</p>'}
               <footer>${h.last ? `${h.kind === 'kitty' ? 'Enviado' : 'Leído'} ${esc(ago(h.last))}` : 'Pendiente'} · cada ${everyTxt(h.every)}${isMuted(h) || isPlanned(h) ? ` · ${esc(muteTxt(h))}` : ''}</footer></a>`; }).join('')}</div>`
-        : saludTab === 'kitty' && !kits ? empty('box', 'Ningún Kitten todavía', 'Instala Kitty en un PC o servidor y acéptalo en Inventario: aparecerá aquí con su sistema, CPU, memoria, discos y tiempo encendido.')
+        : pc && !hs.length ? empty('screen', 'Ningún PC con Kitty todavía', 'Instala Kitty en un PC o servidor y acéptalo aquí: aparecerá con su sistema, CPU, memoria, discos y tiempo encendido.')
         : hs.length ? empty('search', 'Sin resultados', `Nada coincide con «${esc(q)}».`)
         : empty('thermo', 'Aún no lees ningún equipo', 'Activa SNMP en tu NAS o switch (o usa la API de tu grabador Hikvision) y catlan guardará sus temperaturas, discos y estado para dibujarlos y avisarte.'));
-      $('#add').onclick = () => sourceDialog({}, items);
-      if ($('#stab')) { seg($('#stab')); $('#stab').onclick = e => { const b = e.target.closest('[data-v]'); if (b) { saludTab = b.dataset.v; route(false); } }; }
+      if (pc) { $('#add') && ($('#add').onclick = kittyAdd); kittyWaitingBind(); } else $('#add').onclick = () => sourceDialog({}, items);
       cleanup = live('health', () => route(false));
       return;
     }
     let h, hours = healthRange, selPort = null, showAll = false;
-    crumbs([['Salud', '#/salud'], ['…']]);
+    crumbs([['…']]);
     const paint = async () => {
       const [all, ms] = await Promise.all([api('health'), api(`metrics?source=${+id}&hours=${hours}`)]);
       if (!(h = all.find(x => x.id === +id))) throw new Error('404');
-      crumbs([['Salud', '#/salud'], [srcName(h)]]);
+      crumbs(h.kind === 'kitty' ? [['PCs (Kitty)', '#/pcs'], [srcName(h)]] : [['Hardware', '#/salud'], [srcName(h)]]);
+      if (h.kind === 'kitty') navOn('pcs');
       const lat = k => h.latest.filter(m => m.key.startsWith(k)), top = k => [...lat(k)].sort((a, b) => b.value - a.value)[0];
       const t = top('temp:'), d = top('disk:'), c = lat('cpu')[0], m = lat('mem')[0];
       const kit = h.kind === 'kitty', inf = h.info || {};
@@ -252,7 +281,7 @@ Object.assign(views, {
       + `<div id="h-state"></div><div class="kpi-row" id="kpis"></div>
       <section class="card pad" id="kit-card" hidden style="margin-bottom:16px"><h3 class="card-t">Equipo</h3><div id="kit-info"></div>
         <p class="dim small" style="margin:8px 0 0">Lo envía Kitty. Solo lo justo para ver fallos: nada de usuarios, archivos ni más programas que los que IT pide instalar.</p></section>
-      <section class="card pad" id="app-card" hidden style="margin-bottom:16px"><h3 class="card-t">Programas <span class="dim small" style="font-weight:400">· los que IT instala y mantiene al día en los PCs (<a href="#/apps">Opciones → Programas</a>)</span></h3><div id="app-list"></div></section>
+      <section class="card pad" id="app-card" hidden style="margin-bottom:16px"><h3 class="card-t">Programas <span class="dim small" style="font-weight:400">· los que IT instala y mantiene al día en los PCs (<a href="#/apps">PCs → Programas</a>)</span></h3><div id="app-list"></div></section>
       <section class="card pad" id="ev-card" hidden style="margin-bottom:16px"><h3 class="card-t">Visor de eventos <span class="dim small" style="font-weight:400">· críticos y errores de los últimos 7 días</span></h3><div id="ev-list"></div></section>
       <div class="charts stagger"><section class="card pad" style="--i:0" id="temp-card"><h3 class="card-t">Temperatura</h3><div id="c-temp"></div></section>
         <section class="card pad" style="--i:1"><h3 class="card-t">Ocupación de discos</h3><div id="c-disk"></div><div id="c-disk-h" class="mt"></div></section>

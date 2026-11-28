@@ -58,7 +58,7 @@ async function dwData(w, get) {
   }
   if (w.kind === 'health') {
     const h = (await get('health')).find(x => x.id === w.source);
-    if (!h) return {title: DW.health.name, empty: 'Este equipo ya no está en Salud.'};
+    if (!h) return {title: DW.health.name, empty: 'Este equipo ya no está en Hardware ni en PCs.'};
     const g = w.group || 'temp', hours = w.hours || 24, m = await get(`metrics?source=${h.id}&hours=${hours}`);
     const keep = k => g === 'load' ? k === 'cpu' || k === 'mem' : g === 'net' ? /^(rx|tx):/.test(k) : k.startsWith(g + ':');
     const last = x => x.points.at(-1)?.[1] ?? 0;

@@ -9,7 +9,7 @@ function showLogin() {
     <label>Contraseña<input name="pass" type="password" autocomplete="current-password" required></label>
     <label hidden>Código de tu app de autenticación<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7"></label>
     <p class="login-err" role="alert"></p><button class="btn pri">Entrar</button>
-    <details class="small muted" style="margin-top:12px"><summary style="cursor:pointer">¿Has olvidado la contraseña?</summary><p style="margin:8px 0 0">Pide a un administrador una nueva (Opciones → Usuarios). Si eres el único administrador, en el servidor de catlan ejecuta <code>catlan restablecer tu-usuario</code> con su misma carpeta de datos (si lo arrancas con <code>CATLAN_DATA</code>, ponla igual). Con Docker: <code>docker compose exec catlan catlan restablecer tu-usuario</code>.</p></details></form>`;
+    <details class="small muted" style="margin-top:12px"><summary style="cursor:pointer">¿Has olvidado la contraseña?</summary><p style="margin:8px 0 0">Pide a un administrador una nueva (Administración → Usuarios y grupos). Si eres el único administrador, en el servidor de catlan ejecuta <code>catlan restablecer tu-usuario</code> con su misma carpeta de datos (si lo arrancas con <code>CATLAN_DATA</code>, ponla igual). Con Docker: <code>docker compose exec catlan catlan restablecer tu-usuario</code>.</p></details></form>`;
   document.body.append(el);
   const off = [...document.querySelectorAll('body > :not(#login):not([inert])')]; // detrás no se llega con el teclado
   off.forEach(x => x.inert = true);
@@ -55,7 +55,7 @@ async function boot() {
   if (r?.status === 401) return showLogin();
   ME = await r.json();
   if (ME.must_change) { await passDialog(true); ME.must_change = 0; }
-  $('#user-name').textContent = ME.name + (ME.readonly ? ' · solo vista' : '');
+  $('[data-v="cuenta"]').title = `Mi cuenta · ${ME.name}${ME.readonly ? ' · solo vista' : ''}`;
   document.body.classList.toggle('ro', !!ME.readonly);
   $('#nav-opts').hidden = !ME.admin;
   if (booted) return route();
@@ -80,9 +80,49 @@ async function totpDialog() {
     try { ME = await api('me/totp', 'POST', {secret, code: f.get('code')}); toast('Verificación en dos pasos activada'); return; } catch {}
   }
 }
-$('#user-btn').onclick = e => menu(e.currentTarget, [...(ME?.ext ? [] : [['Cambiar contraseña', () => passDialog(false), {icon: 'edit'}], // los del dominio, allí
-  [ME?.totp ? 'Quitar verificación en dos pasos' : 'Verificación en dos pasos', totpDialog, {icon: 'key'}],
-  '-']),
-  ['Cerrar sesión', async () => { await api('logout', 'POST'); location.reload(); }, {icon: 'x'}]]);
+Object.assign(views, {
+  // Mi cuenta: lo de este navegador (antes el cajón de Ajustes) y lo de tu usuario
+  async cuenta() {
+    crumbs([['Mi cuenta']]);
+    const sw = k => `<button class="switch" role="switch" data-k="${k}" aria-label="${k === 'rail' ? 'Barra lateral compacta' : 'Paleta de esquemas abierta'}"></button>`;
+    app.innerHTML = head('Mi cuenta', `${esc(ME.name)}${ME.admin ? ' · administrador' : ''}${ME.readonly ? ' · solo vista' : ''}${ME.ext ? ' · del dominio' : ''}`, '<button class="btn" id="logout">' + ui('x', 16) + 'Cerrar sesión</button>')
+      + `<div id="settings" class="split stagger"><div>
+        <section class="card pad" style="--i:0"><h3 class="card-t">${ui('sliders', 15)}Apariencia <span class="dim small" style="font-weight:400;margin-left:auto">en este navegador</span></h3>
+          <div class="set"><span>Tema</span><div class="seg" data-k="theme"><button data-v="auto">Sistema</button><button data-v="light">Claro</button><button data-v="dark">Oscuro</button></div></div>
+          <div class="set"><span>Acento</span><div class="swatches" data-k="accent">${ACCENTS.map(([n, c]) => `<button data-v="${c}" style="--c:${c}" title="${n}" aria-label="Acento ${n}"></button>`).join('')}</div></div>
+          <div class="set"><span>Densidad</span><div class="seg" data-k="density"><button data-v="comfy">Cómoda</button><button data-v="compact">Compacta</button></div></div>
+          <div class="set"><span>Animaciones<small>«Sistema» respeta «reducir movimiento»</small></span><div class="seg" data-k="motion"><button data-v="auto">Sistema</button><button data-v="on">Sí</button><button data-v="off">No</button></div></div>
+          <div class="set"><span>Barra lateral compacta<small>Solo iconos</small></span>${sw('rail')}</div>
+          <div class="set"><span>Paleta de esquemas abierta</span>${sw('dock')}</div>
+          <div class="set"><span>Sonidos de alerta<small>Están en Monitor, junto a lo que vigilas</small></span><a class="btn sm" href="#/monitor">Abrir Monitor</a></div>
+          <div class="set"><span class="small muted">Se guardan en este navegador</span><button class="btn ghost sm" id="reset-settings">Restablecer</button></div></section></div>
+        <aside class="side-col">
+          <section class="card pad" style="--i:1"><h3 class="card-t">${ui('key', 15)}Acceso</h3>
+            ${ME.ext ? '<p class="small muted" style="margin:0">Tu usuario es del dominio: la contraseña y la verificación en dos pasos se cambian allí.</p>'
+              : `<div class="set"><span>Contraseña</span><button class="btn sm" id="pw">Cambiar</button></div>
+                 <div class="set"><span>Verificación en dos pasos<small>${ME.totp ? 'Activada' : 'Desactivada'}</small></span><button class="btn sm" id="totp">${ME.totp ? 'Quitar' : 'Activar'}</button></div>`}</section>
+          <section class="card pad" style="--i:2"><h3 class="card-t">${ui('book', 15)}Ayuda</h3>
+            <div class="set"><span>Tutorial<small>Un paseo de un minuto por catlan</small></span><button class="btn sm" id="tour-again">Ver el tutorial</button></div>
+            <div class="set"><span>Guía de uso<small>Funciones, trucos y qué hace con tus datos</small></span><a class="btn sm" href="#/guia">Abrir la guía</a></div></section>
+        </aside></div>`;
+    applySettings();
+    $('#settings').onclick = e => {
+      const sw = e.target.closest('.switch');
+      if (sw) { S[sw.dataset.k] = !S[sw.dataset.k]; return applySettings(); }
+      const b = e.target.closest('[data-v]'), g = b?.closest('[data-k]');
+      if (g) { S[g.dataset.k] = b.dataset.v; applySettings(); }
+    };
+    $('#reset-settings').onclick = () => { S = {...DEF}; applySettings(); toast('Ajustes restablecidos'); };
+    $('#tour-again').onclick = () => tour();
+    $('#logout').onclick = async () => { await api('logout', 'POST'); location.reload(); };
+    if (!ME.ext) { $('#pw').onclick = () => passDialog(false); $('#totp').onclick = async () => { await totpDialog(); route(false); }; }
+  },
+  async guia() {
+    const g = (await api('pages').catch(() => [])).find(x => x.title === 'Guía de catlan');
+    if (g) return location.replace('#/wiki/' + g.id); // sin dejar #/guia en el historial: «Atrás» no vuelve a saltar
+    crumbs([['Guía de catlan']]);
+    app.innerHTML = empty('book', 'No encuentro la «Guía de catlan»', 'Se crea en la Wiki al instalar catlan; quizá se borró.', '<a class="btn" href="#/wiki">Ir a la Wiki</a>');
+  },
+});
 applySettings();
 boot();

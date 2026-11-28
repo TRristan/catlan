@@ -1,6 +1,6 @@
 Object.assign(views, {
   async tablero() {
-    crumbs([['Incidencias']]);
+    crumbs([['Mis tareas']]);
     const [all, tasks, n] = await Promise.all([api('incidents'), api('tasks'), names()]);
     const week = Date.now() - 7 * 864e5, ro = ME.readonly;
     const incs = all.filter(x => incMine(x) && (incOpen(x) || date(x.updated) > week)); // lo resuelto o cerrado, solo la última semana
@@ -12,8 +12,8 @@ Object.assign(views, {
         <div class="kc-m">${prioPill(x.priority)}${x.item_name ? `<span class="dim small">${esc(x.item_name)}</span>` : ''}${x.assignee !== ME.id && x.grp_name ? `<span class="dim small">${ui('users', 13)} ${esc(x.grp_name)}</span>` : ''}</div>${ro ? '' : more(incId(x.id))}</div>`;
     const taskCard = (t, i) => `<div class="kc" role="listitem" data-drag data-id="${t.id}" data-col="${t.col}" data-pos="${t.pos}" title="Doble clic para editar" style="--i:${Math.min(i, 12)}"><div class="prose">${md(t.text, n)}</div>${more(t.text.slice(0, 40))}</div>`;
     const byCol = k => tasks.filter(t => t.col === k).map(taskCard);
-    app.innerHTML = head('Incidencias', `${incs.filter(incOpen).length} abiertas para ti o tus grupos · ${tasks.filter(t => t.col === 'pendiente' || t.col === 'hoy').length} tareas pendientes`,
-        `${incViews('board')}<button class="btn pri" id="add">${ui('plus', 16)}Nueva incidencia</button>`)
+    app.innerHTML = head('Mis tareas', `${incs.filter(incOpen).length} incidencias abiertas para ti o tus grupos · ${tasks.filter(t => t.col === 'pendiente' || t.col === 'hoy').length} tareas pendientes`,
+        `<button class="btn pri" id="add">${ui('plus', 16)}Nueva incidencia</button>`)
       + `<h2 class="kb-h">${ui('ticket', 17)}Mis incidencias</h2>
         <div class="kb" id="kb-inc">${INC_STATUS.map(st => col(st, statusPill(st), incs.filter(x => x.status === st).map(incCard))).join('')}</div>
         <p class="dim small" style="margin:8px 0 0">Asignadas a ti o a tus grupos. Arrastra una tarjeta para cambiar su estado: queda en el historial de la incidencia. Las resueltas y cerradas salen una semana.</p>
@@ -30,7 +30,7 @@ Object.assign(views, {
       const f = await dialog(`<h3>Editar</h3><div class="field"><label for="tk-t">Texto <span class="dim">· Markdown; enlaza equipos con [[#id]]</span></label><textarea id="tk-t" name="t" rows="6" maxlength="2000" required>${esc(t.text)}</textarea></div>`, {ok: 'Guardar'});
       if (f) { try { await api('tasks/' + t.id, 'PUT', {text: f.get('t')}); } catch {} route(false); }
     };
-    incViewsBind(); $('#add').onclick = () => incidentDialog();
+    $('#add').onclick = () => incidentDialog();
     kanban($('#kb-inc'), (c, list) => c.dataset.col !== list.parentNode.dataset.col ? setStatus(c.dataset.id, list.parentNode.dataset.col, c) : route(false)); // dentro de la columna manda la prioridad
     kanban($('#kb-task'), (c, list) => { // la posición queda entre sus vecinas
       const p = c.previousElementSibling?.dataset.pos, q = c.nextElementSibling?.dataset.pos;
@@ -60,7 +60,6 @@ Object.assign(views, {
     });
   },
   async inc(id) {
-    if (!id && S.incView === 'board') return views.tablero();
     if (!id) {
       const all = await api('incidents'), q = qv(), sets = {open: all.filter(incOpen), mine: all.filter(n => incOpen(n) && incMine(n)), all, closed: all.filter(n => !incOpen(n))};
       const shown = sets[incFilter].filter(n => [n.title, n.assignee_name, n.grp_name, n.item_name, incId(n.id)].join(' ').toLowerCase().includes(q));
@@ -77,13 +76,13 @@ Object.assign(views, {
           ${ks.length ? `<div class="inc-kids${open ? ' open' : ''}"><div>${ks.map(k => node(k)).join('')}</div></div>` : ''}</div>`;
       };
       crumbs([['Incidencias']]);
-      app.innerHTML = head('Incidencias', `${sets.open.length} abiertas · ${sets.mine.length} para ti o tus grupos`, `${incViews('list')}<button class="btn pri" id="add">${ui('plus', 16)}Nueva incidencia</button>`)
+      app.innerHTML = head('Incidencias', `${sets.open.length} abiertas · ${sets.mine.length} para ti o tus grupos`, `<button class="btn pri" id="add">${ui('plus', 16)}Nueva incidencia</button>`)
         + `<div class="seg" id="if" style="margin-bottom:16px">${[['open', 'Abiertas'], ['mine', 'Mías'], ['all', 'Todas'], ['closed', 'Cerradas']].map(([k, t]) => `<button data-v="${k}" class="${k === incFilter ? 'on' : ''}">${t} <span class="dim">${sets[k].length}</span></button>`).join('')}</div>`
         + (shown.length ? `<div class="rows stagger inc-tree" id="itree">${roots.map((n, i) => node(n, i)).join('')}</div>`
           : empty('ticket', incFilter === 'mine' ? 'Nada pendiente para ti' : incFilter === 'closed' ? 'Aún no hay ninguna cerrada' : 'Sin incidencias', all.length ? 'Nada coincide con este filtro.' : 'Abre una cuando algo falle y asígnala a una persona o a un grupo; cada cambio y cada nota quedan en su historial.'));
       seg($('#if'));
       $('#if').onclick = e => { const b = e.target.closest('[data-v]'); if (b) { incFilter = b.dataset.v; route(false); } };
-      $('#add').onclick = () => incidentDialog(); incViewsBind();
+      $('#add').onclick = () => incidentDialog();
       $('#itree')?.addEventListener('click', e => { // desplegar / plegar las hijas sin recargar la lista
         const t = e.target.closest('[data-tg]'); if (!t) return;
         const id = +t.dataset.tg, open = !incOpenTree.has(id);

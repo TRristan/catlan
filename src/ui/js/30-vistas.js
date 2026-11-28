@@ -1,11 +1,11 @@
 // ── Vistas ──────────────────────────────────────────────
 const findPage = (pages, t) => pages.find(p => esc(p.title).toLowerCase() === t.toLowerCase()); // [[título]] llega escapado
-let logFilter = 'all', saludTab = 'all';
+let logFilter = 'all';
 // Rebote de gelatina al soltar algo en su sitio (Dashboard y tableros)
 const squish = (el, origin = '50% 50%', k = 1) => { el.style.transformOrigin = origin; anim(el, [{transform: 'none'},
   {transform: `scale(${1 + .045 * k},${1 - .04 * k})`}, {transform: `scale(${1 - .03 * k},${1 + .03 * k})`}, {transform: `scale(${1 + .012 * k},${1 - .01 * k})`}, {transform: 'none'}],
   {duration: 680, easing: 'cubic-bezier(.3,.7,.4,1)'}); };
-// Control remoto: desde Salud (Kitty) y desde la ficha del equipo, el mismo camino
+// Control remoto: desde PCs (Kitty) y desde la ficha del equipo, el mismo camino
 async function remoteStart(agent) {
   try { location.hash = '#/remoto/' + (await api('remote', 'POST', {agent})).id; } catch {} // el porqué (Kitty cerrado, ya hay otra…) ya sale en un aviso
 }
