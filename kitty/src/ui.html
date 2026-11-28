@@ -94,10 +94,33 @@ main{flex:1;position:relative;overflow:hidden}
 .help summary{cursor:pointer;font-weight:560}.help .art{white-space:pre-wrap;margin-top:8px;color:var(--tx2);max-height:220px;overflow:auto;user-select:text}
 .chk{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--tx2)}.chk input{width:auto;height:auto;margin:0;flex:none;accent-color:var(--acc)}
 .inc{cursor:pointer}.inc:hover{border-color:color-mix(in oklab,var(--acc) 40%,var(--line))}
-.msgs{display:grid;gap:8px;margin-top:14px}
-.msg{max-width:88%;padding:9px 12px;border-radius:14px;background:var(--s2);font-size:13.5px;line-height:1.45;white-space:pre-wrap;user-select:text;justify-self:start}
-.msg.me{justify-self:end;background:var(--acc-soft)}.msg small{display:block;font-size:11px;color:var(--tx3);margin-bottom:3px}
-.back{background:none;border:0;color:var(--tx2);font:inherit;font-size:13px;cursor:pointer;padding:0;margin-bottom:8px}
+/* Conversación de una incidencia: cabecera fija, burbujas agrupadas por persona y caja de escribir abajo */
+.chat{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--bg);animation:pageIn .35s var(--e) both}
+.chat[hidden]{display:none}
+.ch-h{flex:none;display:flex;align-items:center;gap:10px;padding:10px 12px 10px 8px;border-bottom:1px solid var(--line);background:var(--s1)}
+.ch-back{flex:none;display:grid;place-items:center;width:34px;height:34px;border:0;border-radius:10px;background:none;color:var(--tx2);cursor:pointer}
+.ch-back:hover{background:var(--s2);color:var(--tx)}.ch-back:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+.ch-av{flex:none;display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--acc-soft);color:var(--acc)}
+.ch-t{flex:1;min-width:0}.ch-t b{display:block;font-size:14px;font-weight:620;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ch-t small{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--tx3)}
+.ch-t small i{width:6px;height:6px;border-radius:50%;background:var(--tx3)}.ch-t small.acc i{background:var(--acc)}.ch-t small.ok i{background:var(--ok)}.ch-t small.warn i{background:var(--warn)}
+.ch-l{flex:1;overflow-y:auto;padding:14px 12px 8px;display:flex;flex-direction:column;gap:2px;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+.ch-day{align-self:center;margin:10px 0 8px;padding:3px 10px;border-radius:99px;background:var(--s2);font-size:11.5px;color:var(--tx3);font-weight:560}
+.ch-who{font-size:11.5px;color:var(--tx3);margin:8px 0 3px 4px;font-weight:560}
+.bub{position:relative;max-width:82%;padding:8px 11px 6px;border-radius:18px;font-size:14px;line-height:1.42;white-space:pre-wrap;overflow-wrap:anywhere;user-select:text;
+  align-self:flex-start;background:var(--s1);border:1px solid var(--line);box-shadow:var(--sh1);animation:rise .3s var(--e) both}
+.bub.me{align-self:flex-end;background:var(--acc);border-color:transparent;color:#fff;box-shadow:none}
+.bub.tail{border-bottom-left-radius:6px}.bub.me.tail{border-bottom-left-radius:18px;border-bottom-right-radius:6px}
+.bub+.bub{margin-top:2px}.bub.gap{margin-top:8px}
+.bub time{float:right;margin:6px 0 -2px 10px;font-size:10.5px;color:var(--tx3);line-height:1.4}.bub.me time{color:rgb(255 255 255/.78)}
+.bub.sending{opacity:.6}.bub.failed{background:var(--bad)}
+.ch-note{align-self:center;max-width:90%;margin:10px 0 2px;font-size:12px;color:var(--tx3);text-align:center}
+.ch-f{flex:none;display:flex;align-items:flex-end;gap:8px;padding:10px 12px 12px;border-top:1px solid var(--line);background:var(--s1)}
+.ch-f textarea{flex:1;min-height:42px;max-height:132px;padding:10px 14px;border-radius:21px;line-height:1.45;resize:none;background:var(--bg)}
+.ch-send{flex:none;display:grid;place-items:center;width:42px;height:42px;border:0;border-radius:50%;background:var(--acc);color:#fff;cursor:pointer;transition:transform .15s var(--spring),opacity .15s}
+.ch-send:hover{transform:scale(1.06)}.ch-send:active{transform:scale(.92)}.ch-send:disabled{opacity:.35;pointer-events:none}
+.ch-send:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.ch-closed{flex:none;padding:12px 16px 14px;border-top:1px solid var(--line);background:var(--s1);font-size:13px;color:var(--tx2);text-align:center}
 .field label{display:flex;align-items:baseline;gap:6px;font-size:12.5px;font-weight:560;color:var(--tx2);margin:0 0 6px}
 .field label .dim{font-weight:500}
 input,textarea{width:100%;font:inherit;color:var(--tx);background:var(--s1);border:1px solid var(--line2);border-radius:var(--r);outline:none;user-select:text;
@@ -206,6 +229,7 @@ kbd{font:11px var(--mono);color:var(--tx3);border:1px solid var(--line2);border-
     <symbol id="u-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></symbol>
     <symbol id="u-ticket" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z"/><path d="M9 9.5h6M9 13.5h4"/></symbol>
     <symbol id="u-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+    <symbol id="u-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 6 8.5 12l6 6"/></symbol>
     <symbol id="u-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 3.5 10 14"/><path d="m20.5 3.5-6.5 17-4-6.5-6.5-4z"/></symbol>
     <symbol id="u-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v4.5M12 16h.01"/></symbol>
     <symbol id="u-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
@@ -269,6 +293,7 @@ kbd{font:11px var(--mono);color:var(--tx3);border:1px solid var(--line2);border-
       <div class="hd" style="--i:0"><h1>Mis avisos</h1><p>Los que se han enviado desde este equipo y cómo van.</p></div>
       <div id="mine" style="--i:1"></div>
     </div>
+    <div class="chat" id="chat" hidden role="region" aria-label="Conversación con IT"></div>
   </section>
 
   <section class="view" id="v-pc" hidden>
@@ -467,7 +492,9 @@ function mine(r) {
   S.mineAt = Date.now();
   S.state = stateFrom(r); setConn();
   if (r.status === 200) { S.mine = r.body.incidents || []; renderNotices(r.body.notices || []); }
-  if (!S.thread) renderMine(r);
+  if (!S.thread) return renderMine(r);
+  const open = (S.mine || []).find(x => x.id === S.thread);
+  if (open && S.threadN != null && (open.notes !== S.threadN || open.status !== $('#chat').dataset.st)) toRust({op: 'thread', id: S.thread});
 }
 function renderMine(r) {
   const box = $('#mine');
@@ -505,33 +532,80 @@ function renderNotices(list) {
 
 // ── Una incidencia: lo hablado con IT y contestar ──
 function openThread(id) {
-  S.thread = id;
-  $('#mine').innerHTML = '<div class="list"><div class="skel"></div><div class="skel"></div></div>';
+  S.thread = id; S.threadN = null;
+  const i = (S.mine || []).find(x => x.id === id) || {title: '', status: ''};
+  chatShell(i);
+  $('#ch-l').innerHTML = '<div class="ch-note">Cargando la conversación…</div>';
   toRust({op: 'thread', id});
 }
-function thread(r) {
-  if (!S.thread) return;
-  if (r.status !== 200) { S.thread = null; renderMine(r); return; }
-  const i = r.body.incident, me = n => n.who.startsWith('Kitty · ');
-  const [cls, label] = STATUS[i.status] || ['', i.status];
-  $('#mine').innerHTML = `<button class="back" id="th-back">‹ Mis avisos</button>
-    <div class="inc" style="cursor:default"><span class="ico">${ui('ticket', 17)}</span><div><div class="t">${esc(i.title)}</div><div class="m"><span class="mono">INC-${+i.id}</span> · ${esc(ago(i.created))}</div></div><span class="pill ${cls}"><i></i>${esc(label)}</span></div>
-    <div class="msgs">${i.body ? `<div class="msg me"><small>Tú</small>${esc(i.body)}</div>` : ''}${r.body.notes.map(n =>
-      `<div class="msg${me(n) ? ' me' : ''}"><small>${me(n) ? 'Tú' : esc(n.who) + ' (IT)'} · ${esc(ago(n.ts))}</small>${esc(n.text)}</div>`).join('')}</div>
-    <form class="fields" id="th-f"><div class="field"><label for="th-t">Responder a IT</label><textarea id="th-t" maxlength="5000" required placeholder="Escribe aquí…"></textarea></div>
-      <div id="th-e"></div><button class="btn pri wide" id="th-send">${ui('send', 16)}<span>Enviar</span></button></form>`;
-  $('#th-back').onclick = () => { S.thread = null; renderMine(); };
-  $('#th-f').onsubmit = e => {
+function closeThread() {
+  S.thread = null; $('#chat').hidden = true; $('#chat').dataset.st = ''; $('#v-mios .st').hidden = false; renderMine();
+  setTimeout(() => $(`.inc[data-id]`)?.focus(), 30);
+}
+// La cabecera y la caja de escribir: se pintan una vez; los mensajes se repintan sin perder lo que se escribe
+function chatShell(i) {
+  const [cls, label] = STATUS[i.status] || ['', i.status || ''];
+  const fin = ['resuelta', 'cerrada'].includes(i.status);
+  const box = $('#chat');
+  box.innerHTML = `<header class="ch-h"><button class="ch-back" id="ch-back" aria-label="Volver a Mis avisos" title="Volver">${ui('back', 20)}</button>
+      <span class="ch-av">${ui('ticket', 17)}</span><div class="ch-t"><b id="ch-title">${esc(i.title)}</b><small id="ch-st" class="${cls}"><i></i><span>${esc(label)}</span> · <span class="mono">INC-${+i.id || ''}</span></small></div></header>
+    <div class="ch-l" id="ch-l" aria-live="polite"></div>
+    ${fin ? `<div class="ch-closed">IT la ha dado por ${esc(i.status)}. Si sigue pasando, avisa de nuevo desde «Avisar».</div>`
+      : `<form class="ch-f" id="ch-f"><textarea id="ch-t" rows="1" maxlength="5000" placeholder="Escribe a IT…" aria-label="Mensaje para IT"></textarea>
+         <button class="ch-send" id="ch-send" aria-label="Enviar" title="Enviar (Intro)" disabled>${ui('send', 18)}</button></form>`}`;
+  $('#v-mios .st').hidden = true; box.hidden = false;
+  $('#ch-back').onclick = closeThread;
+  box.onkeydown = e => { if (e.key === 'Escape') { e.stopPropagation(); closeThread(); } };
+  const t = $('#ch-t'); if (!t) return;
+  const grow = () => { t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight + 2, 132) + 'px'; $('#ch-send').disabled = !t.value.trim(); };
+  t.oninput = grow;
+  t.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#ch-f').requestSubmit(); } };
+  $('#ch-f').onsubmit = e => {
     e.preventDefault();
-    const text = $('#th-t').value.trim(); if (!text) return;
-    $('#th-send').disabled = true;
+    const text = t.value.trim(); if (!text) return;
+    S.outbox = text; t.value = ''; grow();
+    $('#ch-l').insertAdjacentHTML('beforeend', `<div class="bub me tail gap sending" id="ch-out">${esc(text)}<time>Enviando…</time></div>`);
+    scrollChat();
     toRust({op: 'reply', id: S.thread, text});
   };
+  setTimeout(() => t.focus(), 60);
+}
+const scrollChat = () => { const l = $('#ch-l'); if (l) l.scrollTop = l.scrollHeight; };
+const hhmm = ts => new Date(ts.replace(' ', 'T') + 'Z').toLocaleTimeString('es', {hour: '2-digit', minute: '2-digit'});
+const dayOf = ts => {
+  const d = new Date(ts.replace(' ', 'T') + 'Z'), k = n => new Date(Date.now() - n * 864e5).toDateString();
+  return d.toDateString() === k(0) ? 'Hoy' : d.toDateString() === k(1) ? 'Ayer' : d.toLocaleDateString('es', {weekday: 'long', day: 'numeric', month: 'long'});
+};
+function thread(r) {
+  if (!S.thread) return;
+  if (r.status !== 200) { $('#ch-l').innerHTML = `<div class="ch-note">${esc(r.body && r.body.error || 'No se ha podido abrir.')}</div>`; return; }
+  const i = r.body.incident, me = n => n.who.startsWith('Kitty · ');
+  if ($('#ch-title')?.textContent !== i.title || !$('#chat').dataset.st || $('#chat').dataset.st !== i.status) { chatShell(i); $('#chat').dataset.st = i.status; }
+  S.threadN = r.body.notes.length;
+  // lo que escribió el usuario al avisar abre la conversación
+  const msgs = [...(i.body ? [{who: 'Kitty · ', ts: i.created, text: i.body}] : []), ...r.body.notes];
+  let out = '', day = '', who = null;
+  msgs.forEach((n, k) => {
+    const d = dayOf(n.ts), mine = me(n), next = msgs[k + 1];
+    if (d !== day) { out += `<div class="ch-day">${esc(d)}</div>`; day = d; who = null; }
+    const first = who !== n.who, last = !next || next.who !== n.who || dayOf(next.ts) !== d;
+    if (first && !mine) out += `<div class="ch-who">${esc(n.who)} · IT</div>`;
+    out += `<div class="bub${mine ? ' me' : ''}${last ? ' tail' : ''}${first && mine ? ' gap' : ''}">${esc(n.text)}<time>${esc(hhmm(n.ts))}</time></div>`;
+    who = n.who;
+  });
+  if (!msgs.length) out = '<div class="ch-note">Aún no hay mensajes. Escribe a IT si quieres añadir algo.</div>';
+  const l = $('#ch-l'), atEnd = l.scrollHeight - l.scrollTop - l.clientHeight < 60;
+  l.innerHTML = out;
+  if (atEnd || S.outbox !== undefined) scrollChat();
+  S.outbox = undefined;
 }
 function replied(r) {
   if (r.status !== 201) {
-    $('#th-send').disabled = false;
-    $('#th-e').innerHTML = `<div class="err">${ui('alert', 16)}<span>${esc(r.body && r.body.error || 'No se ha podido enviar.')}</span></div>`;
+    const o = $('#ch-out');
+    if (o) { o.classList.replace('sending', 'failed'); o.querySelector('time').textContent = 'No enviado'; o.id = ''; }
+    $('#ch-l').insertAdjacentHTML('beforeend', `<div class="ch-note">${esc(r.body && r.body.error || 'No se ha podido enviar.')}</div>`);
+    if ($('#ch-t') && S.outbox) { $('#ch-t').value = S.outbox; $('#ch-t').oninput(); }
+    S.outbox = undefined; scrollChat();
     return;
   }
   toRust({op: 'thread', id: S.thread});
