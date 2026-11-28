@@ -173,7 +173,9 @@ pub fn clean(kind: &str, raw: &str) -> Result<String> {
         }
     }
     let skip = |l: &str| match kind {
-        "cisco" => ["Building configuration", "Current configuration :", "! Last configuration change", "! NVRAM config last updated", "! No configuration change since", "ntp clock-period"].iter().any(|p| l.starts_with(p)),
+        "cisco" => ["Building configuration", "Current configuration :", "! Last configuration change", "! NVRAM config last updated", "! No configuration change since", "ntp clock-period"]
+            .iter()
+            .any(|p| l.starts_with(p)),
         "mikrotik" => l.starts_with("# ") && l.contains(" by RouterOS"),
         _ => false,
     };

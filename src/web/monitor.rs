@@ -48,7 +48,9 @@ pub fn routes() -> Vec<Route> {
             Ok(match q("SELECT c.text, c.ts, s.host FROM configs c LEFT JOIN sources s ON s.id = c.source WHERE c.id=?", p![c.id()])?.one() {
                 Some(r) => {
                     let file = format!("{}-{}.txt", r.s("host"), r.s("ts").replace([' ', ':'], "-"));
-                    Resp::new(200, r.s("text").as_bytes().to_vec(), "text/plain; charset=utf-8").header("Content-Disposition", format!("attachment; filename*=UTF-8''{}", crate::util::quote(&file))).header("X-Content-Type-Options", "nosniff")
+                    Resp::new(200, r.s("text").as_bytes().to_vec(), "text/plain; charset=utf-8")
+                        .header("Content-Disposition", format!("attachment; filename*=UTF-8''{}", crate::util::quote(&file)))
+                        .header("X-Content-Type-Options", "nosniff")
                 }
                 None => err(404, "no existe"),
             })
