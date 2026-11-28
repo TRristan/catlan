@@ -3,6 +3,15 @@
 Cada versión, lo que cambia para quien usa catlan. Sigue [SemVer](https://semver.org/lang/es/): el primer número sube
 cuando hay que hacer algo a mano al actualizar.
 
+## 2.2.2
+
+### Arreglado
+- **Diálogos con casillas** (Nuevo aviso, Añadir usuarios…): cada casilla, de su tamaño y con su texto al lado; se
+  estiraban a todo el ancho y el texto quedaba lejos.
+- **Kitty, chat**: la conversación es un panel alineado con las pestañas, con aire alrededor.
+- **Kitty, Este PC**: en «Red», el tiempo encendido, las IP y la dirección de catlan ya no se salen de la tarjeta; las
+  direcciones van a todo el ancho y cada IPv6 cabe en una línea.
+
 ## 2.2.1
 
 ### Cambia

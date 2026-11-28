@@ -95,7 +95,7 @@ main{flex:1;position:relative;overflow:hidden}
 .chk{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--tx2)}.chk input{width:auto;height:auto;margin:0;flex:none;accent-color:var(--acc)}
 .inc{cursor:pointer}.inc:hover{border-color:color-mix(in oklab,var(--acc) 40%,var(--line))}
 /* Conversación de una incidencia: cabecera fija, burbujas agrupadas por persona y caja de escribir abajo */
-.chat{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--bg);animation:pageIn .35s var(--e) both}
+.chat{position:absolute;inset:12px 16px 14px;display:flex;flex-direction:column;overflow:hidden;background:var(--bg);border:1px solid var(--line);border-radius:var(--r2);box-shadow:var(--sh1);animation:pageIn .35s var(--e) both} /* alineada con las pestañas */
 .chat[hidden]{display:none}
 .ch-h{flex:none;display:flex;align-items:center;gap:10px;padding:10px 12px 10px 8px;border-bottom:1px solid var(--line);background:var(--s1)}
 .ch-back{flex:none;display:grid;place-items:center;width:34px;height:34px;border:0;border-radius:10px;background:none;color:var(--tx2);cursor:pointer}
@@ -104,7 +104,7 @@ main{flex:1;position:relative;overflow:hidden}
 .ch-t{flex:1;min-width:0}.ch-t b{display:block;font-size:14px;font-weight:620;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ch-t small{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--tx3)}
 .ch-t small i{width:6px;height:6px;border-radius:50%;background:var(--tx3)}.ch-t small.acc i{background:var(--acc)}.ch-t small.ok i{background:var(--ok)}.ch-t small.warn i{background:var(--warn)}
-.ch-l{flex:1;overflow-y:auto;padding:14px 12px 8px;display:flex;flex-direction:column;gap:2px;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+.ch-l{flex:1;overflow-y:auto;padding:14px 14px 12px;display:flex;flex-direction:column;gap:2px;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
 .ch-day{align-self:center;margin:10px 0 8px;padding:3px 10px;border-radius:99px;background:var(--s2);font-size:11.5px;color:var(--tx3);font-weight:560}
 .ch-who{font-size:11.5px;color:var(--tx3);margin:8px 0 3px 4px;font-weight:560}
 .bub{position:relative;max-width:82%;padding:8px 11px 6px;border-radius:18px;font-size:14px;line-height:1.42;white-space:pre-wrap;overflow-wrap:anywhere;user-select:text;
@@ -198,10 +198,11 @@ kbd{font:11px var(--mono);color:var(--tx3);border:1px solid var(--line2);border-
 .track{height:8px;border-radius:99px;background:var(--s2);margin-top:7px;overflow:hidden}
 .fill{height:100%;width:0;border-radius:99px;background:var(--ok);transform-origin:left;transition:width .9s var(--e),background .5s}
 .fill.warn{background:var(--warn)}.fill.bad{background:var(--bad)}
-.kv{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:13px}
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px 16px;font-size:13px;align-items:baseline} /* minmax: una IPv6 larga no saca la columna de la tarjeta */
 .kv dt{color:var(--tx3)}.kv dd{margin:0;text-align:right;user-select:text}
 .chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
-.chips span{padding:2px 8px;border-radius:7px;background:var(--s2);font:12px var(--mono)}
+.kv .wide{grid-column:1/-1}.kv dd.wide{margin-top:-4px}.kv dd.wide .chips{justify-content:flex-start} /* las IP, a todo el ancho: una IPv6 cabe en una línea */
+.chips span{padding:2px 8px;border-radius:7px;background:var(--s2);font:12px var(--mono);max-width:100%;overflow-wrap:anywhere}
 
 /* Control remoto: pedir permiso y avisar mientras dura */
 .rmt{position:fixed;inset:0;z-index:20;display:grid;place-items:center;padding:18px;background:color-mix(in oklab,var(--bg) 70%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);animation:pageIn .3s var(--e)}
@@ -303,7 +304,7 @@ kbd{font:11px var(--mono);color:var(--tx3);border:1px solid var(--line2);border-
       <div class="card" style="--i:1"><h3 class="card-t"><svg class="ic" width="15" height="15"><use href="#u-pulse"/></svg>Ahora</h3><div id="meters"></div></div>
       <div class="card" style="--i:2"><h3 class="card-t"><svg class="ic" width="15" height="15"><use href="#u-layers"/></svg>Discos</h3><div id="disks"></div></div>
       <div class="card" style="--i:3"><h3 class="card-t"><svg class="ic" width="15" height="15"><use href="#u-net"/></svg>Red</h3>
-        <dl class="kv"><dt>Encendido</dt><dd id="pc-up">—</dd><dt>Direcciones</dt><dd><div class="chips" id="pc-ips"></div></dd><dt>catlan</dt><dd id="pc-srv" class="mono">—</dd></dl></div>
+        <dl class="kv"><dt>Encendido</dt><dd id="pc-up">—</dd><dt class="wide">Direcciones</dt><dd class="wide"><div class="chips" id="pc-ips"></div></dd><dt>catlan</dt><dd id="pc-srv" class="mono">—</dd></dl></div>
     </div>
   </section>
 </main>
